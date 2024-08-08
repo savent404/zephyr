@@ -32,6 +32,8 @@ run_in_background ${ZEPHYR_BASE}/tests/bsim/bluetooth/host/misc/hfc_multilink/co
 app=tests/bsim/bluetooth/host/misc/unregister_conn_cb compile
 run_in_background ${ZEPHYR_BASE}/tests/bsim/bluetooth/host/misc/sample_test/compile.sh
 run_in_background ${ZEPHYR_BASE}/tests/bsim/bluetooth/host/misc/acl_tx_frag/compile.sh
+app=tests/bsim/bluetooth/host/misc/sample_test compile
+app=tests/bsim/bluetooth/host/misc/acl_tx_frag compile
 
 run_in_background ${ZEPHYR_BASE}/tests/bsim/bluetooth/host/privacy/central/compile.sh
 run_in_background ${ZEPHYR_BASE}/tests/bsim/bluetooth/host/privacy/peripheral/compile.sh
