@@ -14,6 +14,7 @@
 #include <esp_private/spi_flash_os.h>
 #include <esp_private/esp_mmu_map_private.h>
 #include <esp_flash_internal.h>
+#include <esp_flash_internal.h>
 #if CONFIG_ESP_SPIRAM
 #include "psram.h"
 #endif
@@ -137,6 +138,12 @@ void IRAM_ATTR __esp_platform_start(void)
 
 	esp_timer_early_init();
 
+	esp_mspi_pin_init();
+
+	esp_flash_app_init();
+
+	esp_mmu_map_init();
+
 #if CONFIG_SOC_ENABLE_APPCPU
 	/* start the ESP32 APP CPU */
 	esp_start_appcpu();
@@ -146,7 +153,6 @@ void IRAM_ATTR __esp_platform_start(void)
 
 	esp_flash_app_init();
 
-	esp_mmu_map_init();
 
 #if CONFIG_ESP_SPIRAM
 	esp_init_psram();

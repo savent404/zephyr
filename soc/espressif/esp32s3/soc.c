@@ -145,6 +145,41 @@ void IRAM_ATTR __esp_platform_start(void)
 	 */
 	esp_config_data_cache_mode();
 
+	esp_mspi_pin_init();
+
+	esp_flash_app_init();
+
+	mspi_timing_flash_tuning();
+
+	esp_mmu_map_init();
+
+	esp_mmu_map_init();
+
+#if CONFIG_ESP_SPIRAM
+	esp_err_t err = esp_psram_init();
+
+	if (err != ESP_OK) {
+		printk("Failed to Initialize external RAM, aborting.\n");
+		abort();
+	}
+
+	if (esp_psram_get_size() < CONFIG_ESP_SPIRAM_SIZE) {
+		printk("External RAM size is less than configured, aborting.\n");
+		abort();
+	}
+
+	if (esp_psram_is_initialized()) {
+		if (!esp_psram_extram_test()) {
+			printk("External RAM failed memory test!");
+			abort();
+		}
+	}
+
+	memset(&_ext_ram_bss_start, 0,
+	       (&_ext_ram_bss_end - &_ext_ram_bss_start) * sizeof(_ext_ram_bss_start));
+
+#endif /* CONFIG_ESP_SPIRAM */
+
 	/* Apply SoC patches */
 	esp_errata();
 
