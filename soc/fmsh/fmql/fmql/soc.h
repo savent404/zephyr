@@ -14,7 +14,7 @@
  * Common Peripheral Access Layer for aarch32 Cortex-A CPUs:
  */
 
-#define __CORTEX_A 9U
+#define __CORTEX_A 7U
 
 #endif /* !_ASMLANGUAGE */
 
