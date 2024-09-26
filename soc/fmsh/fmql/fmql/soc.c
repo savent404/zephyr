@@ -114,3 +114,12 @@ void soc_reset_hook(void)
 	sys_write32(SLCR_UNLOCK_KEY, addr + SLCR_UNLOCK);
 #endif
 }
+
+extern void *_vector_table[];
+#define VECTOR_ADDRESS ((uintptr_t)_vector_table)
+void relocate_vector_table(void)
+{
+	write_sctlr(read_sctlr() & ~HIVECS);
+	write_vbar(VECTOR_ADDRESS & VBAR_MASK);
+	barrier_isync_fence_full();
+}
