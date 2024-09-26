@@ -1,0 +1,49 @@
+#
+# Copyright (c) 2021 Weidmueller Interface GmbH & Co. KG
+# Copyright (c) 2024 SYSTech Co.
+# SPDX-License-Identifier: Apache-2.0
+#
+
+config SOC_SERIES_FMSH_FMQL
+	bool
+	select SOC_FAMILY_FMSH_FMQL
+	help
+	  Enable support for the FMSH FMQL SoC series.
+	  SoC series based on the ARM Cortex-A7 quad core.
+
+config SOC_FMSH_FMQL10
+	bool
+	select SOC_SERIES_FMSH_FMQL
+	help
+	  4 ARM cortex-A7 cores up to 800 MHz.
+	  28k logic cells.
+
+config SOC_FMSH_FMQL45
+	bool
+	select SOC_SERIES_FMSH_FMQL
+	help
+	  4 ARM cortex-A7 cores up to 800 MHz.
+	  350k logic cells, with x16 GTX.
+
+config SOC_FMSH_FMQL20
+	bool
+	select SOC_SERIES_FMSH_FMQL
+	help
+	  4 ARM cortex-A7 cores up to 800 MHz.
+	  85k logic cells.
+
+config SOC_FMSH_FMQL15
+	bool
+	select SOC_SERIES_FMSH_FMQL
+	help
+	  4 ARM cortex-A7 cores up to 800 MHz.
+	  74k logic cells, with x4 GTX.
+
+config SOC_SERIES
+	default "fmql" if SOC_SERIES_FMSH_FMQL
+
+config SOC
+	default "fmql10" if SOC_FMSH_FMQL10
+	default "fmql15" if SOC_FMSH_FMQL15
+	default "fmql20" if SOC_FMSH_FMQL20
+	default "fmql45" if SOC_FMSH_FMQL45

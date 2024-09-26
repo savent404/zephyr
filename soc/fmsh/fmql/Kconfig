@@ -1,0 +1,11 @@
+#
+# Copyright (c) 2021 Weidmueller Interface GmbH & Co. KG
+# Copyright (c) 2024 SYSTech Co.
+# SPDX-License-Identifier: Apache-2.0
+#
+
+if SOC_FAMILY_FMSH_FMQL
+
+rsource "*/Kconfig"
+
+endif # SOC_FAMILY_FMSH_FMQL

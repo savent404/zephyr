@@ -1,0 +1,9 @@
+family:
+- name: fmsh_fmql
+  series:
+  - name: fmql
+    socs:
+    - name: fmql10
+    - name: fmql15
+    - name: fmql20
+    - name: fmql45
