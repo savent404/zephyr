@@ -1,0 +1,5 @@
+board:
+  name: eval_fmql20
+  vendor: fmsh
+  socs:
+  - name: fmql20
