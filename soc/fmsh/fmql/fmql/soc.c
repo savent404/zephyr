@@ -17,52 +17,87 @@
 /* System Level Control Registers (SLCR) */
 #define SLCR_UNLOCK     0x0008
 #define SLCR_UNLOCK_KEY 0xdf0d
-#define AXI_GPIO_MMU_ENTRY(id)\
-	MMU_REGION_FLAT_ENTRY("axigpio",\
-			      DT_REG_ADDR(id),\
-			      DT_REG_SIZE(id),\
-			      MT_DEVICE | MATTR_SHARED | MPERM_R | MPERM_W),
+
+#define M_DEVICE_UNALIGNED (MT_NORMAL | MPERM_R | MPERM_W | MATTR_SHARED)
+#define M_DEVICE (MT_DEVICE | MATTR_SHARED | MPERM_R | MPERM_W)
 
 static const struct arm_mmu_region mmu_regions[] = {
 
-	MMU_REGION_FLAT_ENTRY("vectors",
-			      0x00000000,
-			      0x1000,
-			      MT_STRONGLY_ORDERED | MPERM_R | MPERM_X),
-	MMU_REGION_FLAT_ENTRY("mpcore",
-			      0xF8F00000,
-			      0x2000,
-			      MT_STRONGLY_ORDERED | MPERM_R | MPERM_W),
-	MMU_REGION_FLAT_ENTRY("ocm",
-			      DT_REG_ADDR(DT_CHOSEN(zephyr_ocm)),
-			      DT_REG_SIZE(DT_CHOSEN(zephyr_ocm)),
-			      MT_STRONGLY_ORDERED | MPERM_R | MPERM_W),
-	/* ARM Arch timer, GIC are covered by the MPCore mapping */
+	MMU_REGION_FLAT_ENTRY("ocm_low",
+			      DT_REG_ADDR(DT_NODELABEL(ocm_low)),
+			      DT_REG_SIZE(DT_NODELABEL(ocm_low)),
+			      MT_STRONGLY_ORDERED | MPERM_R | MPERM_W | MPERM_X),
 
-/* GEMs */
-#if DT_NODE_HAS_STATUS(DT_NODELABEL(gem0), okay)
-	MMU_REGION_FLAT_ENTRY("gem0",
-			      DT_REG_ADDR(DT_NODELABEL(gem0)),
-			      DT_REG_SIZE(DT_NODELABEL(gem0)),
-			      MT_DEVICE | MATTR_SHARED | MPERM_R | MPERM_W),
-#endif
-#if DT_NODE_HAS_STATUS(DT_NODELABEL(gem1), okay)
-	MMU_REGION_FLAT_ENTRY("gem1",
-			      DT_REG_ADDR(DT_NODELABEL(gem1)),
-			      DT_REG_SIZE(DT_NODELABEL(gem1)),
-			      MT_DEVICE | MATTR_SHARED | MPERM_R | MPERM_W),
-#endif
+	MMU_REGION_FLAT_ENTRY("ocm_high",
+				  DT_REG_ADDR(DT_NODELABEL(ocm_high)),
+				  DT_REG_SIZE(DT_NODELABEL(ocm_high)),
+				  MT_STRONGLY_ORDERED | MPERM_R | MPERM_W | MPERM_X),
 
-/* GPIO controller */
-#if DT_NODE_HAS_STATUS(DT_NODELABEL(psgpio), okay)
-	MMU_REGION_FLAT_ENTRY("psgpio",
-			      DT_REG_ADDR(DT_NODELABEL(psgpio)),
-			      DT_REG_SIZE(DT_NODELABEL(psgpio)),
-			      MT_DEVICE | MATTR_SHARED | MPERM_R | MPERM_W),
+	MMU_REGION_FLAT_ENTRY("gic_dist",
+				  DT_REG_ADDR_BY_IDX(DT_NODELABEL(gic), 0),
+				  DT_REG_SIZE_BY_IDX(DT_NODELABEL(gic), 0),
+				  M_DEVICE),
+
+	MMU_REGION_FLAT_ENTRY("gic_cpu",
+				  DT_REG_ADDR_BY_IDX(DT_NODELABEL(gic), 1),
+				  DT_REG_SIZE_BY_IDX(DT_NODELABEL(gic), 1),
+				  M_DEVICE),
+
+#if DT_NODE_HAS_STATUS(DT_NODELABEL(uart0), okay)
+	MMU_REGION_FLAT_ENTRY("uart0",
+			      DT_REG_ADDR(DT_NODELABEL(uart0)),
+			      DT_REG_SIZE(DT_NODELABEL(uart0)),
+				  M_DEVICE),
 #endif
 
-DT_FOREACH_STATUS_OKAY(xlnx_xps_gpio_1_00_a, AXI_GPIO_MMU_ENTRY)
+#if DT_NODE_HAS_STATUS(DT_NODELABEL(uart1), okay)
+	MMU_REGION_FLAT_ENTRY("uart1",
+				  DT_REG_ADDR(DT_NODELABEL(uart1)),
+				  DT_REG_SIZE(DT_NODELABEL(uart1)),
+				  M_DEVICE),
+#endif
 
+#if DT_NODE_HAS_STATUS(DT_NODELABEL(gpio0), okay)
+	MMU_REGION_FLAT_ENTRY("gpio0",
+				  DT_REG_ADDR(DT_NODELABEL(gpio0)),
+				  DT_REG_SIZE(DT_NODELABEL(gpio0)),
+				  M_DEVICE),
+#endif
+
+#if DT_NODE_HAS_STATUS(DT_NODELABEL(gpio1), okay)
+	MMU_REGION_FLAT_ENTRY("gpio1",
+				  DT_REG_ADDR(DT_NODELABEL(gpio1)),
+				  DT_REG_SIZE(DT_NODELABEL(gpio1)),
+				  M_DEVICE),
+#endif
+
+#if DT_NODE_HAS_STATUS(DT_NODELABEL(gpio2), okay)
+	MMU_REGION_FLAT_ENTRY("gpio2",
+				  DT_REG_ADDR(DT_NODELABEL(gpio2)),
+				  DT_REG_SIZE(DT_NODELABEL(gpio2)),
+				  M_DEVICE),
+#endif
+
+#if DT_NODE_HAS_STATUS(DT_NODELABEL(gpio3), okay)
+	MMU_REGION_FLAT_ENTRY("gpio3",
+				  DT_REG_ADDR(DT_NODELABEL(gpio3)),
+				  DT_REG_SIZE(DT_NODELABEL(gpio3)),
+				  M_DEVICE),
+#endif
+
+#if DT_NODE_HAS_STATUS(DT_NODELABEL(arch_timer), okay)
+	MMU_REGION_FLAT_ENTRY("arch_timer",
+			      DT_REG_ADDR(DT_NODELABEL(arch_timer)),
+			      DT_REG_SIZE(DT_NODELABEL(arch_timer)),
+				  M_DEVICE),
+#endif
+
+#if DT_NODE_HAS_STATUS(DT_NODELABEL(slcr), okay)
+	MMU_REGION_FLAT_ENTRY("slcr",
+			      DT_REG_ADDR(DT_NODELABEL(slcr)),
+			      DT_REG_SIZE(DT_NODELABEL(slcr)),
+				  M_DEVICE),
+#endif
 };
 
 const struct arm_mmu_config mmu_config = {
@@ -104,7 +139,8 @@ void soc_reset_hook(void)
 
 	sctlr &= ~SCTLR_I_Msk;
 	sctlr &= ~SCTLR_C_Msk;
-	sctlr &= ~SCTLR_A_Msk;
+	/* sctlr &= ~SCTLR_A_Msk; */
+	sctlr &= ~SCTLR_M_Msk;
 	__set_SCTLR(sctlr);
 
 #if DT_NODE_HAS_STATUS(DT_NODELABEL(slcr), okay)
