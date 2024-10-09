@@ -4,8 +4,10 @@
  */
 
 #include <mem.h>
+#include <freq.h>
 #include <arm/armv7-a.dtsi>
 #include <zephyr/dt-bindings/interrupt-controller/arm-gic.h>
+#include <zephyr/dt-bindings/clock/fmsh_psoc_clock.h>
 
 / {
 
@@ -35,8 +37,8 @@
 
 		uart0: serial@e0004000 {
 			compatible = "ns16550";
-			// clocks = <&clkc NCLK_UART0>, <&clkc NCLK_APB_UART0>;
-			// clock-names = "baudclk", "apb_pclk";
+			clocks = <&clkc CLKID_UART0>;
+			clock-names = "uart0";
 			reg = <0xE0004000 0x1000>;
 			interrupts = <GIC_SPI 23 IRQ_TYPE_LEVEL IRQ_DEFAULT_PRIORITY>;
 			interrupt-names = "irq_0";
@@ -48,8 +50,8 @@
 
 		uart1: serial@e0023000 {
 			compatible = "ns16550";
-			// clocks = <&clkc NCLK_UART1>, <&clkc NCLK_APB_UART1>;
-			// clock-names = "baudclk", "apb_pclk";
+			clocks = <&clkc CLKID_UART1>;
+			clock-names = "uart1";
 			reg = <0xE0023000 0x1000>;
 			interrupts = <GIC_SPI 44 IRQ_TYPE_LEVEL IRQ_DEFAULT_PRIORITY>;
 			interrupt-names = "irq_0";
@@ -137,35 +139,11 @@
 		ranges;
 
 		clkc: clkc@100 {
-			// u-boot,dm-pre-reloc;
 			compatible = "fmsh,psoc-clkc";
 			reg = <0x100 0x100>;
 			#clock-cells = <1>;
 			ps-clk-frequency = <33333333>;
-			osc-clk-frequency = <32765>;
-			fclk-enable = <0>;
-			clock-output-names = "armpll", "ddrpll", "iopll",
-						"cpu", "axi", "ahb", "apb", "axi_cpu",
-						"ddrx1", "ddrx4", "axi_ddr",
-						"apb_ddr", "gtimer",
-						"gmac0_tx", "gmac1_tx", "fclk0",
-						"fclk1", "fclk2", "fclk3",
-						"gmac0_rx", "gmac1_rx","axi_gmac0",
-						"axi_gmac1", "ahb_gmac0", "ahb_gmac1",
-						"ahb_smc", "ahb_nfc", "nfc",
-						"qspi", "ahb_qspi", "apb_qspi",
-						"sdio0", "sdio1",
-						"ahb_sdio0", "ahb_sdio1",
-						"uart0", "uart1",
-						"apb_uart0", "apb_uart1",
-						"spi0", "spi1", "apb_spi0", "apb_spi1",
-						"apb_can0", "apb_can1", "apb_gpio",
-						"apb_i2c0", "apb_i2c1",
-						"ahb_usb0", "ahb_usb1", "usb0_phy",
-						"usb1_phy", "ahb_dmac", "wdt", "apb_wdt",
-						"ttc0_ref1", "ttc0_ref2", "ttc0_ref3",
-						"ttc1_ref1", "ttc1_ref2", "ttc1_ref3",
-						"apb_ttc0", "apb_ttc1", "ahb_pcap";
+			status = "okay";
 		};
 
 		pinctrl0: pintrl@700 {
@@ -174,5 +152,4 @@
 			syscon = <&slcr>;
 		};
 	};
-
 };

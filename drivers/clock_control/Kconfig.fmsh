@@ -1,0 +1,11 @@
+# FMSH
+
+# Copyright (c) 2024 SYSTech Co.
+# SPDX-License-Identifier: Apache-2.0
+
+config CLOCK_CONTROL_FMSH
+	bool "FMSH clock control driver"
+	default y
+	depends on SYSCON && DT_HAS_FMSH_PSOC_CLKC_ENABLED
+	help
+	  Enable support for FMSH clock driver.

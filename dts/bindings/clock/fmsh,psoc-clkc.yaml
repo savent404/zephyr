@@ -1,0 +1,22 @@
+# Copyright (c) 2024 SYSTech Co.
+# SPDX-License-Identifier: Apache-2.0
+
+include: [base.yaml, clock-controller.yaml]
+
+description: |
+  FMSH Clock Manager clock output binding
+
+compatible: "fmsh,psoc-clkc"
+
+properties:
+  reg:
+    type: array
+    description: Base address and lengths of the register space
+
+  ps-clk-frequency:
+    required: true
+    type: int
+    description: |
+      default frequency in Hz for clock input
+clock-cells:
+  - clkid
