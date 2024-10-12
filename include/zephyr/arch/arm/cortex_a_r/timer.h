@@ -19,23 +19,38 @@
 extern "C" {
 #endif
 
-#define ARM_ARCH_TIMER_BASE     DT_REG_ADDR_BY_IDX(ARM_TIMER_NODE, 0)
-#define ARM_ARCH_TIMER_IRQ      ARM_TIMER_VIRTUAL_IRQ
-#define ARM_ARCH_TIMER_PRIO     ARM_TIMER_VIRTUAL_PRIO
-#define ARM_ARCH_TIMER_FLAGS    ARM_TIMER_VIRTUAL_FLAGS
+#ifdef CONFIG_ARM_ARCH_TIMER_FMSH_CUSTOM
+#ifdef CONFIG_TICKLESS_KERNEL
+#error "FMSH timer driver does not support tickless kernel (requires set_compare)"
+#endif
+#endif
 
-#define TIMER_CNT_LOWER         0x00
-#define TIMER_CNT_UPPER         0x04
-#define TIMER_CTRL              0x08
-#define TIMER_ISR               0x0c
-#define TIMER_CMP_LOWER         0x10
-#define TIMER_CMP_UPPER         0x14
+#define ARM_ARCH_TIMER_BASE  DT_REG_ADDR_BY_IDX(ARM_TIMER_NODE, 0)
+#define ARM_ARCH_TIMER_IRQ   ARM_TIMER_VIRTUAL_IRQ
+#define ARM_ARCH_TIMER_PRIO  ARM_TIMER_VIRTUAL_PRIO
+#define ARM_ARCH_TIMER_FLAGS ARM_TIMER_VIRTUAL_FLAGS
 
-#define TIMER_IRQ_ENABLE        BIT(2)
-#define TIMER_COMP_ENABLE       BIT(1)
-#define TIMER_ENABLE            BIT(0)
+#ifndef CONFIG_ARM_ARCH_TIMER_FMSH_CUSTOM
+#define TIMER_CNT_LOWER 0x00
+#define TIMER_CNT_UPPER 0x04
+#define TIMER_CTRL      0x08
+#define TIMER_ISR       0x0c
+#define TIMER_CMP_LOWER 0x10
+#define TIMER_CMP_UPPER 0x14
 
-#define TIMER_ISR_EVENT_FLAG	BIT(0)
+#define TIMER_IRQ_ENABLE  BIT(2)
+#define TIMER_COMP_ENABLE BIT(1)
+#define TIMER_ENABLE      BIT(0)
+
+#define TIMER_ISR_EVENT_FLAG BIT(0)
+#else
+#define TIMER_CTRL      0x00
+#define TIMER_STATUS    0x04
+#define TIMER_CNT_LOWER 0x08
+#define TIMER_CNT_UPPER 0x0c
+
+#define TIMER_ENABLE BIT(0)
+#endif
 
 DEVICE_MMIO_TOPLEVEL_STATIC(timer_regs, ARM_TIMER_NODE);
 
@@ -48,6 +63,7 @@ static ALWAYS_INLINE void arm_arch_timer_init(void)
 
 static ALWAYS_INLINE void arm_arch_timer_set_compare(uint64_t val)
 {
+#ifndef CONFIG_ARM_ARCH_TIMER_FMSH_CUSTOM
 	uint32_t lower = (uint32_t)val;
 	uint32_t upper = (uint32_t)(val >> 32);
 	uint32_t ctrl;
@@ -63,6 +79,7 @@ static ALWAYS_INLINE void arm_arch_timer_set_compare(uint64_t val)
 	/* enable comparator back, let set_irq_mask enabling the IRQ again */
 	ctrl |= TIMER_COMP_ENABLE;
 	sys_write32(ctrl, TIMER_REG_GET(TIMER_CTRL));
+#endif
 }
 
 #if defined(CONFIG_ARM_ARCH_TIMER_ERRATUM_740657)
@@ -105,6 +122,7 @@ static ALWAYS_INLINE void arm_arch_timer_enable(bool enable)
 
 static ALWAYS_INLINE void arm_arch_timer_set_irq_mask(bool mask)
 {
+#ifndef CONFIG_ARM_ARCH_TIMER_FMSH_CUSTOM
 	uint32_t ctrl;
 
 	ctrl = sys_read32(TIMER_REG_GET(TIMER_CTRL));
@@ -115,6 +133,7 @@ static ALWAYS_INLINE void arm_arch_timer_set_irq_mask(bool mask)
 		sys_write32(1, TIMER_REG_GET(TIMER_ISR));
 	}
 	sys_write32(ctrl, TIMER_REG_GET(TIMER_CTRL));
+#endif
 }
 
 static ALWAYS_INLINE uint64_t arm_arch_timer_count(void)
@@ -145,8 +164,8 @@ static ALWAYS_INLINE uint64_t arm_arch_timer_count(void)
 }
 #endif
 
-#endif  /* _ASMLANGUAGE */
+#endif /* _ASMLANGUAGE */
 
 #endif /* CONFIG_ARM_ARCH_TIMER */
 
-#endif  /* ZEPHYR_INCLUDE_ARCH_ARM_CORTEX_A_R_TIMER_H_ */
+#endif /* ZEPHYR_INCLUDE_ARCH_ARM_CORTEX_A_R_TIMER_H_ */
