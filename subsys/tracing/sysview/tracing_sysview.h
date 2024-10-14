@@ -678,12 +678,6 @@ void sys_trace_k_thread_info(struct k_thread *thread);
 #define sys_trace_sys_init_enter(...)
 #define sys_trace_sys_init_exit(...)
 
-#define sys_port_trace_net_recv_data_enter(...)
-#define sys_port_trace_net_recv_data_exit(...)
-#define sys_port_trace_net_send_data_enter(...)
-#define sys_port_trace_net_send_data_exit(...)
-#define sys_port_trace_net_rx_time(...)
-#define sys_port_trace_net_tx_time(...)
 #define sys_port_trace_socket_init(sock, family, type, proto)
 #define sys_port_trace_socket_close_enter(sock)
 #define sys_port_trace_socket_close_exit(sock, ret)
@@ -721,6 +715,13 @@ void sys_trace_k_thread_info(struct k_thread *thread);
 #define sys_port_trace_socket_getsockname_exit(sock, addr, addrlen, ret)
 #define sys_port_trace_socket_socketpair_enter(family, type, proto, sv)
 #define sys_port_trace_socket_socketpair_exit(sockA, sockB, ret)
+
+#define sys_port_trace_net_recv_data_enter(iface, pkt)
+#define sys_port_trace_net_recv_data_exit(iface, pkt, ret)
+#define sys_port_trace_net_send_data_enter(pkt)
+#define sys_port_trace_net_send_data_exit(pkt, ret)
+#define sys_port_trace_net_rx_time(pkt, end_time)
+#define sys_port_trace_net_tx_time(pkt, end_time)
 
 #ifdef __cplusplus
 }
