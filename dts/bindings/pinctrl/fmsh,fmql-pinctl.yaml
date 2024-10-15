@@ -1,0 +1,102 @@
+# Copyright (C) 2024 SYSTech Co.
+# SPDX-License-Identifier: Apache-2.0
+#
+
+description: |
+  FMQL Pin controller Node
+  Based on pincfg-node.yaml binding.
+
+compatible: "fmsh,fmql-pinctrl"
+
+include: base.yaml
+
+properties:
+  reg:
+    required: true
+  syscon:
+    type: phandle
+    required: true
+    description: |
+      phandle to the syscon node that controls the pin configuration
+      for the pinmux and drive-strength settings
+
+child-binding:
+  description: |
+    Base binding configuration for FMQLxxx APUs
+    Please use io_type to disable the pin
+
+  include:
+    - name: pincfg-node.yaml
+      property-allowlist:
+        - bias-high-impedance
+        - bias-pull-down
+        - bias-pull-up
+        - input-disable
+  properties:
+    pinmux:
+      required: true
+      type: int
+      description: |
+        Integer array, represents gpio pin number and mux setting.
+        These defines are calculated as: (port<<24 | pin<<16 | mux<<1)
+        With:
+        - pin: The pin offset within the port (0, 1, 2, ...)
+        - mux: The function number, can be:
+          * PINMUX_GPIO
+          * PINMUX_QSPI
+          * PINMUX_USB
+          * PINMUX_NOR
+          * PINMUX_NAND
+          * PINMUX_SDIO_PWR
+          * PINMUX_SDIO
+          * PINMUX_CAN
+          * PINMUX_I2C
+          * PINMUX_SPI
+          * PINMUX_TTC
+          * PINMUX_UART
+        In case selected pin function is GPIO, pin is statically configured as
+        a plain input/output GPIO. Default configuration is input. Output value
+        can be configured by adding 'ouptut-low' or 'output-high' properties
+        to the pin configuration.
+
+        To simplify the usage, macro is available to generate "pinmux" field.
+        This macro is available here:
+          -include/zephyr/dt-bindings/pinctrl/fmql-pinctrl.h
+        Some examples of macro usage:
+          {
+            pinmux = <FMQL_PINMUX(MIO, 10, PINMUX_UART)>;
+          };
+    drive-strength:
+      default: 8
+      type: int
+      enum: [4, 8, 12, 16]
+      description: |
+        Maximum sink or source current in mA
+    io_type:
+      default: 3
+      type: int
+      enum: [0, 1, 2, 3, 4, 5]
+      description: |
+        IO type
+        0: disable
+        1: LVCMOS 1.8V
+        2: LVCMOS 2.5V
+        3: LVCMOS 3.3V
+        4: HSTL-I
+        5: HSTL-II
+    keeper:
+      default: 0
+      type: int
+      enum: [0, 1]
+      description: |
+        Keeper, only valid for with pull-up or pull-down disabled
+        0: disable
+        1: enable
+    hystr:
+      default: 1
+      type: int
+      enum: [0, 1]
+      description: |
+        Hysteresis
+        0: disable
+        1: enable

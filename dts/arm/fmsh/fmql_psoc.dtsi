@@ -146,8 +146,8 @@
 			status = "okay";
 		};
 
-		pinctrl0: pintrl@700 {
-			compatible = "xlnx,pinctrl-zynq";
+		pinctrl: pintrl@700 {
+			compatible = "fmsh,fmql-pinctrl";
 			reg = <0x700 0x200>;
 			syscon = <&slcr>;
 		};

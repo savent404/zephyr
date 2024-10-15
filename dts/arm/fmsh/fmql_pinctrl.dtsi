@@ -1,0 +1,16 @@
+// Copyright 2024 (C) SYSTech Co.
+// SPDX-License-Identifier: Apache-2.0
+
+#include <zephyr/dt-bindings/pinctrl/fmql-pinctrl.h>
+
+&pinctrl {
+	/omit-if-no-ref/ uart0_rx_mio_50: uart0_rx_mio_50 {
+		pinmux = <FMQL_PINMUX(MIO, 50, PINMUX_UART)>;
+		bias-high-impedance;
+		io_type = <IO_TYPE_LVCMOS18>;
+	};
+	/omit-if-no-ref/ uart0_tx_mio_51: uart0_tx_mio_51 {
+		pinmux = <FMQL_PINMUX(MIO, 51, PINMUX_UART)>;
+		io_type = <IO_TYPE_LVCMOS18>;
+	};
+};

@@ -1,0 +1,10 @@
+# Copyright 2024 (C) SYSTech Co.
+# SPDX-License-Identifier: Apache-2.0
+#
+
+config PINCTRL_FMQL
+	bool "Pin controller driver for FMQL SoCs"
+	depends on DT_HAS_FMSH_FMQL_PINCTRL_ENABLED
+	default y
+	help
+	  Enable pin controller driver for SYSTech FMQL series SoCs

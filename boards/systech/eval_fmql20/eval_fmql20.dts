@@ -7,6 +7,7 @@
 
 #include <freq.h>
 #include <fmsh/fmql_psoc.dtsi>
+#include <fmsh/fmql_pinctrl.dtsi>
 
 / {
 	model = "QEMU Cortex-A7";
@@ -46,10 +47,6 @@
 &uart0 {
 	status = "okay";
 	current-speed = <115200>;
+	pinctrl-0 = <&uart0_rx_mio_50>, <&uart0_tx_mio_51>;
+	pinctrl-names = "default";
 };
-
-&uart1 {
-	status = "okay";
-	current-speed = <115200>;
-};
-
