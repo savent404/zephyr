@@ -9,3 +9,10 @@ config CLOCK_CONTROL_FMSH
 	depends on SYSCON && DT_HAS_FMSH_PSOC_CLKC_ENABLED
 	help
 	  Enable support for FMSH clock driver.
+
+config CLOCK_CONTROL_FMSH_DEBUG
+	bool "FMSH clock control debug message (via printk)"
+	default n
+	depends on CLOCK_CONTROL_FMSH
+	help
+	  Extra debug message for FMSH clock driver.

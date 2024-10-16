@@ -836,7 +836,7 @@ static int fmsh_clkc_init(const struct device *dev)
 
 DEVICE_DT_DEFINE(CLKC, fmsh_clkc_init, NULL, NULL, &config, PRE_KERNEL_1,
 /* FIXME: SYSCON should be initialized before clock_control */
-#if CONFIG_CLOCK_CONTROL_FMSH_XXX
+#ifndef CONFIG_SYSCON
 		 CONFIG_CLOCK_CONTROL_INIT_PRIORITY,
 #else
 		 CONFIG_SYSCON_INIT_PRIORITY,
