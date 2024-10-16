@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 
-if BOARD_QEMU_CORTEX_A7
+if BOARD_EVAL_FMQL20
 
 config BUILD_OUTPUT_BIN
 	default n
@@ -47,17 +47,7 @@ config TEST_RANDOM_GENERATOR
 
 endif # NETWORKING
 
-if QEMU_ICOUNT
-
-config QEMU_ICOUNT_SHIFT
-	default 3
-
-config QEMU_ICOUNT_SLEEP
-	default y
-
-endif # QEMU_ICOUNT
-
 config SHELL_STACK_SIZE
 	default 8192 if SHELL
 
-endif # BOARD_QEMU_CORTEX_A9
+endif # BOARD_EVAL_FMQL20
