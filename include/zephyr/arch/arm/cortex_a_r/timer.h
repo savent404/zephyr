@@ -14,21 +14,23 @@
 #include <zephyr/drivers/timer/arm_arch_timer.h>
 #include <zephyr/sys/device_mmio.h>
 #include <zephyr/types.h>
+#include <zephyr/arch/arm/cortex_a_r/lib_helpers.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-#ifdef CONFIG_ARM_ARCH_TIMER_FMSH_CUSTOM
-#ifdef CONFIG_TICKLESS_KERNEL
-#error "FMSH timer driver does not support tickless kernel (requires set_compare)"
-#endif
-#endif
-
+#ifndef CONFIG_ARM_ARCH_TIMER_FMSH_CUSTOM
 #define ARM_ARCH_TIMER_BASE  DT_REG_ADDR_BY_IDX(ARM_TIMER_NODE, 0)
 #define ARM_ARCH_TIMER_IRQ   ARM_TIMER_VIRTUAL_IRQ
 #define ARM_ARCH_TIMER_PRIO  ARM_TIMER_VIRTUAL_PRIO
 #define ARM_ARCH_TIMER_FLAGS ARM_TIMER_VIRTUAL_FLAGS
+#else
+#define ARM_ARCH_TIMER_BASE  DT_REG_ADDR_BY_IDX(ARM_TIMER_NODE, 0)
+#define ARM_ARCH_TIMER_IRQ   ARM_TIMER_SECURE_IRQ
+#define ARM_ARCH_TIMER_PRIO  ARM_TIMER_SECURE_PRIO
+#define ARM_ARCH_TIMER_FLAGS ARM_TIMER_SECURE_FLAGS
+#endif
 
 #ifndef CONFIG_ARM_ARCH_TIMER_FMSH_CUSTOM
 #define TIMER_CNT_LOWER 0x00
@@ -79,6 +81,12 @@ static ALWAYS_INLINE void arm_arch_timer_set_compare(uint64_t val)
 	/* enable comparator back, let set_irq_mask enabling the IRQ again */
 	ctrl |= TIMER_COMP_ENABLE;
 	sys_write32(ctrl, TIMER_REG_GET(TIMER_CTRL));
+#else
+	uint32_t lower = (uint32_t)val;
+	uint32_t upper = (uint32_t)(val >> 32);
+
+	barrier_dmem_fence_full();
+	__asm volatile("mcrr p15, 2, %0, %1, c14" : : "r"(lower), "r"(upper));
 #endif
 }
 
@@ -118,6 +126,20 @@ static ALWAYS_INLINE void arm_arch_timer_enable(bool enable)
 	}
 
 	sys_write32(ctrl, TIMER_REG_GET(TIMER_CTRL));
+
+#ifdef CONFIG_ARM_ARCH_TIMER_FMSH_CUSTOM
+	uint32_t ctl;
+
+	ctl = read_sysreg32(0, 14, 2, 1);
+
+	if (enable) {
+		ctl |= TIMER_ENABLE;
+	} else {
+		ctl &= ~TIMER_ENABLE;
+	}
+
+	write_sysreg32(ctl, 0, 14, 2, 1);
+#endif
 }
 
 static ALWAYS_INLINE void arm_arch_timer_set_irq_mask(bool mask)
@@ -133,11 +155,23 @@ static ALWAYS_INLINE void arm_arch_timer_set_irq_mask(bool mask)
 		sys_write32(1, TIMER_REG_GET(TIMER_ISR));
 	}
 	sys_write32(ctrl, TIMER_REG_GET(TIMER_CTRL));
+#else
+	uint32_t ctl;
+
+	ctl = read_sysreg32(0, 14, 2, 1);
+
+	if (mask) {
+		ctl |= 2;
+	} else {
+		ctl &= ~2;
+	}
+	write_sysreg32(ctl, 0, 14, 2, 1);
 #endif
 }
 
 static ALWAYS_INLINE uint64_t arm_arch_timer_count(void)
 {
+#ifndef CONFIG_ARM_ARCH_TIMER_FMSH_CUSTOM
 	uint32_t lower;
 	uint32_t upper, upper_saved;
 
@@ -158,6 +192,12 @@ static ALWAYS_INLINE uint64_t arm_arch_timer_count(void)
 	} while (upper != upper_saved);
 
 	return ((uint64_t)upper) << 32 | lower;
+#else
+	uint32_t upper, lower;
+
+	__asm volatile("mrrc p15, 0, %0, %1, c14" : "=r"(lower), "=r"(upper));
+	return ((uint64_t)upper << 32) | lower;
+#endif
 }
 
 #ifdef __cplusplus

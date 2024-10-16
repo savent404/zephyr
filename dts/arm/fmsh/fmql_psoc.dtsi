@@ -124,6 +124,11 @@
 				<GIC_PPI 14 IRQ_TYPE_LEVEL IRQ_DEFAULT_PRIORITY>,
 				<GIC_PPI 11 IRQ_TYPE_LEVEL IRQ_DEFAULT_PRIORITY>,
 				<GIC_PPI 10 IRQ_TYPE_LEVEL IRQ_DEFAULT_PRIORITY>;
+			interrupt-names =
+				"secure_timer",
+				"non-sec_timer",
+				"virt_timer",
+				"hyp_timer";
 			clocks = <&clkc CLKID_GTC>;
 			clock-names = "gtc";
 		};
