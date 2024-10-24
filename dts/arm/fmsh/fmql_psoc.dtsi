@@ -133,6 +133,16 @@
 			clock-names = "gtc";
 		};
 
+		wdt: watchdog@e0025000 {
+			compatible = "snps,designware-watchdog";
+			reg = <0xe0025000 0x1000>;
+			interrupts = <GIC_SPI 9 IRQ_TYPE_LEVEL IRQ_DEFAULT_PRIORITY>;
+			interrupt-names = "irq_0";
+			clocks = <&clkc CLKID_WDT>;
+			clock-names = "iwdt";
+			reset-pulse-length = <256>; // 256 pclk cycles
+			status = "disabled";
+		};
 	};
 
 	slcr: slcr@e0026000 {
