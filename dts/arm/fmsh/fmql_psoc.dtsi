@@ -65,13 +65,11 @@
 			#address-cells = <1>;
 			#size-cells = <0>;
 			compatible = "snps,designware-gpio";
-			// clocks = <&clkc NCLK_APB_GPIO>;
 			reg = <0xe0003000 0x100>;
 			interrupts = <GIC_SPI 17 IRQ_TYPE_LEVEL IRQ_DEFAULT_PRIORITY>;
 			gpio-controller;
 			ngpios = <32>;
 			#gpio-cells = <2>;
-			// line-name = "porta";
 			status = "disabled";
 		};
 
@@ -79,13 +77,11 @@
 			#address-cells = <1>;
 			#size-cells = <0>;
 			compatible = "snps,designware-gpio";
-			// clocks = <&clkc NCLK_APB_GPIO>;
 			reg = <0xe0003100 0x100>;
 			interrupts = <GIC_SPI 36 IRQ_TYPE_LEVEL IRQ_DEFAULT_PRIORITY>;
 			gpio-controller;
 			ngpios = <22>;
 			#gpio-cells = <2>;
-			// line-name = "portb";
 			status = "disabled";
 		};
 
@@ -93,7 +89,6 @@
 			#address-cells = <1>;
 			#size-cells = <0>;
 			compatible = "snps,designware-gpio";
-			// clocks = <&clkc NCLK_APB_GPIO>;
 			reg = <0xe0003200 0x100>;
 			interrupts = <GIC_SPI 37 IRQ_TYPE_LEVEL IRQ_DEFAULT_PRIORITY>;
 			gpio-controller;
@@ -106,7 +101,6 @@
 			#address-cells = <1>;
 			#size-cells = <0>;
 			compatible = "snps,designware-gpio";
-			// clocks = <&clkc NCLK_APB_GPIO>;
 			reg = <0xe0003400 0x100>;
 			interrupts = <GIC_SPI 38 IRQ_TYPE_LEVEL IRQ_DEFAULT_PRIORITY>;
 			gpio-controller;
