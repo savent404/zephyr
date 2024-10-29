@@ -11,8 +11,7 @@ if SOC_SERIES_FMSH_FMQL
 config MP_MAX_NUM_CPUS
 	default 1
 
-# TODO: disable MMU for compatibility with U-Boot
 config ARM_AARCH32_MMU
-	default n
+	default y
 
 endif # SOC_SERIES_FMSH_FMQL
