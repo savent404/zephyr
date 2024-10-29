@@ -36,7 +36,7 @@
 
 	chosen {
 		zephyr,flash      = &flash0;
-		zephyr,sram       = &ocm_low;
+		zephyr,sram       = &sram0;
 		zephyr,console    = &uart0;
 		zephyr,shell-uart = &uart0;
 		zephyr,ocm        = &ocm_low;
