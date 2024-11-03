@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 
-zephyr_sources(soc.c)
+zephyr_sources(soc.c ps_init.c)
 
 zephyr_include_directories(.)
 

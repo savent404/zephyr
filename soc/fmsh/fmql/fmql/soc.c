@@ -114,18 +114,17 @@ void soc_reset_hook(void)
 	barrier_dsync_fence_full();
 	barrier_isync_fence_full();
 
-#if DT_NODE_HAS_STATUS(DT_NODELABEL(slcr), okay)
-	mm_reg_t addr = DT_REG_ADDR(DT_NODELABEL(slcr));
-
-	/* Unlock System Level Control Registers (SLCR) */
-	sys_write32(SLCR_UNLOCK_KEY, addr + SLCR_UNLOCK);
-#endif
-
-#if DT_NODE_HAS_STATUS(DT_NODELABEL(scu), okay)
-	mm_reg_t scu_base = DT_REG_ADDR(DT_NODELABEL(scu));
-
-	/* Enable the SCU */
-	scu_enable(scu_base);
+#define ADDR_IN_RANGE(addr, region_addr, region_size)                                              \
+	((addr) >= (region_addr) && (addr) < ((region_addr) + (region_size)))
+#define ADDR_IN_NODE_RANGE(addr, node) ADDR_IN_RANGE(addr, DT_REG_ADDR(node), DT_REG_SIZE(node))
+#if ADDR_IN_NODE_RANGE(DT_REG_SIZE(DT_CHOSEN(zephyr_sram)), ddr) ||                                \
+	ADDR_IN_NODE_RANGE(DT_REG_SIZE(DT_CHOSEN(zephyr_flash)), ddr)
+	/* SRAM cannot be re-initialized again while Zephyr is using it, skip ddr init */
+#else
+	/* NOTE: Application cannot be placed in OCM due to the size limitation, this routine
+	 * is used to initialize DDR and other essential peripherals as the boot loader.
+	 */
+	fmsh_psoc_ps_init();
 #endif
 }
 

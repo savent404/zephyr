@@ -16,6 +16,16 @@
 
 #define __CORTEX_A 7U
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+int fmsh_psoc_ps_init(void);
+
+#ifdef __cplusplus
+}
+#endif
+
 #endif /* !_ASMLANGUAGE */
 
 #endif /* _SOC__H_ */

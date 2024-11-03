@@ -1,0 +1,5 @@
+/ {
+		chosen {
+		zephyr,sram       = &ocm_low;
+		};
+};

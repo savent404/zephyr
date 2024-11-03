@@ -137,6 +137,11 @@
 			reset-pulse-length = <256>; // 256 pclk cycles
 			status = "disabled";
 		};
+
+		ddr: memory@100000 {
+			compatible = "mmio-sram";
+			reg = <0x00100000 DT_SIZE_M(512)>;
+		};
 	};
 
 	slcr: slcr@e0026000 {
