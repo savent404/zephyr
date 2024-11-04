@@ -1,0 +1,17 @@
+# Copyright (c) 2024 SYSTech Co.
+# SPDX-License-Identifier: Apache-2.0
+
+config SDHC_DW
+	bool "DW MSHC Driver"
+	default y
+	select SDHC_SUPPORTS_NATIVE_MODE
+	depends on DT_HAS_SNPS_DW_MSHC_ENABLED
+	help
+	  Enable the snps,dw-mshc driver.
+
+config SDHC_DW_DMA
+	bool "DW using DMA"
+	default n
+	depends on SDHC_DW
+	help
+	  Enable DMA support for snps,dw-mshc.

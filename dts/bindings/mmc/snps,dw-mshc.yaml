@@ -1,0 +1,42 @@
+description: dw mshc driver
+
+compatible: "snps,dw-mshc"
+
+include: [mmc.yaml, pinctrl-device.yaml, reset-device.yaml]
+
+properties:
+  clocks:
+    required: true
+
+  reg:
+    required: true
+
+  data-addr:
+    type: int
+    required: true
+
+  fifo-depth:
+    type: int
+    default: 16
+
+  card-detect-delay:
+    type: int
+    default: 200
+
+  non-removable:
+    type: boolean
+    description: |
+      Non-removable slots (like eMMC), which are assumed to always be present,
+      will affect the `sdhc_card_present` call. This call will always return
+      true if this property exists for the node.
+
+  bus-width:
+    type: int
+    default: 1
+    description: |
+      Bus width for SDMMC access, defaults to the minimum necessary
+      number of bus lines. This parameter is controlled by MMC/SD stack.
+    enum:
+      - 1
+      - 4
+      - 8

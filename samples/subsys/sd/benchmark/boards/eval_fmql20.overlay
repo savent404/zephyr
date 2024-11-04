@@ -1,0 +1,11 @@
+#include <zephyr/dt-bindings/gpio/gpio.h>
+
+/ {
+	aliases {
+		mmc = &mmc0;
+	};
+};
+
+&mmc0 {
+	status = "okay";
+};

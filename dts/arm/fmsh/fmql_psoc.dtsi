@@ -200,6 +200,45 @@
 			compatible = "mmio-sram";
 			reg = <0x00100000 DT_SIZE_M(512)>;
 		};
+
+		mmc0: dwmmc@e0043000 {
+			compatible = "snps,dw-mshc";
+			reg = <0xe0043000 0x1000>;
+			interrupts = <GIC_SPI 20 IRQ_TYPE_LEVEL IRQ_DEFAULT_PRIORITY>;
+			clocks = <&clkc CLKID_AHB>, <&clkc CLKID_SDMMC0>;
+			clock-names = "biu", "ciu";
+			#address-cells = <1>;
+			#size-cells = <0>;
+			data-addr = <0x100>;
+			fifo-depth = <0x20>;
+			bus-width = <4>;
+			status = "disabled";
+
+			/* device */
+			card-detect-delay = <200>;
+
+			/* enable dma */
+			// dmas = <&dmahost 0 0 0>;
+			// dma-names = "rx-tx";
+		};
+		mmc1: dwmmc@e0044000 {
+			compatible = "snps,dw-mshc";
+			reg = <0xe0044000 0x1000>;
+			interrupts = <GIC_SPI 20 IRQ_TYPE_LEVEL IRQ_DEFAULT_PRIORITY>;
+			clocks = <&clkc CLKID_AHB>, <&clkc CLKID_SDMMC1>;
+			clock-names = "biu", "ciu";
+			#address-cells = <1>;
+			#size-cells = <0>;
+			data-addr = <0x100>;
+			fifo-depth = <0x20>;
+			bus-width = <4>;
+			status = "disabled";
+
+			/* device */
+			card-detect-delay = <200>;
+
+			/* mmc1 not support dma */
+		};
 	};
 
 	slcr: slcr@e0026000 {
