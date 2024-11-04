@@ -10,11 +10,20 @@
 #include <zephyr/sd/sd.h>
 #include <zephyr/sd/sdmmc.h>
 #include <zephyr/sd/mmc.h>
+#include <string.h>
+#include <stdio.h>
+#include <stdlib.h>
+
+typedef int (*read_blocks_t)(struct sd_card *card, uint8_t *rbuf, uint32_t start_block,
+			     uint32_t num_blocks);
+typedef int (*write_blocks_t)(struct sd_card *card, const uint8_t *wbuf, uint32_t start_block,
+			      uint32_t num_blocks);
 
 static int sdhc_test_inst(const struct device *dev);
+static int write_validate(struct sd_card *card, uint32_t start_block, uint32_t num_blocks,
+			  read_blocks_t read_, write_blocks_t write_);
 static int benchmark(struct sd_card *card, uint32_t start_block, uint32_t num_blocks,
-		     int (*read_)(struct sd_card *card, uint8_t *rbuf, uint32_t start_block,
-				  uint32_t num_blocks));
+		     uint32_t chunk, read_blocks_t read_, write_blocks_t write_);
 
 int main(void)
 {
@@ -47,8 +56,10 @@ static int xxd_dump(uint8_t *data, unsigned int size)
 static int sdhc_test_inst(const struct device *dev)
 {
 	const char *dev_name = dev->name;
-	static uint8_t data[1024]; /* Give stack some space !*/
 	struct sd_card card = {0};
+	uint32_t blocks_128M = 2 * 1024 * 128;
+	uint32_t blocks_1M = 2 * 1024;
+	uint32_t chunk_128K = 2 * 128;
 
 	card.bus_io.clock = SD_CLOCK_50MHZ;
 	card.bus_io.bus_mode = SDHC_BUSMODE_PUSHPULL;
@@ -78,7 +89,7 @@ static int sdhc_test_inst(const struct device *dev)
 	printk("Card voltage: %d\n", card.card_voltage);
 	printk("Card block size: %d\n", card.block_size);
 	printk("Card block count: %d\n", card.block_count);
-	printk("Card capacity: %d\n", card.block_size * card.block_count);
+	printk("Card capacity: %u\n", (unsigned int)card.block_size * card.block_count);
 	printk("Card version: %d\n", card.sd_version);
 	printk("Card speed: %d\n", card.card_speed);
 	printk("Card type: %d\n", card.type);
@@ -87,25 +98,13 @@ static int sdhc_test_inst(const struct device *dev)
 	switch (card.type) {
 	case CARD_SDMMC:
 		printk("Card type: SDMMC\n");
-		if (sdmmc_read_blocks(&card, data, 0, 2)) {
-			printk("Failed to read block\n");
-		} else {
-			printk("Read block 0:\n");
-			xxd_dump(data, 1024);
-		}
-
-		benchmark(&card, 0, card.block_count, sdmmc_read_blocks);
+		write_validate(&card, 0, blocks_1M, sdmmc_read_blocks, sdmmc_write_blocks);
+		benchmark(&card, 0, blocks_128M, chunk_128K, sdmmc_read_blocks, sdmmc_write_blocks);
 		break;
 	case CARD_MMC:
 		printk("Card type: MMC\n");
-		if (mmc_read_blocks(&card, data, 0, 2)) {
-			printk("Failed to read block\n");
-		} else {
-			printk("Read block 0:\n");
-			xxd_dump(data, 1024);
-		}
-
-		benchmark(&card, 0, card.block_count, mmc_read_blocks);
+		write_validate(&card, 0, blocks_1M, mmc_read_blocks, mmc_write_blocks);
+		benchmark(&card, 0, blocks_128M, chunk_128K, mmc_read_blocks, mmc_write_blocks);
 		break;
 	default:
 		printk("Card type: Unknown\n");
@@ -116,24 +115,24 @@ static int sdhc_test_inst(const struct device *dev)
 }
 
 static int benchmark(struct sd_card *card, uint32_t start_block, uint32_t num_blocks,
-		     int (*read_)(struct sd_card *card, uint8_t *rbuf, uint32_t start_block,
-				  uint32_t num_blocks))
+		     uint32_t block_chunk, read_blocks_t read_, write_blocks_t write_)
 {
-	uint64_t acc = 0;
-#define block_chunk (2 * 128) /* 128KB per chunk */
-	static uint8_t data[512 * block_chunk];
+	uint64_t rd_acc = 0, wr_acc = 0;
+	uint8_t *data = malloc(block_chunk * 512);
+
+	printk("Benchmark...\n");
 
 	for (unsigned int chunk = 0; chunk * block_chunk < num_blocks; chunk++) {
 		uint32_t start = k_cycle_get_32();
 
 		if (read_(card, data, start_block + chunk * block_chunk, block_chunk)) {
 			printk("Failed to read block\n");
-			return -EIO;
+			goto err;
 		}
 		uint32_t end = k_cycle_get_32();
 		uint32_t diff = end - start;
 
-		acc += diff;
+		rd_acc += diff;
 		printk("Read block %d-%d in %d cycles, average %.2f MB/s\n",
 		       start_block + chunk * block_chunk, start_block + (chunk + 1) * block_chunk,
 		       diff,
@@ -141,7 +140,104 @@ static int benchmark(struct sd_card *card, uint32_t start_block, uint32_t num_bl
 			       1024);
 	}
 
-	printk("Read %d blocks in %lld cycles, average %.2f MB/s\n", num_blocks, acc,
-	       (double)num_blocks * 512 / acc * sys_clock_hw_cycles_per_sec() / 1024 / 1024);
+	for (unsigned int chunk = 0; chunk * block_chunk < num_blocks; chunk++) {
+		uint32_t start = k_cycle_get_32();
+
+		if (sdmmc_write_blocks(card, data, start_block + chunk * block_chunk,
+				       block_chunk)) {
+			printk("Failed to write block\n");
+			goto err;
+		}
+		uint32_t end = k_cycle_get_32();
+		uint32_t diff = end - start;
+
+		wr_acc += diff;
+		printk("Write block %d-%d in %d cycles, average %.2f MB/s\n",
+		       start_block + chunk * block_chunk, start_block + (chunk + 1) * block_chunk,
+		       diff,
+		       (double)block_chunk * 512 / diff * sys_clock_hw_cycles_per_sec() / 1024 /
+			       1024);
+	}
+
+	free(data);
+	printk("Read %d blocks in %lld cycles, average %.2f MB/s\n", num_blocks, rd_acc,
+	       (double)num_blocks * 512 / rd_acc * sys_clock_hw_cycles_per_sec() / 1024 / 1024);
+	printk("Write %d blocks in %lld cycles, average %.2f MB/s\n", num_blocks, wr_acc,
+	       (double)num_blocks * 512 / wr_acc * sys_clock_hw_cycles_per_sec() / 1024 / 1024);
+	printk("Benchmark...done\n");
+	return 0;
+err:
+	free(data);
+	printk("Benchmark fatal error\n");
+	printk("Benchmark...done\n");
+	return -EIO;
+}
+
+static int write_validate(struct sd_card *card, uint32_t start_block, uint32_t num_blocks,
+			  int (*read_)(struct sd_card *card, uint8_t *rbuf, uint32_t start_block,
+				       uint32_t num_blocks),
+			  int (*write_)(struct sd_card *card, const uint8_t *wbuf,
+					uint32_t start_block, uint32_t num_blocks))
+{
+	static uint8_t data[1024]; /* Give stack some space !*/
+	static uint8_t r_data[1024];
+
+	printk("Write validate...\n");
+
+	if (num_blocks % 2 != 0) {
+		printk("Number of blocks must be even\n");
+		return -EINVAL;
+	}
+
+	for (unsigned int i = 0; i < 1024; i++) {
+		data[i] = i;
+	}
+
+	/* single write validate */
+	for (uint32_t i = 0; i < num_blocks; i++) {
+		uint32_t block = start_block + i;
+
+		if (write_(card, data, block, 1)) {
+			printk("Failed to write block %d\n", block);
+			return -EIO;
+		}
+
+		if (read_(card, r_data, block, 1)) {
+			printk("Failed to read block %d\n", block);
+			return -EIO;
+		}
+
+		if (memcmp(data, r_data, 512)) {
+			printk("Block %d data mismatch\n", block);
+			xxd_dump(data, 512);
+			xxd_dump(r_data, 512);
+			return -EIO;
+		}
+	}
+
+	/* multi write validate */
+	for (uint32_t i = 0; i < num_blocks; i += 2) {
+		uint32_t block = start_block + i;
+
+		if (write_(card, data, block, 2)) {
+			printk("Failed to write block %d\n", block);
+			return -EIO;
+		}
+
+		if (read_(card, r_data, block, 2)) {
+			printk("Failed to read block %d\n", block);
+			return -EIO;
+		}
+
+		if (memcmp(data, r_data, 1024)) {
+			printk("Block %d data mismatch\n", block);
+			xxd_dump(data, 1024);
+			xxd_dump(r_data, 1024);
+			return -EIO;
+		}
+	}
+
+	printk("Write validate...done\n");
+
 	return 0;
 }

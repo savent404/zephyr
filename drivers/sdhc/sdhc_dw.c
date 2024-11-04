@@ -171,6 +171,12 @@ static bool _is_long_response(uint32_t z_resp_type)
 	return res;
 }
 
+static int sdhc_dw_set_fifo_threshold(const struct device *dev, uint32_t threshold)
+{
+	dw_writel(dev, SDMMC_FIFOTH, SDMMC_SET_FIFOTH(0, threshold, threshold));
+	return 0;
+}
+
 static int sdhc_dw_set_power(const struct device *dev, enum sdhc_power power)
 {
 	int val;
@@ -306,8 +312,8 @@ static int sdhc_dw_write_poll(const struct device *dev, const uint32_t *addr, ui
 	while (iter) {
 		reg_status = dw_readl(dev, SDMMC_STATUS);
 
-		if (!(reg_status & SDMMC_STATUS_FIFO_FULL)) {
-
+		if (!(reg_status & SDMMC_STATUS_FIFO_FULL) &&
+		    fifo_threshold > SDMMC_GET_FCNT(reg_status)) {
 			fifo_cnt = fifo_threshold - SDMMC_GET_FCNT(reg_status);
 			if (unlikely(fifo_cnt > iter)) {
 				fifo_cnt = iter;
@@ -416,6 +422,7 @@ static int sdhc_dw_request(const struct device *dev, struct sdhc_command *cmd,
 static int sdhc_dw_set_io(const struct device *dev, struct sdhc_io *io)
 {
 	int ret;
+	const struct sdhc_dw_config *config = dev->config;
 
 	/* Deal with power mode */
 	ret = sdhc_dw_set_power(dev, io->power_mode);
@@ -437,6 +444,8 @@ static int sdhc_dw_set_io(const struct device *dev, struct sdhc_io *io)
 		LOG_WRN("Failed to set bus width");
 		return -EIO;
 	}
+
+	sdhc_dw_set_fifo_threshold(dev, config->fifo_depth);
 
 	return 0;
 }
