@@ -123,8 +123,8 @@ void soc_reset_hook(void)
 #define ADDR_IN_RANGE(addr, region_addr, region_size)                                              \
 	((addr) >= (region_addr) && (addr) < ((region_addr) + (region_size)))
 #define ADDR_IN_NODE_RANGE(addr, node) ADDR_IN_RANGE(addr, DT_REG_ADDR(node), DT_REG_SIZE(node))
-#if ADDR_IN_NODE_RANGE(DT_REG_SIZE(DT_CHOSEN(zephyr_sram)), ddr) ||                                \
-	ADDR_IN_NODE_RANGE(DT_REG_SIZE(DT_CHOSEN(zephyr_flash)), ddr)
+#if ADDR_IN_NODE_RANGE(DT_REG_ADDR(DT_CHOSEN(zephyr_sram)), DT_NODELABEL(ddr)) ||                  \
+	ADDR_IN_NODE_RANGE(DT_REG_ADDR(DT_CHOSEN(zephyr_flash)), DT_NODELABEL(ddr))
 	/* SRAM cannot be re-initialized again while Zephyr is using it, skip ddr init */
 #else
 	/* NOTE: Application cannot be placed in OCM due to the size limitation, this routine
