@@ -26,9 +26,11 @@
 
 static const struct arm_mmu_region mmu_regions[] = {
 
+#ifdef CONFIG_MMU
 	/* Relocate vector address to 0x00000000, possible sram is ddr or ocm */
 	MMU_REGION_ENTRY("vector", DT_REG_ADDR(DT_CHOSEN(zephyr_sram)), 0x00000000,
 			 CONFIG_MMU_PAGE_SIZE, M_MEMORY_UNCACHED),
+#endif
 
 	/**
 	 * @note Zephyr already has mapped the generic regions (e.g. .text, .data, .bss)
@@ -97,9 +99,12 @@ void soc_reset_hook(void)
 	sctlr &= ~SCTLR_I_Msk;
 	sctlr &= ~SCTLR_C_Msk;
 	sctlr &= ~SCTLR_A_Msk;
+#ifdef CONFIG_MMU
 	sctlr &= ~SCTLR_M_Msk;
+#endif
 	__set_SCTLR(sctlr);
 
+#ifdef CONFIG_MMU
 	/* Enable SMP */
 	__set_ACTLR(__get_ACTLR() | ACTLR_SMP_Msk);
 
@@ -113,6 +118,7 @@ void soc_reset_hook(void)
 	__set_TLBIALL(0);
 	barrier_dsync_fence_full();
 	barrier_isync_fence_full();
+#endif
 
 #define ADDR_IN_RANGE(addr, region_addr, region_size)                                              \
 	((addr) >= (region_addr) && (addr) < ((region_addr) + (region_size)))
