@@ -108,7 +108,7 @@ static const struct dma_driver_api dw_dma_driver_api = {
 			    &dw_dma_init,				\
 			    NULL,					\
 			    &dw_dma##inst##_data,			\
-			    &dw_dma##inst##_config, POST_KERNEL,	\
+			    &dw_dma##inst##_config, PRE_KERNEL_1,	\
 			    CONFIG_DMA_INIT_PRIORITY,			\
 			    &dw_dma_driver_api);			\
 									\
@@ -117,7 +117,7 @@ static const struct dma_driver_api dw_dma_driver_api = {
 		IRQ_CONNECT(DT_INST_IRQN(inst),				\
 			    DT_INST_IRQ(inst, priority), dw_dma_isr,	\
 			    DEVICE_DT_INST_GET(inst),			\
-			    DT_INST_IRQ(inst, sense));			\
+			    DT_INST_IRQ(inst, flags));			\
 		irq_enable(DT_INST_IRQN(inst));				\
 	}
 
