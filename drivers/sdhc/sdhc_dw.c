@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 #include <zephyr/devicetree.h>
+#include <zephyr/drivers/gpio.h>
 #include <zephyr/drivers/sdhc.h>
 #include <zephyr/drivers/clock_control.h>
 #include <zephyr/logging/log.h>
@@ -35,6 +36,7 @@ struct sdhc_dw_config {
 	uint32_t data_addr;
 	uint32_t fifo_depth;
 	int non_removable;
+	struct gpio_dt_spec cd_gpio;
 };
 
 static uint32_t _res_opcode_convert(uint32_t z_opcode, struct sdhc_dw_data *data)
@@ -471,7 +473,12 @@ static int sdhc_dw_get_host_props(const struct device *dev, struct sdhc_host_pro
 
 static int sdhc_dw_card_present(const struct device *dev)
 {
-	return -EIO;
+	const struct sdhc_dw_config *config = dev->config;
+
+	if (config->non_removable) {
+		return 1;
+	}
+	return gpio_pin_get(config->cd_gpio.port, config->cd_gpio.pin);
 }
 
 static int sdhc_dw_reset(const struct device *dev)
@@ -517,7 +524,16 @@ static int sdhc_dw_init(const struct device *dev)
 	}
 	data->host_freq = rate;
 
-	/* TODO: configure FIFO depth */
+	if (!config->non_removable && device_is_ready(config->cd_gpio.port)) {
+		ret = gpio_pin_configure_dt(&config->cd_gpio, GPIO_INPUT);
+		if (ret) {
+			LOG_ERR("Failed to configure CD GPIO");
+			return ret;
+		}
+	} else if (!config->non_removable) {
+		LOG_ERR("CD GPIO not available");
+		return -EINVAL;
+	}
 
 	return 0;
 }
@@ -530,6 +546,7 @@ static int sdhc_dw_init(const struct device *dev)
 		.data_addr = DT_INST_PROP(n, data_addr),                                           \
 		.fifo_depth = DT_INST_PROP(n, fifo_depth),                                         \
 		.non_removable = DT_INST_PROP(n, non_removable),                                   \
+		.cd_gpio = GPIO_DT_SPEC_GET_BY_IDX_OR(DT_DRV_INST(n), cd_gpios, 0, {0}),           \
 	};                                                                                         \
 	struct sdhc_dw_data sdhc_dw_data_##n = {};                                                 \
 	DEVICE_DT_INST_DEFINE(n, sdhc_dw_init, NULL, &sdhc_dw_data_##n, &sdhc_dw_config_##n,       \

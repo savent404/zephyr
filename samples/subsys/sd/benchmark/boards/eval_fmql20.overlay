@@ -8,4 +8,9 @@
 
 &mmc0 {
 	status = "okay";
+	cd-gpios = <&gpio1 15 GPIO_ACTIVE_LOW>; // MIO47 is the SD card detect pin
+};
+
+&gpio1 {
+	status = "okay";
 };
