@@ -1,0 +1,21 @@
+/**
+ * Copyright (c) 2024 SYSTech Co.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+#include <zephyr/dt-bindings/gpio/gpio.h>
+
+&mmc0 {
+	status = "okay";
+
+	cd-gpios = <&gpio1 15 GPIO_ACTIVE_LOW>; // MIO47 is the SD card detect pin
+
+	mmc {
+		compatible = "zephyr,sdmmc-disk";
+		status = "okay";
+	};
+};
+
+&gpio1 {
+	status = "okay";
+};
