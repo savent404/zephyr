@@ -239,6 +239,22 @@
 
 			/* mmc1 not support dma */
 		};
+
+		qspi0_flash: qspi@e0000000 {
+			#address-cells = <0x1>;
+			#size-cells = <0x0>;
+			compatible = "cdns,qspi-nor";
+			reg = <0xe0000000 0x1000>,
+				<0xe8000000 0x1000000>;
+			reg-names = "qspi_reg", "qspi_data";
+			interrupts = <GIC_SPI 14 IRQ_TYPE_LEVEL IRQ_DEFAULT_PRIORITY>;
+			interrupt-names = "irq_0";
+			clock-frequency = <30000000>;
+			clocks = <&clkc CLKID_QSPI>;
+			clock-names = "qspi";
+			status = "disabled";
+		};
+
 	};
 
 	slcr: slcr@e0026000 {

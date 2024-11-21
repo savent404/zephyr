@@ -5,10 +5,25 @@ description: Cadence Quad-SPI NOR flash controller
 
 compatible: "cdns,qspi-nor"
 
-include: flash-controller.yaml
+include: [flash-controller.yaml, pinctrl-device.yaml]
 
 properties:
   clock-frequency:
     type: int
     required: true
     description: clock frequency information for Cadence QSPI NOR Flash
+
+  cpol:
+    type: int
+    default: 1
+    description: Clock polarity (0 or 1)
+
+  cpha:
+    type: int
+    default: 1
+    description: Clock phase (0 or 1)
+
+  sram-fifo-size:
+    type: int
+    default: 1024
+    description: SRAM FIFO size in bytes

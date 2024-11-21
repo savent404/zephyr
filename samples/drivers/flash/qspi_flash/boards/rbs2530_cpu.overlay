@@ -1,0 +1,51 @@
+/**
+ * Copyright (c) 2024 SYSTech Co.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+&pinctrl {
+	/omit-if-no-ref/ qspi0_cs_mio_1: qspi0_cs_mio_1 {
+		pinmux = <FMQL_PINMUX(MIO, 1, PINMUX_QSPI)>;
+		io_type = <IO_TYPE_LVCMOS18>;
+	};
+	/omit-if-no-ref/ qspi0_io0_mio_2: qspi0_io0_mio_2 {
+		pinmux = <FMQL_PINMUX(MIO, 2, PINMUX_QSPI)>;
+		io_type = <IO_TYPE_LVCMOS18>;
+	};
+	/omit-if-no-ref/ qspi0_io1_mio_3: qspi0_io1_mio_3 {
+		pinmux = <FMQL_PINMUX(MIO, 3, PINMUX_QSPI)>;
+		io_type = <IO_TYPE_LVCMOS18>;
+	};
+	/omit-if-no-ref/ qspi0_io2_mio_4: qspi0_io2_mio_4 {
+		pinmux = <FMQL_PINMUX(MIO, 4, PINMUX_QSPI)>;
+		io_type = <IO_TYPE_LVCMOS18>;
+	};
+	/omit-if-no-ref/ qspi0_io3_mio_5: qspi0_io3_mio_5 {
+		pinmux = <FMQL_PINMUX(MIO, 5, PINMUX_QSPI)>;
+		io_type = <IO_TYPE_LVCMOS18>;
+	};
+	/omit-if-no-ref/ qspi0_clk_mio_6: qspi0_clk_mio_6 {
+		pinmux = <FMQL_PINMUX(MIO, 6, PINMUX_QSPI)>;
+		io_type = <IO_TYPE_LVCMOS18>;
+	};
+};
+
+&qspi0_flash {
+	status = "okay";
+	pinctrl-0 = <&qspi0_cs_mio_1>,
+				<&qspi0_io0_mio_2>,
+				<&qspi0_io1_mio_3>,
+				<&qspi0_io2_mio_4>,
+				<&qspi0_io3_mio_5>,
+				<&qspi0_clk_mio_6>;
+	pinctrl-names = "default";
+	cpol = <0>;
+	cpha = <0>;
+	sram-fifo-size = <1024>;
+};
+
+/ {
+	aliases {
+		flash = &qspi0_flash;
+	};
+};

@@ -302,12 +302,12 @@ int cad_qspi_n25q_wait_for_program_and_erase(struct cad_qspi_params *cad_params,
 	int count = 0;
 
 	while (count < CAD_QSPI_COMMAND_TIMEOUT) {
-		status = cad_qspi_device_status(cad_params, &status);
+		status = cad_qspi_device_status(cad_params, &flag_sr);
 		if (status != 0) {
 			LOG_ERR("Error getting device status\n");
 			return -1;
 		}
-		if (!CAD_QSPI_STIG_SR_BUSY(status)) {
+		if (!CAD_QSPI_STIG_SR_BUSY(flag_sr)) {
 			break;
 		}
 		count++;
@@ -334,6 +334,20 @@ int cad_qspi_n25q_wait_for_program_and_erase(struct cad_qspi_params *cad_params,
 		}
 	}
 
+#if FLASH_CAD_FLASH_QSPI_NOR
+	uint8_t is_program_error = false;
+	uint8_t is_erase_error = false;
+
+	if (program_only) {
+		is_program_error = CAD_QSPI_STIG_FLAGSR_PROGRAMERROR(flag_sr);
+	} else {
+		is_erase_error = CAD_QSPI_STIG_FLAGSR_ERASEERROR(flag_sr);
+	}
+
+	if (is_program_error || is_erase_error) {
+		cad_qspi_stig_cmd(cad_params, CAD_QSPI_STIG_OPCODE_CLFSR, 0);
+	}
+#else
 	if (count >= CAD_QSPI_COMMAND_TIMEOUT) {
 		LOG_ERR("Timed out waiting for program and erase\n");
 	}
@@ -344,6 +358,7 @@ int cad_qspi_n25q_wait_for_program_and_erase(struct cad_qspi_params *cad_params,
 		cad_qspi_stig_cmd(cad_params, CAD_QSPI_STIG_OPCODE_CLFSR, 0);
 		return -1;
 	}
+#endif
 
 	return 0;
 }
@@ -721,7 +736,7 @@ int cad_qspi_indirect_page_bound_write(struct cad_qspi_params *cad_params, uint3
 	write_count = 0;
 	sram_partition =
 		CAD_QSPI_SRAMPART_ADDR(sys_read32(cad_params->reg_base + CAD_QSPI_SRAMPART));
-	write_capacity = (uint32_t)CAD_QSPI_SRAM_FIFO_ENTRY_COUNT - sram_partition;
+	write_capacity = (cad_params->sram_fifo_size / sizeof(uint32_t)) - sram_partition;
 
 	while (write_count < len) {
 		write_fill_level = CAD_QSPI_SRAMFILL_INDWRPART(

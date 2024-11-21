@@ -9,7 +9,7 @@ config FLASH_CAD_QSPI_NOR
 	select FLASH_HAS_DRIVER_ENABLED
 	select FLASH_HAS_EXPLICIT_ERASE
 	help
-	  Enable Cadence QSPI-NOR support.
+		Enable Cadence QSPI-NOR support.
 
 if FLASH_CAD_QSPI_NOR
 
@@ -17,31 +17,40 @@ config CAD_QSPI_MICRON_N25Q_SUPPORT
 	bool "Cadence Quad SPI Micron N25Q Support"
 	default y
 	help
-	  Enable Micron N25Q Support.
+		Enable Micron N25Q Support.
+
+config FLASH_CAD_FLASH_QSPI_NOR
+	bool "FMQL platform adaptation for Micron N25Q QSPI flash"
+	default n
+	depends on CAD_QSPI_MICRON_N25Q_SUPPORT
+	help
+		Platform specific adaptation layer for Micron N25Q QSPI flash on FMQL.
+		This driver extends the Cadence QSPI Micron N25Q support with FMQL
+		platform specific configurations and optimizations.
 
 config CAD_QSPI_NOR_SUBSECTOR_SIZE
 	hex "Cadence Quad SPI subsector size"
 	default 0x1000
 	help
-	  Set the Cadence Quad SPI subsector size.
+		Set the Cadence Quad SPI subsector size.
 
 config QSPI_ADDR_BYTES
 	int "Access QSPI address memory size in bytes"
 	default 2
 	help
-	  Set the address memory size in bytes when
-	  accessing QSPI.
+		Set the address memory size in bytes when
+		accessing QSPI.
 
 config QSPI_BYTES_PER_DEV
 	int "Set QSPI to read / write how many bytes per device"
 	default 256
 	help
-	  Set the size for a QSPI to read / write per device.
+		Set the size for a QSPI to read / write per device.
 
 config QSPI_BYTES_PER_BLOCK
 	int "Set QSPI to read / write how many bytes per block"
 	default 16
 	help
-	  Set the size for a QSPI to read / write per block.
+		Set the size for a QSPI to read / write per block.
 
 endif # FLASH_CAD_QSPI_NOR
