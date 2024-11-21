@@ -143,6 +143,24 @@
 			clock-names = "gtc";
 		};
 
+		timer0: timer@e0007000 {
+			compatible = "snps,dw-timers";
+			interrupt-parent = <&gic>;
+			interrupts = <GIC_SPI 10 IRQ_TYPE_LEVEL IRQ_DEFAULT_PRIORITY>;
+			reg = <0xe0007000 0x1000>;
+			clock-frequency = < 55555555 >;
+			status = "disabled";
+		};
+
+		timer1: timer@e0024000 {
+			compatible = "snps,dw-timers";
+			interrupt-parent = <&gic>;
+			interrupts = <GIC_SPI 33 IRQ_TYPE_LEVEL IRQ_DEFAULT_PRIORITY>;
+			reg = <0xe0024000 0x1000>;
+			clock-frequency = < 55555555 >;
+			status = "disabled";
+		};
+
 		wdt: watchdog@e0025000 {
 			compatible = "snps,designware-watchdog";
 			reg = <0xe0025000 0x1000>;
