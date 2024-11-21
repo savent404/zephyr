@@ -1,7 +1,0 @@
-#
-# Copyright (c) 2024, SYSTech Co.
-# SPDX-License-Identifier: Apache-2.0
-#
-
-config BOARD_RBS2530_CPU
-	select SOC_FMSH_FMQL20

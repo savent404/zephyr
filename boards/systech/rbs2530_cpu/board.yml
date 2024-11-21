@@ -1,5 +1,0 @@
-board:
-  name: rbs2530_cpu
-  vendor: fmsh
-  socs:
-  - name: fmql20
