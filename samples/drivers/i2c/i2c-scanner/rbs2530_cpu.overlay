@@ -1,0 +1,23 @@
+/ {
+	aliases {
+		my-i2c = &i2c0;
+	};
+};
+
+&pinctrl {
+	/omit-if-no-ref/ i2c0_pins_mio_50: i2c0_pins_mio_50 {
+		pinmux = <FMQL_PINMUX(MIO, 50, PINMUX_I2C)>;
+		io_type = <IO_TYPE_LVCMOS18>;
+	};
+
+	/omit-if-no-ref/ i2c0_pins_mio_51: i2c0_pins_mio_51 {
+		pinmux = <FMQL_PINMUX(MIO, 51, PINMUX_I2C)>;
+		io_type = <IO_TYPE_LVCMOS18>;
+	};
+};
+
+&i2c0 {
+	status = "okay";
+	pinctrl-0 = <&i2c0_pins_mio_50>, <&i2c0_pins_mio_51>;
+	pinctrl-names = "default";
+};
