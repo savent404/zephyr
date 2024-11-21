@@ -8,7 +8,6 @@
 #include <arm/armv7-a.dtsi>
 #include <zephyr/dt-bindings/interrupt-controller/arm-gic.h>
 #include <zephyr/dt-bindings/clock/fmsh_psoc_clock.h>
-#include <zephyr/dt-bindings/i2c/i2c.h>
 
 / {
 
@@ -151,30 +150,6 @@
 			clocks = <&clkc CLKID_WDT>;
 			clock-names = "iwdt";
 			reset-pulse-length = <256>; // 256 pclk cycles
-			status = "disabled";
-		};
-
-		i2c0: i2c@e0002000 {
-			compatible = "snps,designware-i2c";
-			reg = <0xe0002000 0x1000>;
-			interrupts = <GIC_SPI 21 IRQ_TYPE_LEVEL IRQ_DEFAULT_PRIORITY>;
-			clocks = <&clkc CLKID_I2C0>;
-			clock-names = "i2c";
-			clock-frequency = <100000>; // 100kHz
-			#address-cells = <1>;
-			#size-cells = <0>;
-			status = "disabled";
-		};
-	
-		i2c1: i2c@e0022000 {
-			compatible = "snps,designware-i2c";
-			reg = <0xe0022000 0x1000>;
-			interrupts = <GIC_SPI 42 IRQ_TYPE_LEVEL IRQ_DEFAULT_PRIORITY>;
-			clocks = <&clkc CLKID_I2C1>;
-			clock-names = "i2c";
-			clock-frequency = <100000>; // 100kHz
-			#address-cells = <1>;
-			#size-cells = <0>;
 			status = "disabled";
 		};
 
