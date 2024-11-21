@@ -35,21 +35,6 @@
 			#interrupt-cells = <4>;
 		};
 
-		dma0: dma@e004b000 {
-			compatible = "snps,designware-dma";
-			reg = <0xe004b000 0x1000>;
-			interrupts = <GIC_SPI 13 IRQ_TYPE_LEVEL IRQ_DEFAULT_PRIORITY>;
-			interrupt-names = "irq_0";
-			#dma-cells = <1>;
-			dma-channels = <8>;
-			dma-requests = <16>;
-			dma-buf-addr-alignment = <4>;
-			dma-copy-alignment = <4>;
-			clocks = <&clkc CLKID_AHB>;
-			clock-names = "hclk";
-			status = "disabled";
-		};
-
 		uart0: serial@e0004000 {
 			compatible = "ns16550";
 			clocks = <&clkc CLKID_UART0>;
