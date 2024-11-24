@@ -241,8 +241,6 @@
 		};
 
 		qspi0_flash: qspi@e0000000 {
-			#address-cells = <0x1>;
-			#size-cells = <0x0>;
 			compatible = "cdns,qspi-nor";
 			reg = <0xe0000000 0x1000>,
 				<0xe8000000 0x1000000>;

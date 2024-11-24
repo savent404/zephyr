@@ -25,6 +25,10 @@ struct flash_cad_priv {
 struct flash_cad_config {
 	DEVICE_MMIO_NAMED_ROM(qspi_reg);
 	DEVICE_MMIO_NAMED_ROM(qspi_data);
+#if defined(CONFIG_FLASH_PAGE_LAYOUT)
+	const struct flash_pages_layout *pages_layout;
+	size_t pages_layout_size;
+#endif
 };
 
 static const struct flash_parameters flash_cad_parameters = {
@@ -105,11 +109,24 @@ static const struct flash_parameters *flash_cad_get_parameters(const struct devi
 	return &flash_cad_parameters;
 }
 
+#if defined(CONFIG_FLASH_PAGE_LAYOUT)
+static void flash_cad_pages_layout(const struct device *dev,
+				   const struct flash_pages_layout **layout, size_t *layout_size)
+{
+
+	*layout = DEV_CFG(dev)->pages_layout;
+	*layout_size = DEV_CFG(dev)->pages_layout_size;
+}
+#endif
+
 static const struct flash_driver_api flash_cad_api = {
 	.erase = flash_cad_erase,
 	.write = flash_cad_write,
 	.read = flash_cad_read,
 	.get_parameters = flash_cad_get_parameters,
+#if defined(CONFIG_FLASH_PAGE_LAYOUT)
+	.page_layout = flash_cad_pages_layout,
+#endif
 };
 
 static int flash_cad_init(const struct device *dev)
@@ -135,6 +152,23 @@ static int flash_cad_init(const struct device *dev)
 	return 0;
 }
 
+#define CREATE_FLASH_CONFIG(inst)                                                                  \
+	static struct flash_cad_config flash_cad_config_##inst = {                                 \
+		DEVICE_MMIO_NAMED_ROM_INIT_BY_NAME(qspi_reg, DT_DRV_INST(inst)),                   \
+		DEVICE_MMIO_NAMED_ROM_INIT_BY_NAME(qspi_data, DT_DRV_INST(inst)),                  \
+	};
+
+#define CREATE_FLASH_CONFIG_WITH_PAGES_LAYOUT(inst)                                                \
+	const static struct flash_pages_layout flash_pages_layout_##inst[] = {                     \
+		{.pages_count = DT_INST_PROP(inst, flat_page_count),                               \
+		 .pages_size = DT_INST_PROP(inst, flat_page_size)}};                               \
+	static struct flash_cad_config flash_cad_config_##inst = {                                 \
+		DEVICE_MMIO_NAMED_ROM_INIT_BY_NAME(qspi_reg, DT_DRV_INST(inst)),                   \
+		DEVICE_MMIO_NAMED_ROM_INIT_BY_NAME(qspi_data, DT_DRV_INST(inst)),                  \
+		.pages_layout = flash_pages_layout_##inst,                                         \
+		.pages_layout_size = ARRAY_SIZE(flash_pages_layout_##inst),                        \
+	};
+
 #define CREATE_FLASH_CADENCE_QSPI_DEVICE(inst)                                                     \
 	static struct flash_cad_priv flash_cad_priv_##inst = {                                     \
 		.params =                                                                          \
@@ -146,11 +180,8 @@ static int flash_cad_init(const struct device *dev)
 				.sram_fifo_size = DT_INST_PROP_OR(inst, sram_fifo_size, 1024),     \
 			},                                                                         \
 	};                                                                                         \
-                                                                                                   \
-	static struct flash_cad_config flash_cad_config_##inst = {                                 \
-		DEVICE_MMIO_NAMED_ROM_INIT_BY_NAME(qspi_reg, DT_DRV_INST(inst)),                   \
-		DEVICE_MMIO_NAMED_ROM_INIT_BY_NAME(qspi_data, DT_DRV_INST(inst)),                  \
-	};                                                                                         \
+	COND_CODE_1(CONFIG_FLASH_PAGE_LAYOUT, (CREATE_FLASH_CONFIG_WITH_PAGES_LAYOUT(inst)),       \
+		    (CREATE_FLASH_CONFIG(inst)));                                                  \
                                                                                                    \
 	DEVICE_DT_INST_DEFINE(inst, flash_cad_init, NULL, &flash_cad_priv_##inst,                  \
 			      &flash_cad_config_##inst, POST_KERNEL,                               \

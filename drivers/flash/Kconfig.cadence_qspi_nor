@@ -28,6 +28,9 @@ config FLASH_CAD_FLASH_QSPI_NOR
 		This driver extends the Cadence QSPI Micron N25Q support with FMQL
 		platform specific configurations and optimizations.
 
+config FLASH_PAGE_LAYOUT
+	default y
+
 config CAD_QSPI_NOR_SUBSECTOR_SIZE
 	hex "Cadence Quad SPI subsector size"
 	default 0x1000

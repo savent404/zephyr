@@ -27,3 +27,13 @@ properties:
     type: int
     default: 1024
     description: SRAM FIFO size in bytes
+
+  flat-page-size:
+    type: int
+    default: 256
+    description: Flat page size in bytes
+
+  flat-page-count:
+    type: int
+    default: 32768
+    description: Flat page count
