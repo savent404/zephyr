@@ -25,13 +25,15 @@ static int write_validate(struct sd_card *card, uint32_t start_block, uint32_t n
 static int benchmark(struct sd_card *card, uint32_t start_block, uint32_t num_blocks,
 		     uint32_t chunk, read_blocks_t read_, write_blocks_t write_);
 
+#define MMC_DEV (DEVICE_DT_GET(DT_ALIAS(mmc)))
+
 int main(void)
 {
 #ifdef CONFIG_SAMPLE_DO_OUTPUT
 	printk("Hello World from minimal!\n");
 #endif
 
-	sdhc_test_inst(DEVICE_DT_GET(DT_NODELABEL(mmc0)));
+	sdhc_test_inst(MMC_DEV);
 
 	k_sleep(K_FOREVER);
 

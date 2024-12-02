@@ -39,10 +39,10 @@ struct sdhc_dw_config {
 	struct gpio_dt_spec cd_gpio;
 };
 
-static uint32_t _res_opcode_convert(uint32_t z_opcode, struct sdhc_dw_data *data)
+static uint32_t _res_opcode_convert(bool is_spi_mode, uint32_t z_opcode, struct sdhc_dw_data *data)
 {
 	/* NOTE: CMD_SWITCH and ACMD_SWITCH_BUS_WIDTH are the same, need to determine which is */
-	if (data->prev_opcode != SD_APP_CMD) {
+	if (data->prev_opcode != SD_APP_CMD && is_spi_mode) {
 		if (z_opcode == SD_SWITCH) {
 			z_opcode = CMD_SWITCH_FUNC;
 		}
@@ -51,11 +51,12 @@ static uint32_t _res_opcode_convert(uint32_t z_opcode, struct sdhc_dw_data *data
 	return z_opcode;
 }
 
-static uint32_t _dw_cmd_prepare(struct sdhc_command *_cmd, struct sdhc_dw_data *dev_data)
+static uint32_t _dw_cmd_prepare(struct sdhc_command *_cmd,
+								struct sdhc_dw_data *dev_data)
 {
-	uint32_t cmd = _res_opcode_convert(_cmd->opcode, dev_data);
-	uint32_t cmd_data = 0;
 	bool is_spi_cmd = _cmd->response_type & SDHC_SPI_RESPONSE_TYPE_MASK;
+	uint32_t cmd = _res_opcode_convert(is_spi_cmd, _cmd->opcode, dev_data);
+	uint32_t cmd_data = 0;
 
 	switch (cmd) {
 	/* No response commands */
@@ -91,8 +92,15 @@ static uint32_t _dw_cmd_prepare(struct sdhc_command *_cmd, struct sdhc_dw_data *
 	case SD_SELECT_CARD:
 	case SD_SEND_STATUS:
 	case SD_APP_CMD:
-	case MMC_SEND_EXT_CSD:
 		cmd_data = (SDMMC_CMD_RESP_EXP + cmd);
+		break;
+	case MMC_SEND_EXT_CSD:
+		if (is_spi_cmd) {
+			cmd_data = (SDMMC_CMD_RESP_EXP + cmd);
+		} else {
+			cmd_data = (SDMMC_CMD_PRV_DAT_WAIT + SDMMC_CMD_DAT_EXP +
+				    SDMMC_CMD_RESP_CRC + SDMMC_CMD_RESP_EXP + cmd);
+		}
 		break;
 
 	/* Stop&abort command */
@@ -140,8 +148,8 @@ static uint32_t _dw_cmd_prepare(struct sdhc_command *_cmd, struct sdhc_dw_data *
 			    SDMMC_CMD_RESP_EXP + (cmd >> 4));
 		break;
 	default:
-		LOG_WRN("unknown command %d.\r\n", cmd);
-		return -1;
+		LOG_WRN("unknown command %d.", cmd);
+		return -EINVAL;
 	}
 	cmd_data |= SDMMC_CMD_START;
 	return cmd_data;
@@ -265,7 +273,7 @@ static int sdhc_dw_read_poll(const struct device *dev, uint32_t *addr, uint32_t 
 	uint32_t reg_status, fifo_cnt;
 
 	if ((unsigned int)addr & 3 || len & 3) {
-		LOG_WRN("Unaligned address or length\n");
+		LOG_WRN("Unaligned address or length");
 		return -EINVAL;
 	}
 	iter = len / 4;
@@ -284,7 +292,7 @@ static int sdhc_dw_read_poll(const struct device *dev, uint32_t *addr, uint32_t 
 			iter -= fifo_cnt;
 			continue;
 		} else if (timeout-- <= 0) {
-			LOG_WRN_ONCE("Timeout\n");
+			LOG_WRN_ONCE("Timeout");
 			return -ETIMEDOUT;
 		}
 		k_busy_wait(10);
@@ -303,7 +311,7 @@ static int sdhc_dw_write_poll(const struct device *dev, const uint32_t *addr, ui
 	uint32_t reg_status, fifo_cnt, fifo_threshold;
 
 	if ((unsigned int)addr & 3 || len & 3) {
-		LOG_WRN("Unaligned address or length\n");
+		LOG_WRN("Unaligned address or length");
 		return -EINVAL;
 	}
 
@@ -326,7 +334,7 @@ static int sdhc_dw_write_poll(const struct device *dev, const uint32_t *addr, ui
 			iter -= fifo_cnt;
 			continue;
 		} else if (timeout-- <= 0) {
-			LOG_WRN_ONCE("Timeout\n");
+			LOG_WRN_ONCE("Timeout");
 			return -ETIMEDOUT;
 		}
 
@@ -380,14 +388,14 @@ static int sdhc_dw_request(const struct device *dev, struct sdhc_command *cmd,
 	}
 
 	if (timeout < 0 || (temp & SDMMC_INT_RTO) || (temp & SDMMC_INT_DRTO)) {
-		LOG_WRN_ONCE("Command(%x) timeout\n", cmd->opcode & 0xFF);
+		LOG_WRN_ONCE("Command(%x) timeout", cmd->opcode & 0xFF);
 		return -ETIMEDOUT;
 	} else if (rcmd & SDMMC_CMD_RESP_CRC && temp & (SDMMC_INT_RCRC | SDMMC_INT_DCRC)) {
-		LOG_WRN_ONCE("Response CRC error\n");
+		LOG_WRN_ONCE("Response CRC error");
 		return -EIO;
 	}
 
-	LOG_DBG("Command(%08x), status(%08x), timeout(%08x), X(%c)\n", cmd->opcode, temp, timeout,
+	LOG_DBG("Command(%08x), status(%08x), timeout(%08x), X(%c)", cmd->opcode, temp, timeout,
 		dir == rd   ? 'R'
 		: dir == wr ? 'W'
 			    : 'N');
@@ -406,12 +414,12 @@ static int sdhc_dw_request(const struct device *dev, struct sdhc_command *cmd,
 	if (dir != none) {
 		if (dir == rd) {
 			if (sdhc_dw_read_poll(dev, data->data, data->blocks * data->block_size)) {
-				LOG_WRN_ONCE("Read data timeout\n");
+				LOG_WRN_ONCE("Read data timeout");
 				return -ETIMEDOUT;
 			}
 		} else {
 			if (sdhc_dw_write_poll(dev, data->data, data->blocks * data->block_size)) {
-				LOG_WRN_ONCE("Write data timeout\n");
+				LOG_WRN_ONCE("Write data timeout");
 				return -ETIMEDOUT;
 			}
 		}
