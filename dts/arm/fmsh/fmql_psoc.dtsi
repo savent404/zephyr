@@ -196,9 +196,9 @@
 			status = "disabled";
 		};
 
-		ddr: memory@100000 {
+		ddr: memory@8100000 {
 			compatible = "mmio-sram";
-			reg = <0x00100000 DT_SIZE_M(512)>;
+			reg = <0x08100000 DT_SIZE_M(256)>;
 		};
 
 		mmc0: dwmmc@e0043000 {

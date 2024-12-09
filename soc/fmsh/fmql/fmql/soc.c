@@ -144,4 +144,10 @@ void relocate_vector_table(void)
 	write_vbar(VECTOR_ADDRESS & VBAR_MASK);
 	barrier_isync_fence_full();
 }
+#else
+/* NOTE: do not use generic relocate_vector_table() */
+void relocate_vector_table(void)
+{
+	write_sctlr(read_sctlr() & ~HIVECS);
+}
 #endif
