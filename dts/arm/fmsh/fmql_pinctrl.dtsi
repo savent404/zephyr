@@ -4,6 +4,44 @@
 #include <zephyr/dt-bindings/pinctrl/fmql-pinctrl.h>
 
 &pinctrl {
+	/omit-if-no-ref/ qspi0_cs_mio_1: qspi0_cs_mio_1 {
+		pinmux = <FMQL_PINMUX(MIO, 1, PINMUX_QSPI)>;
+		io_type = <IO_TYPE_LVCMOS18>;
+	};
+	/omit-if-no-ref/ qspi0_io0_mio_2: qspi0_io0_mio_2 {
+		pinmux = <FMQL_PINMUX(MIO, 2, PINMUX_QSPI)>;
+		io_type = <IO_TYPE_LVCMOS18>;
+	};
+	/omit-if-no-ref/ qspi0_io1_mio_3: qspi0_io1_mio_3 {
+		pinmux = <FMQL_PINMUX(MIO, 3, PINMUX_QSPI)>;
+		io_type = <IO_TYPE_LVCMOS18>;
+	};
+	/omit-if-no-ref/ qspi0_io2_mio_4: qspi0_io2_mio_4 {
+		pinmux = <FMQL_PINMUX(MIO, 4, PINMUX_QSPI)>;
+		io_type = <IO_TYPE_LVCMOS18>;
+	};
+	/omit-if-no-ref/ qspi0_io3_mio_5: qspi0_io3_mio_5 {
+		pinmux = <FMQL_PINMUX(MIO, 5, PINMUX_QSPI)>;
+		io_type = <IO_TYPE_LVCMOS18>;
+	};
+	/omit-if-no-ref/ qspi0_clk_mio_6: qspi0_clk_mio_6 {
+		pinmux = <FMQL_PINMUX(MIO, 6, PINMUX_QSPI)>;
+		io_type = <IO_TYPE_LVCMOS18>;
+	};
+
+	/omit-if-no-ref/ uart1_rx_mio_9: uart1_rx_mio_9 {
+		pinmux = <FMQL_PINMUX(MIO, 9, PINMUX_UART)>;
+		bias-high-impedance;
+		io_type = <IO_TYPE_LVCMOS18>;
+	};
+	/omit-if-no-ref/ uart1_tx_mio_8: uart1_tx_mio_8 {
+		pinmux = <FMQL_PINMUX(MIO, 8, PINMUX_UART)>;
+		io_type = <IO_TYPE_LVCMOS18>;
+	};
+	/omit-if-no-ref/ i2c0_pins_mio_50: i2c0_pins_mio_50 {
+		pinmux = <FMQL_PINMUX(MIO, 50, PINMUX_I2C)>;
+		io_type = <IO_TYPE_LVCMOS18>;
+	};
 	/omit-if-no-ref/ uart0_rx_mio_50: uart0_rx_mio_50 {
 		pinmux = <FMQL_PINMUX(MIO, 50, PINMUX_UART)>;
 		bias-high-impedance;
@@ -11,6 +49,10 @@
 	};
 	/omit-if-no-ref/ uart0_tx_mio_51: uart0_tx_mio_51 {
 		pinmux = <FMQL_PINMUX(MIO, 51, PINMUX_UART)>;
+		io_type = <IO_TYPE_LVCMOS18>;
+	};
+	/omit-if-no-ref/ i2c0_pins_mio_51: i2c0_pins_mio_51 {
+		pinmux = <FMQL_PINMUX(MIO, 51, PINMUX_I2C)>;
 		io_type = <IO_TYPE_LVCMOS18>;
 	};
 };
