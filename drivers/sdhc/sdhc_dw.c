@@ -463,14 +463,16 @@ static int sdhc_dw_set_io(const struct device *dev, struct sdhc_io *io)
 static int sdhc_dw_get_host_props(const struct device *dev, struct sdhc_host_props *props)
 {
 	memset(props, 0, sizeof(struct sdhc_host_props));
-	props->f_max = 50000000;
+	props->f_max = 100000000;
 	props->f_min = 400000;
 	props->power_delay = 100;
 	props->host_caps.bus_4_bit_support = 1;
-	props->host_caps.high_spd_support = 0;
+	props->host_caps.high_spd_support = 1;
 	props->host_caps.vol_330_support = 1;
 	props->host_caps.vol_300_support = 1;
 	props->host_caps.vol_180_support = 0;
+	props->host_caps.hs200_support = 1;
+	props->host_caps.hs400_support = 1;
 	props->max_current_330 = 200;
 	props->max_current_300 = 200;
 	props->max_current_180 = 200;

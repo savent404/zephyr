@@ -55,6 +55,51 @@ static int xxd_dump(uint8_t *data, unsigned int size)
 
 	return 0;
 }
+
+const char *voltage_type(enum sd_voltage voltage)
+{
+	switch (voltage) {
+	case SD_VOL_3_3_V:
+		return "3.3V";
+	case SD_VOL_3_0_V:
+		return "3.0V";
+	case SD_VOL_1_8_V:
+		return "1.8V";
+	case SD_VOL_1_2_V:
+		return "1.2V";
+	default:
+		return "Unknown";
+	}
+}
+
+const char *timing_type(enum sdhc_timing_mode timing)
+{
+	switch (timing) {
+	case SDHC_TIMING_LEGACY:
+		return "Legacy";
+	case SDHC_TIMING_HS:
+		return "High speed";
+	case SDHC_TIMING_SDR12:
+		return "SDR12";
+	case SDHC_TIMING_SDR25:
+		return "SDR25";
+	case SDHC_TIMING_SDR50:
+		return "SDR50";
+	case SDHC_TIMING_SDR104:
+		return "SDR104";
+	case SDHC_TIMING_DDR50:
+		return "DDR50";
+	case SDHC_TIMING_DDR52:
+		return "DDR52";
+	case SDHC_TIMING_HS200:
+		return "HS200";
+	case SDHC_TIMING_HS400:
+		return "HS400";
+	default:
+		return "Unknown";
+	}
+}
+
 static int sdhc_test_inst(const struct device *dev)
 {
 	const char *dev_name = dev->name;
@@ -63,13 +108,7 @@ static int sdhc_test_inst(const struct device *dev)
 	uint32_t blocks_1M = 2 * 1024;
 	uint32_t chunk_128K = 2 * 128;
 
-	card.bus_io.clock = SD_CLOCK_50MHZ;
-	card.bus_io.bus_mode = SDHC_BUSMODE_PUSHPULL;
-	card.bus_io.power_mode = SDHC_POWER_ON;
-	card.bus_io.bus_width = SDHC_BUS_WIDTH4BIT;
-	card.bus_io.timing = SDHC_TIMING_LEGACY;
-	card.bus_io.driver_type = SD_DRIVER_TYPE_B;
-	card.bus_io.signal_voltage = SD_VOL_3_3_V;
+	card.bus_width = SDHC_BUS_WIDTH4BIT;
 
 	printk("Testing %s\n", dev_name);
 
@@ -88,14 +127,15 @@ static int sdhc_test_inst(const struct device *dev)
 	}
 
 	printk("Card initialized\n");
-	printk("Card voltage: %d\n", card.card_voltage);
+	printk("Card voltage: %s\n", voltage_type(card.bus_io.signal_voltage));
 	printk("Card block size: %d\n", card.block_size);
-	printk("Card block count: %d\n", card.block_count);
-	printk("Card capacity: %u\n", (unsigned int)card.block_size * card.block_count);
-	printk("Card version: %d\n", card.sd_version);
-	printk("Card speed: %d\n", card.card_speed);
-	printk("Card type: %d\n", card.type);
-	printk("Card bus_width: %d\n", card.bus_width);
+	printk("Card block count: %dK\n", card.block_count / 1024);
+	printk("Card capacity: %uM\n",
+	       (unsigned int)card.block_size * card.block_count / 1024 / 1024);
+	printk("Card timing: %s\n", timing_type(card.bus_io.timing));
+	printk("Card driver type: %d\n", card.bus_io.driver_type);
+	printk("Card frequency: %dMHz\n", card.bus_io.clock / 1000000);
+	printk("Card bus_width: %d\n", card.bus_io.bus_width);
 
 	switch (card.type) {
 	case CARD_SDMMC:
