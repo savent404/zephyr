@@ -160,7 +160,12 @@ static int benchmark(struct sd_card *card, uint32_t start_block, uint32_t num_bl
 		     uint32_t block_chunk, read_blocks_t read_, write_blocks_t write_)
 {
 	uint64_t rd_acc = 0, wr_acc = 0;
-	uint8_t *data = malloc(block_chunk * 512);
+	uint8_t *data = malloc(512 * block_chunk);
+
+	if (!data) {
+		printk("Failed to allocate data buffer\n");
+		return -ENOMEM;
+	}
 
 	printk("Benchmark...\n");
 
@@ -185,8 +190,7 @@ static int benchmark(struct sd_card *card, uint32_t start_block, uint32_t num_bl
 	for (unsigned int chunk = 0; chunk * block_chunk < num_blocks; chunk++) {
 		uint32_t start = k_cycle_get_32();
 
-		if (sdmmc_write_blocks(card, data, start_block + chunk * block_chunk,
-				       block_chunk)) {
+		if (write_(card, data, start_block + chunk * block_chunk, block_chunk)) {
 			printk("Failed to write block\n");
 			goto err;
 		}

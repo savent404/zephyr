@@ -52,6 +52,26 @@ static const struct arm_mmu_region mmu_regions[] = {
 	MMU_REGION_FLAT_ENTRY("gic_cpu", DT_REG_ADDR_BY_IDX(DT_NODELABEL(gic), 1),
 			      DT_REG_SIZE_BY_IDX(DT_NODELABEL(gic), 1), M_DEVICE),
 
+#if DT_NODE_HAS_STATUS(DT_NODELABEL(gpio0), okay)
+	MMU_REGION_FLAT_ENTRY("gpio0", DT_REG_ADDR(DT_NODELABEL(gpio0)),
+			      DT_REG_SIZE(DT_NODELABEL(gpio0)), M_DEVICE),
+#endif
+
+#if DT_NODE_HAS_STATUS(DT_NODELABEL(gpio1), okay)
+	MMU_REGION_FLAT_ENTRY("gpio1", DT_REG_ADDR(DT_NODELABEL(gpio1)),
+			      DT_REG_SIZE(DT_NODELABEL(gpio1)), M_DEVICE),
+#endif
+
+#if DT_NODE_HAS_STATUS(DT_NODELABEL(gpio2), okay)
+	MMU_REGION_FLAT_ENTRY("gpio2", DT_REG_ADDR(DT_NODELABEL(gpio2)),
+			      DT_REG_SIZE(DT_NODELABEL(gpio2)), M_DEVICE),
+#endif
+
+#if DT_NODE_HAS_STATUS(DT_NODELABEL(gpio3), okay)
+	MMU_REGION_FLAT_ENTRY("gpio3", DT_REG_ADDR(DT_NODELABEL(gpio3)),
+			      DT_REG_SIZE(DT_NODELABEL(gpio3)), M_DEVICE),
+#endif
+
 #if DT_NODE_HAS_STATUS(DT_NODELABEL(arch_timer), okay)
 	MMU_REGION_FLAT_ENTRY("arch_timer", DT_REG_ADDR(DT_NODELABEL(arch_timer)),
 			      DT_REG_SIZE(DT_NODELABEL(arch_timer)), M_DEVICE),

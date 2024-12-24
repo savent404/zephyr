@@ -22,6 +22,7 @@
 LOG_MODULE_REGISTER(sdhc_dw, CONFIG_SDHC_LOG_LEVEL);
 
 struct sdhc_dw_data {
+	DEVICE_MMIO_RAM;
 	uint32_t prev_opcode;
 	uint32_t host_freq;
 };
@@ -51,8 +52,7 @@ static uint32_t _res_opcode_convert(bool is_spi_mode, uint32_t z_opcode, struct 
 	return z_opcode;
 }
 
-static uint32_t _dw_cmd_prepare(struct sdhc_command *_cmd,
-								struct sdhc_dw_data *dev_data)
+static uint32_t _dw_cmd_prepare(struct sdhc_command *_cmd, struct sdhc_dw_data *dev_data)
 {
 	bool is_spi_cmd = _cmd->response_type & SDHC_SPI_RESPONSE_TYPE_MASK;
 	uint32_t cmd = _res_opcode_convert(is_spi_cmd, _cmd->opcode, dev_data);
@@ -527,6 +527,8 @@ static int sdhc_dw_init(const struct device *dev)
 	int ret;
 	uint32_t rate;
 
+	DEVICE_MMIO_MAP(dev, K_MEM_CACHE_NONE);
+
 	ret = clock_control_get_rate(config->clk_dev, config->clk_subsys, &rate);
 	if (ret) {
 		LOG_ERR("Failed to get clock rate");
@@ -544,21 +546,21 @@ static int sdhc_dw_init(const struct device *dev)
 		LOG_ERR("CD GPIO not available");
 		return -EINVAL;
 	}
-
 	return 0;
 }
 
 #define SDHC_DW_INIT(n)                                                                            \
-	const struct sdhc_dw_config sdhc_dw_config_##n = {                                         \
-		.port = DT_INST_REG_ADDR(n),                                                       \
-		.clk_dev = DEVICE_DT_GET(DT_INST_CLOCKS_CTLR(n)),                                  \
+	static const struct sdhc_dw_config sdhc_dw_config_##n = {                                  \
+		COND_CODE_1(DT_INST_PROP_OR(n, io_mapped, 0), (.port = DT_INST_REG_ADDR(n), ),     \
+			    (DEVICE_MMIO_ROM_INIT(DT_DRV_INST(n)), ))                              \
+			.clk_dev = DEVICE_DT_GET(DT_INST_CLOCKS_CTLR(n)),                          \
 		.clk_subsys = (clock_control_subsys_t)DT_INST_PHA(n, clocks, clkid),               \
 		.data_addr = DT_INST_PROP(n, data_addr),                                           \
 		.fifo_depth = DT_INST_PROP(n, fifo_depth),                                         \
 		.non_removable = DT_INST_PROP(n, non_removable),                                   \
 		.cd_gpio = GPIO_DT_SPEC_GET_BY_IDX_OR(DT_DRV_INST(n), cd_gpios, 0, {0}),           \
 	};                                                                                         \
-	struct sdhc_dw_data sdhc_dw_data_##n = {};                                                 \
+	static struct sdhc_dw_data sdhc_dw_data_##n = {};                                          \
 	DEVICE_DT_INST_DEFINE(n, sdhc_dw_init, NULL, &sdhc_dw_data_##n, &sdhc_dw_config_##n,       \
 			      POST_KERNEL, CONFIG_SDHC_INIT_PRIORITY, &sdhc_dw_api);
 
