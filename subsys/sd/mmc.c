@@ -41,7 +41,7 @@
 #define MMC_SWITCH_HS200_TIMING_ARG                                                                \
 	(0xFC000000 & (0U << 26)) + (0x03000000 & (0b11 << 24)) + (0x00FF0000 & (185U << 16)) +    \
 		(0x0000FF00 & (2U << 8)) + (0x000000F7 & (0U << 3)) + (0x00000000 & (3U << 0))
-#define MMC_RCA_ARG	(CONFIG_MMC_RCA << 16U)
+#define MMC_RCA_ARG     (CONFIG_MMC_RCA << 16U)
 #define MMC_REL_ADR_ARG (card->relative_addr << 16U)
 #define MMC_SWITCH_PWR_CLASS_ARG                                                                   \
 	(0xFC000000 & (0U << 26)) + (0x03000000 & (0b11 << 24)) + (0x00FF0000 & (187U << 16)) +    \
@@ -597,7 +597,9 @@ static int mmc_read_ext_csd(struct sd_card *card, struct mmc_ext_csd *card_ext_c
 	return 0;
 }
 
-static inline void mmc_decode_ext_csd(struct mmc_ext_csd *ext, uint8_t *raw)
+__attribute__((optimize("O0"))) /* FIXME: Optimize this function will cause a data abort */
+static inline void
+mmc_decode_ext_csd(struct mmc_ext_csd *ext, uint8_t *raw)
 {
 	ext->sec_count =
 		(raw[215U] << 24U) + (raw[214U] << 16U) + (raw[213U] << 8U) + (raw[212U] << 0U);
