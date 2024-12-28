@@ -15,3 +15,6 @@ config SDHC_DW_DMA
 	depends on SDHC_DW
 	help
 	  Enable DMA support for snps,dw-mshc.
+
+config SDHC_BUFFER_ALIGNMENT
+	default 4
