@@ -3,39 +3,15 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-/ {
-	fstab {
-		compatible = "zephyr,fstab";
-		lfs1: lfs1 {
-			compatible = "zephyr,fstab,littlefs";
-			read-size = <256>;
-			prog-size = <256>;
-			cache-size = <256>;
-			lookahead-size = <256>;
-			partition = <&littlefs_dev>;
-			mount-point = "/lfs1";
-			block-cycles = <1024>;
-		};
-	};
-};
+#include <common/mem.h>
 
-&qspi0_flash {
+&mmc0 {
 	status = "okay";
+	non-removable;
 
-	partitions {
-		compatible = "fixed-partitions";
-		#address-cells = <1>;
-		#size-cells = <1>;
-
-		littlefs_dev: partition@0 {
-			label = "storage";
-			reg = <0xff0000 0xf000>;
-		};
-	};
-};
-
-/ {
-	aliases {
-		flash = &qspi0_flash;
+	usr {
+		compatible = "zephyr,mmc-disk";
+		status = "okay";
+		bus-width = <4>;
 	};
 };
