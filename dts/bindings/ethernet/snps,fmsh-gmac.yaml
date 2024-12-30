@@ -1,0 +1,24 @@
+description: FMQL GMAC Ethernet controller
+
+compatible: "snps,fmsh-gmac"
+
+include: [ethernet-controller.yaml, pinctrl-device.yaml]
+
+properties:
+  reg:
+    required: true
+
+  interrupts:
+    required: true
+
+  local-mac-address:
+    type: uint8-array
+    required: true
+
+  clock-frequency:
+    type: int
+    required: true
+
+  phy-handle:
+    type: phandle
+    required: true

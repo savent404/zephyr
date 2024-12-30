@@ -52,6 +52,16 @@ static const struct arm_mmu_region mmu_regions[] = {
 	MMU_REGION_FLAT_ENTRY("gic_cpu", DT_REG_ADDR_BY_IDX(DT_NODELABEL(gic), 1),
 			      DT_REG_SIZE_BY_IDX(DT_NODELABEL(gic), 1), M_DEVICE),
 
+#if DT_NODE_HAS_STATUS(DT_NODELABEL(slcr), okay)
+	MMU_REGION_FLAT_ENTRY("slcr", DT_REG_ADDR_BY_IDX(DT_NODELABEL(slcr), 0),
+			      DT_REG_SIZE_BY_IDX(DT_NODELABEL(slcr), 0), M_DEVICE),
+#endif
+
+#if DT_NODE_HAS_STATUS(DT_NODELABEL(uart1), okay)
+	MMU_REGION_FLAT_ENTRY("uart1", DT_REG_ADDR_BY_IDX(DT_NODELABEL(uart1), 0),
+			      DT_REG_SIZE_BY_IDX(DT_NODELABEL(uart1), 0), M_DEVICE),
+#endif
+
 #if DT_NODE_HAS_STATUS(DT_NODELABEL(gpio0), okay)
 	MMU_REGION_FLAT_ENTRY("gpio0", DT_REG_ADDR(DT_NODELABEL(gpio0)),
 			      DT_REG_SIZE(DT_NODELABEL(gpio0)), M_DEVICE),
@@ -72,11 +82,18 @@ static const struct arm_mmu_region mmu_regions[] = {
 			      DT_REG_SIZE(DT_NODELABEL(gpio3)), M_DEVICE),
 #endif
 
+#if DT_NODE_HAS_STATUS(DT_NODELABEL(ethernet0), okay)
+	MMU_REGION_FLAT_ENTRY("ethernet0", DT_REG_ADDR_BY_IDX(DT_NODELABEL(ethernet0), 0),
+			      DT_REG_SIZE_BY_IDX(DT_NODELABEL(ethernet0), 0), M_DEVICE),
+#endif
+
 #if DT_NODE_HAS_STATUS(DT_NODELABEL(arch_timer), okay)
 	MMU_REGION_FLAT_ENTRY("arch_timer", DT_REG_ADDR(DT_NODELABEL(arch_timer)),
 			      DT_REG_SIZE(DT_NODELABEL(arch_timer)), M_DEVICE),
 #endif
 
+	MMU_REGION_FLAT_ENTRY("ocm_data", DT_REG_ADDR(DT_NODELABEL(ocm_low)),
+			      DT_REG_SIZE(DT_NODELABEL(ocm_low)), M_DEVICE),
 };
 
 const struct arm_mmu_config mmu_config = {

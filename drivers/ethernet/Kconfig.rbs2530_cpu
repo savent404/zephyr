@@ -1,0 +1,19 @@
+# Copyright (c) 2024 SYSTech Co.
+# SPDX-License-Identifier: Apache-2.0
+menuconfig ETH_FMQL
+	bool "FMQL Ethernet driver"
+	depends on NET_L2_ETHERNET
+
+if ETH_FMQL
+	config ETH_FMQL_RX_BUFFER_SIZE
+		int "Size of RX buffer"
+		default 1524
+
+	config ETH_FMQL_TX_BUFFER_SIZE
+		int "Size of TX buffer"
+		default 1524
+
+	config ETH_FMQL_USE_RMII
+		bool "Use RMII interface"
+		default y
+endif

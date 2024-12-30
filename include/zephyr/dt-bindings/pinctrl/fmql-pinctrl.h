@@ -35,6 +35,8 @@
 #define PINMUX_SPI        0x50
 #define PINMUX_TTC        0x60
 #define PINMUX_UART       0x70
+#define PINMUX_MDIO0      0x80
+#define PINMUX_MDIO1      0xa0
 
 #define MIO  0
 #define EMIO 1

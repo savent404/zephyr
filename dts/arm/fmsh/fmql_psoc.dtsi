@@ -253,6 +253,22 @@
 			status = "disabled";
 		};
 
+		phy0: ethernet-phy {
+			compatible = "snps,fmql-ethernet-phy";
+			status = "okay";
+		};
+
+		ethernet0: ethernet@e0047000 {
+			compatible = "snps,fmsh-gmac";
+			reg = <0xe0047000 0x2000>;
+			interrupts = <GIC_SPI 19 IRQ_TYPE_LEVEL IRQ_DEFAULT_PRIORITY>;
+			interrupt-names = "irq_0";
+			clock-frequency = <25000000>;
+			status = "okay";
+			local-mac-address = [00 01 02 03 04 05];
+			phy-handle = <&phy0>;
+
+		};
 	};
 
 	slcr: slcr@e0026000 {
