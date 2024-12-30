@@ -55,4 +55,12 @@
 		pinmux = <FMQL_PINMUX(MIO, 51, PINMUX_I2C)>;
 		io_type = <IO_TYPE_LVCMOS18>;
 	};
+	/omit-if-no-ref/ mdio0_clk_mio_52: mdio0_clk_mio_52 {
+		pinmux = <FMQL_PINMUX(MIO, 52, PINMUX_MDIO0)>;
+		io_type = <IO_TYPE_LVCMOS18>;
+	};
+	/omit-if-no-ref/ mdio0_data_mio_53: mdio0_data_mio_53 {
+		pinmux = <FMQL_PINMUX(MIO, 53, PINMUX_MDIO0)>;
+		io_type = <IO_TYPE_LVCMOS18>;
+	};
 };

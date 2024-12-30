@@ -67,3 +67,8 @@
 	flat-page-count = <65536>;
 	flat-page-size = <256>;
 };
+
+&ethernet0 {
+	pinctrl-0 = <&mdio0_clk_mio_52>, <&mdio0_data_mio_53>;
+	pinctrl-names = "default";
+};

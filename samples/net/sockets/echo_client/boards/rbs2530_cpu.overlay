@@ -1,18 +1,4 @@
-&pinctrl {
-	/omit-if-no-ref/ mdio0_clk_mio_52: mdio0_clk_mio_52 {
-		pinmux = <FMQL_PINMUX(MIO, 52, PINMUX_MDIO0)>;
-		io_type = <IO_TYPE_LVCMOS18>;
-	};
-
-	/omit-if-no-ref/ mdio0_data_mio_53: mdio0_data_mio_53 {
-		pinmux = <FMQL_PINMUX(MIO, 53, PINMUX_MDIO0)>;
-		io_type = <IO_TYPE_LVCMOS18>;
-	};
-};
-
 &ethernet0 {
 	status = "okay";
 	local-mac-address = [00 80 E1 00 00 00];
-	pinctrl-0 = <&mdio0_clk_mio_52>, <&mdio0_data_mio_53>;
-	pinctrl-names = "default";
 };
