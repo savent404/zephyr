@@ -5,8 +5,7 @@
 #include "fmsh_phy.h"
 #include "fmsh_mdio.h"
 
-/* 第一片GMII_to_RGMII IP核的MDIO地址:0x1,第二片：0x9 */
-#define XILINX_GMII2RGMII_MDIO_ADDR1 0x1
+#define XILINX_GMII2RGMII_MDIO_ADDR1 0x8
 #define XILINX_GMII2RGMII_MDIO_ADDR2 0x9
 #define XILINX_GMII2RGMII_CTRL_REG   0x10
 #define XILINX_GMII2RGMII_SPEED_1000 0x40

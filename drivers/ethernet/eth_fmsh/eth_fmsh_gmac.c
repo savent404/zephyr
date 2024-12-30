@@ -38,7 +38,7 @@ FGmacPs_PhyConfig_T s_GMAC_PhyCfg = {
 	.phy_device = PHY_YT8521,
 	.speed = FPAR_GMACPS_0_SPEED,
 	.auto_detect_ad_en = 1,
-	.mdio_address = 0,
+	.mdio_address = 3,
 	.auto_nag_en = 1,
 	.interface = FPAR_GMACPS_0_INTERFACE,
 };
