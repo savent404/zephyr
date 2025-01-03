@@ -345,6 +345,15 @@ config NET_SOCKETS_CAN
 	help
 	  The value depends on your network needs.
 
+config NET_SOCKETS_CIF
+	bool "Socket CIF support [EXPERIMENTAL]"
+	select NET_CONNECTION_SOCKETS
+	select EXPERIMENTAL
+	select LDP
+	help
+	  Enable support for CIF sockets. CIF is a simple protocol for
+	  custom back plane bus
+
 config NET_SOCKETS_CAN_RECEIVERS
 	int "How many simultaneous SocketCAN receivers are allowed"
 	default 1
@@ -442,3 +451,5 @@ config NET_SOCKETS_OBJ_CORE
 	  to show the socket information.
 
 endif # NET_SOCKETS
+
+source "subsys/net/lib/sockets/ldp/Kconfig"

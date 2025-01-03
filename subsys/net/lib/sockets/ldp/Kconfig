@@ -1,0 +1,14 @@
+# LDP (low data protocol for custom back-plane bus) support
+
+# Copyright (c) 2025 SYSTech Co.
+# SPDX-License-Identifier: Apache-2.0
+#
+#
+config LDP
+	bool "LDP support"
+	default n
+	select CPP
+	select REQUIRES_FULL_LIBCPP
+	help
+	  This option enables LDP support
+	  and is the basis for higher level protocols (e.g. LDP protocols).

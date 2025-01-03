@@ -27,6 +27,7 @@ LOG_MODULE_REGISTER(net_ctx, CONFIG_NET_CONTEXT_LOG_LEVEL);
 #include <zephyr/net/net_offload.h>
 #include <zephyr/net/ethernet.h>
 #include <zephyr/net/socketcan.h>
+#include <zephyr/net/socketcif.h>
 #include <zephyr/net/ieee802154.h>
 
 #include "connection.h"
@@ -435,7 +436,20 @@ static int net_context_check(sa_family_t family, enum net_sock_type type,
 			return -EPROTOTYPE;
 		}
 		break;
-
+	case AF_CIF:
+		if (!IS_ENABLED(CONFIG_NET_SOCKETS_CIF)) {
+			NET_DBG("AF_CIF disabled");
+			return -EPFNOSUPPORT;
+		}
+		if (type != SOCK_RAW) {
+			NET_DBG("AF_CIF only supports RAW socket type.");
+			return -EPROTOTYPE;
+		}
+		if (proto != CIF_RAW_MASTER && proto != CIF_RAW_SLAVE) {
+			NET_DBG("AF_CIF only supports CIF_RAW_MASTER/CIF_RAW_SLAVE protocol.");
+			return -EPROTOTYPE;
+		}
+		break;
 	default:
 		NET_DBG("Unknown address family %d", family);
 		return -EAFNOSUPPORT;
