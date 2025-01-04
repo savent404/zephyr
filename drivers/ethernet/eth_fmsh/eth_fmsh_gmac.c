@@ -445,7 +445,6 @@ static void eth_fmsh_iface_init(struct net_if *iface)
 	const struct device *dev = net_if_get_device(iface);
 	struct eth_fmsh_data *data = dev->data;
 
-	data->gmac_inst = &s_GMAC_Instance;
 	data->iface = iface;
 
 	ethernet_init(data->iface);
@@ -465,8 +464,9 @@ static void eth_fmsh_iface_init(struct net_if *iface)
 			K_PRIO_COOP(FMSH_ETH_RX_THREAD_PRIORITY), 0, K_SECONDS(2));
 	k_thread_name_set(&data->rx_thread, "eth_fmsh_rx");
 
-	k_thread_create(&data->phy_update_thread, data->phy_update_thread_stack, 2048,
-			eth_fmsh_phy_update, (void *)dev, NULL, NULL, K_IDLE_PRIO, 0, K_SECONDS(1));
+	k_thread_create(&data->phy_update_thread, data->phy_update_thread_stack,
+			FMSH_ETH_PYH_STACK_SIZE, eth_fmsh_phy_update, (void *)dev, NULL, NULL,
+			K_IDLE_PRIO, 0, K_SECONDS(1));
 	k_thread_name_set(&data->phy_update_thread, "eth_fmsh_phy_update");
 
 	FMSH_DEBUG("Interface init done.");
@@ -545,14 +545,13 @@ void FGmacPs_GmacTxCallback(FGmacPs_Instance_T *pGmac, int32_t ecode)
 static int eth_fmsh_init(const struct device *dev)
 {
 	struct eth_fmsh_data *data = dev->data;
-
-	/* const struct eth_fmsh_config *cfg = dev->config; */
 	int ret;
 
 	/* 初始化信号量 */
 	k_sem_init(&data->tx_sem, 0, 1);
 	k_sem_init(&data->rx_sem, 0, 1);
 
+	data->gmac_inst = &s_GMAC_Instance;
 	data->gmac_inst->pFrmBuffer = pack_buf;
 
 	FGmac_Ps_phy_Init(data->gmac_inst->phy_cfg);
@@ -596,8 +595,6 @@ static int eth_fmsh_init(const struct device *dev)
 		    0);
 	irq_enable(DT_INST_IRQN(0));
 
-	ethernet_init(data->iface);
-	net_eth_carrier_on(data->iface);
 	FMSH_DEBUG("eth Init done");
 
 	return 0;
