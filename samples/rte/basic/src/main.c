@@ -25,7 +25,7 @@ int main(void)
 	int32_t ret;
 	uint32_t sleep_ms = 10;
 
-	printf("Board name is %s\n", CONFIG_BOARD_TARGET);
+	LOG_INF("Board name is %s\n", CONFIG_BOARD_TARGET);
 	if (fs_default_mount()) {
 		return -1;
 	}
@@ -46,27 +46,33 @@ FS_LITTLEFS_DECLARE_CUSTOM_CONFIG(lfs_data, CONFIG_SDHC_BUFFER_ALIGNMENT, SDMMC_
 				  SDMMC_DEFAULT_BLOCK_SIZE, SDMMC_DEFAULT_BLOCK_SIZE,
 				  2 * SDMMC_DEFAULT_BLOCK_SIZE);
 
+#if defined(CONFIG_DISK_DRIVER_SDMMC)
+#define DISK_NAME CONFIG_SDMMC_VOLUME_NAME
+#elif defined(CONFIG_DISK_DRIVER_MMC)
+#define DISK_NAME CONFIG_MMC_VOLUME_NAME
+#else
+#error "No disk device defined, is your board supported?"
+#endif
+
 static struct fs_mount_t littlefs_mnt = {
 	.type = FS_LITTLEFS,
 	.fs_data = &lfs_data,
 	.flags = FS_MOUNT_FLAG_USE_DISK_ACCESS,
-	.storage_dev = "MMC",
+	.storage_dev = DISK_NAME,
 };
 static struct fs_mount_t *lfs_mpt = &littlefs_mnt;
 
 static int fs_default_mount(void)
 {
-
-	return 0;
-	/* FIXME: This is a workaround to avoid the issue that the mount point is not created */
 	int32_t rc;
 
 	lfs_mpt->mnt_point = "/lfs";
 	rc = fs_mount(lfs_mpt);
 	if (rc < 0) {
-		printk("FAIL: mount id %" PRIuPTR " at %s: %d\n", (uintptr_t)(lfs_mpt->storage_dev),
-		       lfs_mpt->mnt_point, rc);
+		LOG_ERR("FAIL: mount id %" PRIuPTR " at %s: %d\n",
+			(uintptr_t)(lfs_mpt->storage_dev), lfs_mpt->mnt_point, rc);
 		return rc;
 	}
-	printk("%s mount: %d\n", lfs_mpt->mnt_point, rc);
+	LOG_INF("%s mount: %d\n", lfs_mpt->mnt_point, rc);
+	return 0;
 }
