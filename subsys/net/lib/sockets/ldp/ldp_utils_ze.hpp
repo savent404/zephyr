@@ -77,7 +77,7 @@ struct ldp_wq: public work_queue_if {
 		void (*fn)(void *, void *);
 		void *arg1;
 		void *arg2;
-        int id;
+		int id;
 		uint32_t cycle;
 		uint32_t left;
 	};
@@ -98,4 +98,4 @@ struct ldp_wq: public work_queue_if {
 	static inline const uint32_t enclosed_cycle = 1000; /* 1ms */
 };
 
-} // namespace systech::ldp::zephyr
+} // namespace systech::cif::zephyr

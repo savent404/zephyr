@@ -566,30 +566,30 @@ static inline int cif_ldp_error_to_errno(int ldp_err)
 {
 	using ldp_error = ldp_basic::ldp_error;
 	switch (-ldp_err) {
-		case ldp_error::LDP_ERR_OK:
-			return 0;
-		case ldp_error::LDP_ERR_T_ERROR:
-			return -EIO;
-		case ldp_error::LDP_ERR_P_ERROR:
-			return -ECONNREFUSED;
-		case ldp_error::LDP_ERR_ATIMEOUT:
-			return -ETIMEDOUT;
-		case ldp_error::LDP_ERR_INVALID:
-			return -EINVAL;
-		case ldp_error::LDP_ERR_INVALID_ASYNC_PACK:
-			return -ENOMSG;
-		case ldp_error::LDP_ERR_AGAIN:
-			return -EAGAIN;
-		case ldp_error::LDP_ERR_CONN_NOT_FOUND:
-			return -ENOENT;
-		case ldp_error::LDP_ERR_NOMEM:
-			return -ENOMEM;
-		case ldp_error::LDP_ERR_RX_BUF_TOO_SMALL:
-			return -ENOBUFS;
-		case ldp_error::LDP_ERR_CONN_EXIST:
-			return -EEXIST;
-		default:
-			return -EOVERFLOW;
+	case ldp_error::LDP_ERR_OK:
+		return 0;
+	case ldp_error::LDP_ERR_T_ERROR:
+		return -EIO;
+	case ldp_error::LDP_ERR_P_ERROR:
+		return -ECONNREFUSED;
+	case ldp_error::LDP_ERR_ATIMEOUT:
+		return -ETIMEDOUT;
+	case ldp_error::LDP_ERR_INVALID:
+		return -EINVAL;
+	case ldp_error::LDP_ERR_INVALID_ASYNC_PACK:
+		return -ENOMSG;
+	case ldp_error::LDP_ERR_AGAIN:
+		return -EAGAIN;
+	case ldp_error::LDP_ERR_CONN_NOT_FOUND:
+		return -ENOENT;
+	case ldp_error::LDP_ERR_NOMEM:
+		return -ENOMEM;
+	case ldp_error::LDP_ERR_RX_BUF_TOO_SMALL:
+		return -ENOBUFS;
+	case ldp_error::LDP_ERR_CONN_EXIST:
+		return -EEXIST;
+	default:
+		return -EOVERFLOW;
 	}
 	return 0;
 }
