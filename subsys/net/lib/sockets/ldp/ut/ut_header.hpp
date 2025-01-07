@@ -235,7 +235,7 @@ public:
 
     switch (io_mode_[dst_sid]) {
     case dead:
-      status_[sid_] |= (MCB_ERR_TIMEOUT);
+      status_[sid_] |= (MCB_ERR_T_ERR);
       break;
     case fpga_io:
     case ps_io:

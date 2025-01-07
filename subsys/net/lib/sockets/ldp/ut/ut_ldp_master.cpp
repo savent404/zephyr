@@ -252,8 +252,8 @@ TEST_F(test_ldp_master, sync_rx_tx) {
   EXPECT_CALL(mcb, has_rx(0x40)).Times(1).WillOnce(Return(false));
   EXPECT_CALL(mcb, get_status())
       .Times(1)
-      .WillOnce(Return(mcb_if::MCB_ERR_TIMEOUT));
-  EXPECT_CALL(mcb, clr_status(mcb_if::MCB_ERR_TIMEOUT)).Times(1);
+      .WillOnce(Return(mcb_if::MCB_ERR_T_ERR));
+  EXPECT_CALL(mcb, clr_status(mcb_if::MCB_ERR_T_ERR)).Times(1);
   work_queue.sync();
 
   /* Tx buffer is empty, so no data is send, and no data is received */
@@ -272,9 +272,9 @@ TEST_F(test_ldp_master, sync_rx_tx) {
   EXPECT_CALL(mcb, has_rx(0x40)).Times(1).WillOnce(Return(false));
   EXPECT_CALL(mcb, get_status())
       .Times(1)
-      .WillOnce(Return(mcb_if::MCB_ERR_TIMEOUT));
+      .WillOnce(Return(mcb_if::MCB_ERR_T_ERR));
   EXPECT_CALL(mcb, clr_rx(0x40)).Times(0);
-  EXPECT_CALL(mcb, clr_status(mcb_if::MCB_ERR_TIMEOUT)).Times(1);
+  EXPECT_CALL(mcb, clr_status(mcb_if::MCB_ERR_T_ERR)).Times(1);
   work_queue.sync();
 
   ret = m.recv(cfg_conn, rx_buf, sizeof(rx_buf));
@@ -398,9 +398,9 @@ TEST_F(test_ldp_master, async_rx_tx) {
   EXPECT_CALL(mcb, has_rx(0x10)).Times(1).WillOnce(Return(false));
   EXPECT_CALL(mcb, get_status())
       .Times(1)
-      .WillOnce(Return(mcb_if::MCB_ERR_TIMEOUT));
+      .WillOnce(Return(mcb_if::MCB_ERR_T_ERR));
   EXPECT_CALL(mcb, clr_rx(0x10)).Times(0);
-  EXPECT_CALL(mcb, clr_status(mcb_if::MCB_ERR_TIMEOUT)).Times(1);
+  EXPECT_CALL(mcb, clr_status(mcb_if::MCB_ERR_T_ERR)).Times(1);
   work_queue.sync();
 
   /* Tx buffer is empty, so no data is send, and no data is received */
@@ -420,9 +420,9 @@ TEST_F(test_ldp_master, async_rx_tx) {
   EXPECT_CALL(mcb, has_rx(0x10)).Times(1).WillOnce(Return(false));
   EXPECT_CALL(mcb, get_status())
       .Times(1)
-      .WillOnce(Return(mcb_if::MCB_ERR_TIMEOUT));
+      .WillOnce(Return(mcb_if::MCB_ERR_T_ERR));
   EXPECT_CALL(mcb, clr_rx(0x10)).Times(0);
-  EXPECT_CALL(mcb, clr_status(mcb_if::MCB_ERR_TIMEOUT)).Times(1);
+  EXPECT_CALL(mcb, clr_status(mcb_if::MCB_ERR_T_ERR)).Times(1);
   work_queue.sync();
 
   ret = m.recv(cfg_conn, rx_buf, sizeof(rx_buf));
@@ -489,9 +489,9 @@ TEST_F(test_ldp_master, async_with_preempt) {
   EXPECT_CALL(mcb, has_rx(0x10)).Times(1).WillOnce(Return(false));
   EXPECT_CALL(mcb, get_status())
       .Times(1)
-      .WillOnce(Return(mcb_if::MCB_ERR_TIMEOUT));
+      .WillOnce(Return(mcb_if::MCB_ERR_T_ERR));
   EXPECT_CALL(mcb, clr_rx(0x10)).Times(0);
-  EXPECT_CALL(mcb, clr_status(mcb_if::MCB_ERR_TIMEOUT)).Times(1);
+  EXPECT_CALL(mcb, clr_status(mcb_if::MCB_ERR_T_ERR)).Times(1);
   work_queue.sync();
 
   /* Tx buffer is empty, so no data is send, and no data is received */
@@ -518,9 +518,9 @@ TEST_F(test_ldp_master, async_with_preempt) {
   EXPECT_CALL(mcb, has_rx(0x10)).Times(1).WillOnce(Return(false));
   EXPECT_CALL(mcb, get_status())
       .Times(1)
-      .WillOnce(Return(mcb_if::MCB_ERR_TIMEOUT));
+      .WillOnce(Return(mcb_if::MCB_ERR_T_ERR));
   EXPECT_CALL(mcb, clr_rx(0x10)).Times(0);
-  EXPECT_CALL(mcb, clr_status(mcb_if::MCB_ERR_TIMEOUT)).Times(1);
+  EXPECT_CALL(mcb, clr_status(mcb_if::MCB_ERR_T_ERR)).Times(1);
   work_queue.sync();
 
   ret = m.recv(cfg_conn, rx_buf, sizeof(rx_buf));

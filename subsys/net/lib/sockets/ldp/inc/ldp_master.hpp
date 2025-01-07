@@ -452,7 +452,7 @@ template <typename T_mempool, typename T_cache> struct ldp_master: public ldp_ba
 			do {
 				status = mcb_->get_status();
 				data_ready = mcb_->has_rx(ci->port);
-				data_timeout = status & mcb_if::MCB_ERR_TIMEOUT;
+				data_timeout = status & mcb_if::MCB_ERR_T_ERR;
 			} while (!data_ready && !data_timeout);
 
 			/* handle received frame */
@@ -541,7 +541,7 @@ template <typename T_mempool, typename T_cache> struct ldp_master: public ldp_ba
 			do {
 				status = mcb_->get_status();
 				data_ready = mcb_->has_rx(ci->port);
-				data_timeout = status & mcb_if::MCB_ERR_TIMEOUT;
+				data_timeout = status & mcb_if::MCB_ERR_T_ERR;
 			} while (!data_ready && !data_timeout);
 
 			p_error = status & mcb_if::MCB_ERR_P_ERR;

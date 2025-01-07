@@ -27,7 +27,7 @@ struct mcb_if {
   static const uint32_t MCB_MAX_FRAME_LEN = 0x800;
   enum mcb_error {
     MCB_ERR_OK = 0,
-    MCB_ERR_TIMEOUT = 0x01,   // Timeout
+    MCB_ERR_T_ERR = 0x01,   // Timeout
     MCB_ERR_R_ERR = 0x02,     // Redundancy error(lost one of the frames)
     MCB_ERR_I_ERR = 0x04,     // Invalid frame
     MCB_ERR_MUL_FRAME = 0x08, // Multiple frames received

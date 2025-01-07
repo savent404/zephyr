@@ -57,7 +57,7 @@ struct mcb_dummy: public mcb_if {
 	virtual uint32_t get_status()
 	{
 		/* always return T_ERROR and R_ERROR(for test) */
-		return MCB_ERR_TIMEOUT | MCB_ERR_R_ERR;
+		return MCB_ERR_T_ERR | MCB_ERR_R_ERR;
 	}
 	virtual void clr_status(uint32_t bits)
 	{
