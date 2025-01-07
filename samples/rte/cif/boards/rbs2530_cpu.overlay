@@ -1,0 +1,14 @@
+&mcb0 {
+	status = "okay";
+};
+
+&mcb1 {
+	status = "okay";
+};
+
+/ {
+	aliases {
+		mcbl= &mcb0;
+		mcbh= &mcb1;
+	};
+};

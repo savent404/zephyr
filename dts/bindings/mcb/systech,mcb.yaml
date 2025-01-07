@@ -1,0 +1,16 @@
+# Copyright (c) 2025 SYSTech Co.
+# SPDX-License-Identifier: Apache-2.0
+
+description: SYSTech MCB Driver node
+
+compatible: "systech,mcb"
+
+include: base.yaml
+
+properties:
+  bandwidth:
+    type: int
+    description: |
+      The bandwidth of the MCB device in bps.
+      The bandwidth is the maximum data rate that the MCB device can handle.
+    default: 10000000

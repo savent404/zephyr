@@ -1,0 +1,9 @@
+# Copyright (c) 2025 SYSTech Co.
+# SPDX-License-Identifier: Apache-2.0
+
+config MCB_SYSTECH
+		bool "Systech MCB driver"
+		default y
+		depends on DT_HAS_SYSTECH_MCB_ENABLED
+		help
+			Enable Systech MCB driver.

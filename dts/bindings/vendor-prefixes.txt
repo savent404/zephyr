@@ -651,6 +651,7 @@ supermicro	Super Micro Computer, Inc.
 swir	Sierra Wireless
 syna	Synaptics Inc.
 synology	Synology, Inc.
+systech	SYSTech Co.
 tbs	TBS Technologies
 tbs-biometrics	Touchless Biometric Systems AG
 tcg	Trusted Computing Group

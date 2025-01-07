@@ -29,7 +29,7 @@ using namespace systech::cif;
 
 struct cif_master_data {
 	using ldp_wq = zephyr::ldp_wq;
-	using ldp_mcb_impl = zephyr::mcb_dummy;
+	using ldp_mcb_impl = zephyr::ldp_mcb_impl;
 	ldp_wq wq;
 	ldp_mcb_impl mcb[CIF_BUS_MAX];
 	bool occupied[CIF_BUS_MAX];
@@ -82,8 +82,11 @@ struct cif_sock_data {
 using conn_idx = cif_sock_data::conn_idx;
 using conn_t = cif_sock_data::conn_t;
 
+#define MCB_DEV_LOW  DEVICE_DT_GET(DT_ALIAS(mcbl))
+#define MCB_DEV_HIGH DEVICE_DT_GET(DT_ALIAS(mcbh))
+
 static cif_master_data cif_data = {
-	.mcb = {zephyr::ldp_mcb_impl{nullptr}, zephyr::ldp_mcb_impl{nullptr}},
+	.mcb = {zephyr::ldp_mcb_impl{MCB_DEV_LOW}, zephyr::ldp_mcb_impl{MCB_DEV_HIGH}},
 	.occupied = {0},
 };
 

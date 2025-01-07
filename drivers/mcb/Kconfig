@@ -1,0 +1,25 @@
+# MCB configuration options
+# Copyright (c) 2025 SYSTech Co.
+# SPDX-License-Identifier: Apache-2.0
+
+menuconfig MCB
+		bool "MCB: Low-level backplane driver"
+		default n
+		help
+			Enable MCB Driver Configuration
+
+if MCB
+
+source "drivers/mcb/Kconfig.systech"
+
+config MCB_INIT_PRIORITY
+		int "Init priority"
+		default 60
+		help
+			MCB device driver initialization priority.
+
+module = MCB
+module-str = mcb
+source "subsys/logging/Kconfig.template.log_config"
+
+endif # MCB
