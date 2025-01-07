@@ -83,8 +83,7 @@ struct mock_work_queue_manual : public systech::cif::work_queue_if {
 };
 struct mock_mcb : public systech::cif::mcb_if {
   mock_mcb(uint8_t sid) : sid_(sid) {}
-  MOCK_METHOD(void, reset, (), (override));
-  MOCK_METHOD(void, switch_role, (uint8_t role), (override));
+  MOCK_METHOD(void, reset, (uint8_t), (override));
   MOCK_METHOD(void, set_poll_time, (uint16_t timeout), (override));
   MOCK_METHOD(void, config_port,
               (uint8_t port, bool enable, bool w_allow, uint16_t max_rx),
@@ -161,7 +160,7 @@ public:
 
   virtual uint8_t get_sid() override { return sid_; }
 
-  virtual void reset() override {
+  virtual void reset(uint8_t r) override {
     memset(rx_buf_[sid_], 0, sizeof(rx_buf_[sid_]));
     memset(tx_buf_[sid_], 0, sizeof(tx_buf_[sid_]));
     memset(data_ready_[sid_], 0, sizeof(data_ready_[sid_]));
@@ -171,14 +170,10 @@ public:
     memset(rx_len_[sid_], 0, sizeof(rx_len_[sid_]));
     memset(tx_len_[sid_], 0, sizeof(tx_len_[sid_]));
     status_[sid_] = 0;
-    role_[sid_] = slave;
+    role_[sid_] = r == MCB_ROLE_MASTER ? master : slave;
   }
 
   void fault_inject(mcb_if::mcb_error err) { status_[sid_] |= err; }
-
-  virtual void switch_role(uint8_t r) override {
-    role_[sid_] = r == MCB_ROLE_MASTER ? master : slave;
-  }
 
   virtual void set_poll_time(uint16_t timeout) override {}
 

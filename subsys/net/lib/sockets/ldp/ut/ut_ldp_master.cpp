@@ -24,8 +24,7 @@ TEST_F(test_ldp_master, create_sync) {
   mock_mcb mcb(0);
   mock_work_queue work_queue;
 
-  EXPECT_CALL(mcb, reset()).Times(1);
-  EXPECT_CALL(mcb, switch_role(mcb_if::MCB_ROLE_MASTER)).Times(1);
+  EXPECT_CALL(mcb, reset(mcb_if::MCB_ROLE_MASTER)).Times(1);
   EXPECT_CALL(work_queue, enqueue(_, _, _, _)).Times(1);
   ldp_master_impl m(&mcb, &work_queue);
 
@@ -70,8 +69,7 @@ TEST_F(test_ldp_master, create_async) {
   mock_mcb mcb(0);
   mock_work_queue work_queue;
 
-  EXPECT_CALL(mcb, reset()).Times(1);
-  EXPECT_CALL(mcb, switch_role(mcb_if::MCB_ROLE_MASTER)).Times(1);
+  EXPECT_CALL(mcb, reset(mcb_if::MCB_ROLE_MASTER)).Times(1);
   EXPECT_CALL(work_queue, enqueue(_, _, _, _))
       .Times(3)
       .WillOnce(Return(0))
@@ -125,8 +123,7 @@ TEST_F(test_ldp_master, create_destroy) {
   mock_mcb mcb(0);
   mock_work_queue_manual work_queue;
 
-  EXPECT_CALL(mcb, reset()).Times(1);
-  EXPECT_CALL(mcb, switch_role(mcb_if::MCB_ROLE_MASTER)).Times(1);
+  EXPECT_CALL(mcb, reset(mcb_if::MCB_ROLE_MASTER)).Times(1);
   ldp_master_impl m(&mcb, &work_queue);
 
   ldp_master_async_config async_cfg;
@@ -230,8 +227,7 @@ TEST_F(test_ldp_master, sync_rx_tx) {
   mock_mcb mcb(0);
   mock_work_queue_manual work_queue;
 
-  EXPECT_CALL(mcb, reset()).Times(1);
-  EXPECT_CALL(mcb, switch_role(mcb_if::MCB_ROLE_MASTER)).Times(1);
+  EXPECT_CALL(mcb, reset(mcb_if::MCB_ROLE_MASTER)).Times(1);
   ldp_master_impl m(&mcb, &work_queue);
 
   ldp_master_sync_config sync_cfg;
@@ -329,8 +325,7 @@ TEST_F(test_ldp_master, sync_with_preempt) {
   mock_mcb mcb(0);
   mock_work_queue_manual work_queue;
 
-  EXPECT_CALL(mcb, reset()).Times(1);
-  EXPECT_CALL(mcb, switch_role(mcb_if::MCB_ROLE_MASTER)).Times(1);
+  EXPECT_CALL(mcb, reset(mcb_if::MCB_ROLE_MASTER)).Times(1);
 
   ldp_master_impl m(&mcb, &work_queue);
 
@@ -377,8 +372,7 @@ TEST_F(test_ldp_master, async_rx_tx) {
   mock_mcb mcb(0);
   mock_work_queue_manual work_queue;
 
-  EXPECT_CALL(mcb, reset()).Times(1);
-  EXPECT_CALL(mcb, switch_role(mcb_if::MCB_ROLE_MASTER)).Times(1);
+  EXPECT_CALL(mcb, reset(mcb_if::MCB_ROLE_MASTER)).Times(1);
   ldp_master_impl m(&mcb, &work_queue);
 
   ldp_master_async_config async_cfg;
@@ -469,8 +463,7 @@ TEST_F(test_ldp_master, async_with_preempt) {
   mock_mcb mcb(0);
   mock_work_queue_manual work_queue;
 
-  EXPECT_CALL(mcb, reset()).Times(1);
-  EXPECT_CALL(mcb, switch_role(mcb_if::MCB_ROLE_MASTER)).Times(1);
+  EXPECT_CALL(mcb, reset(mcb_if::MCB_ROLE_MASTER)).Times(1);
   ldp_master_impl m(&mcb, &work_queue);
 
   ldp_master_async_config async_cfg;
@@ -573,8 +566,7 @@ TEST_F(test_ldp_master, invalid_check) {
   mock_mcb mcb(0);
   mock_work_queue_manual work_queue;
 
-  EXPECT_CALL(mcb, reset()).Times(1);
-  EXPECT_CALL(mcb, switch_role(mcb_if::MCB_ROLE_MASTER)).Times(1);
+  EXPECT_CALL(mcb, reset(mcb_if::MCB_ROLE_MASTER)).Times(1);
   ldp_master_impl m(&mcb, &work_queue);
 
   ldp_master_sync_config sync_cfg;

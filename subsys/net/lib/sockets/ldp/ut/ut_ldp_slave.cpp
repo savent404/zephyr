@@ -20,8 +20,7 @@ using ldp_slave_impl = ldp_slave<dummy_cache>;
 TEST_F(test_ldp_slave, create_sync_conn) {
   mock_mcb mcb(5);
 
-  EXPECT_CALL(mcb, reset()).Times(1);
-  EXPECT_CALL(mcb, switch_role(mcb_if::MCB_ROLE_SLAVE)).Times(1);
+  EXPECT_CALL(mcb, reset(mcb_if::MCB_ROLE_SLAVE)).Times(1);
   ldp_slave_impl s(&mcb);
 
   ldp_slave_sync_config sync_cfg;
@@ -43,8 +42,7 @@ TEST_F(test_ldp_slave, create_sync_conn) {
 TEST_F(test_ldp_slave, create_async_conn) {
   mock_mcb mcb(5);
 
-  EXPECT_CALL(mcb, reset()).Times(1);
-  EXPECT_CALL(mcb, switch_role(mcb_if::MCB_ROLE_SLAVE)).Times(1);
+  EXPECT_CALL(mcb, reset(mcb_if::MCB_ROLE_SLAVE)).Times(1);
   ldp_slave_impl s(&mcb);
 
   ldp_slave_async_config async_cfg;
@@ -70,8 +68,7 @@ TEST_F(test_ldp_slave, create_async_conn) {
 TEST_F(test_ldp_slave, create_invalid_conn1) {
   mock_mcb mcb(5);
 
-  EXPECT_CALL(mcb, reset()).Times(1);
-  EXPECT_CALL(mcb, switch_role(mcb_if::MCB_ROLE_SLAVE)).Times(1);
+  EXPECT_CALL(mcb, reset(mcb_if::MCB_ROLE_SLAVE)).Times(1);
   ldp_slave_impl s(&mcb);
 
   ldp_slave_async_config async_cfg;
@@ -85,8 +82,7 @@ TEST_F(test_ldp_slave, create_invalid_conn1) {
 TEST_F(test_ldp_slave, create_invalid_conn2) {
   mock_mcb mcb(5);
 
-  EXPECT_CALL(mcb, reset()).Times(1);
-  EXPECT_CALL(mcb, switch_role(mcb_if::MCB_ROLE_SLAVE)).Times(1);
+  EXPECT_CALL(mcb, reset(mcb_if::MCB_ROLE_SLAVE)).Times(1);
   ldp_slave_impl s(&mcb);
 
   ldp_slave_async_config sync_cfg;
@@ -100,8 +96,7 @@ TEST_F(test_ldp_slave, create_invalid_conn2) {
 TEST_F(test_ldp_slave, create_invalid_conn3) {
   mock_mcb mcb(5);
 
-  EXPECT_CALL(mcb, reset()).Times(1);
-  EXPECT_CALL(mcb, switch_role(mcb_if::MCB_ROLE_SLAVE)).Times(1);
+  EXPECT_CALL(mcb, reset(mcb_if::MCB_ROLE_SLAVE)).Times(1);
   ldp_slave_impl s(&mcb);
 
   auto cfg_conn = s.create(true, nullptr);
@@ -111,8 +106,7 @@ TEST_F(test_ldp_slave, create_invalid_conn3) {
 TEST_F(test_ldp_slave, destroy) {
   mock_mcb mcb(5);
 
-  EXPECT_CALL(mcb, reset()).Times(1);
-  EXPECT_CALL(mcb, switch_role(mcb_if::MCB_ROLE_SLAVE)).Times(1);
+  EXPECT_CALL(mcb, reset(mcb_if::MCB_ROLE_SLAVE)).Times(1);
   ldp_slave_impl s(&mcb);
 
   ldp_slave_sync_config sync_cfg;
@@ -136,8 +130,7 @@ TEST_F(test_ldp_slave, destroy) {
 TEST_F(test_ldp_slave, destroy_all) {
   mock_mcb mcb(5);
 
-  EXPECT_CALL(mcb, reset()).Times(1);
-  EXPECT_CALL(mcb, switch_role(mcb_if::MCB_ROLE_SLAVE)).Times(1);
+  EXPECT_CALL(mcb, reset(mcb_if::MCB_ROLE_SLAVE)).Times(1);
 
   ldp_slave_impl s(&mcb);
 
@@ -174,8 +167,7 @@ TEST_F(test_ldp_slave, destroy_all) {
 TEST_F(test_ldp_slave, sync_send) {
   mock_mcb mcb(5);
 
-  EXPECT_CALL(mcb, reset()).Times(1);
-  EXPECT_CALL(mcb, switch_role(mcb_if::MCB_ROLE_SLAVE)).Times(1);
+  EXPECT_CALL(mcb, reset(mcb_if::MCB_ROLE_SLAVE)).Times(1);
   ldp_slave_impl s(&mcb);
 
   ldp_slave_sync_config sync_cfg;
@@ -205,8 +197,7 @@ TEST_F(test_ldp_slave, async_send) {
   int ret;
   mock_mcb mcb(5);
 
-  EXPECT_CALL(mcb, reset()).Times(1);
-  EXPECT_CALL(mcb, switch_role(mcb_if::MCB_ROLE_SLAVE)).Times(1);
+  EXPECT_CALL(mcb, reset(mcb_if::MCB_ROLE_SLAVE)).Times(1);
   ldp_slave_impl s(&mcb);
 
   ldp_slave_async_config async_cfg;
@@ -250,8 +241,7 @@ TEST_F(test_ldp_slave, async_send) {
 TEST_F(test_ldp_slave, invalid_send) {
   mock_mcb mcb(5);
 
-  EXPECT_CALL(mcb, reset()).Times(1);
-  EXPECT_CALL(mcb, switch_role(mcb_if::MCB_ROLE_SLAVE)).Times(1);
+  EXPECT_CALL(mcb, reset(mcb_if::MCB_ROLE_SLAVE)).Times(1);
   ldp_slave_impl s(&mcb);
 
   ldp_slave_async_config async_cfg;
@@ -281,8 +271,7 @@ TEST_F(test_ldp_slave, invalid_send) {
 TEST_F(test_ldp_slave, sync_recv) {
   mock_mcb mcb(5);
 
-  EXPECT_CALL(mcb, reset()).Times(1);
-  EXPECT_CALL(mcb, switch_role(mcb_if::MCB_ROLE_SLAVE)).Times(1);
+  EXPECT_CALL(mcb, reset(mcb_if::MCB_ROLE_SLAVE)).Times(1);
   ldp_slave_impl s(&mcb);
 
   ldp_slave_sync_config sync_cfg;
@@ -329,8 +318,7 @@ TEST_F(test_ldp_slave, sync_recv) {
 TEST_F(test_ldp_slave, async_multi_recv) {
   mock_mcb mcb(5);
 
-  EXPECT_CALL(mcb, reset()).Times(1);
-  EXPECT_CALL(mcb, switch_role(mcb_if::MCB_ROLE_SLAVE)).Times(1);
+  EXPECT_CALL(mcb, reset(mcb_if::MCB_ROLE_SLAVE)).Times(1);
   ldp_slave_impl s(&mcb);
 
   ldp_slave_sync_config async_cfg;
@@ -392,8 +380,7 @@ TEST_F(test_ldp_slave, async_multi_send) {
   int ret;
   mock_mcb mcb(5);
 
-  EXPECT_CALL(mcb, reset()).Times(1);
-  EXPECT_CALL(mcb, switch_role(mcb_if::MCB_ROLE_SLAVE)).Times(1);
+  EXPECT_CALL(mcb, reset(mcb_if::MCB_ROLE_SLAVE)).Times(1);
   ldp_slave_impl s(&mcb);
 
   ldp_slave_sync_config async_cfg;
@@ -453,8 +440,7 @@ TEST_F(test_ldp_slave, async_multi_send) {
 TEST_F(test_ldp_slave, not_required_extra_error) {
   mock_mcb mcb(5);
 
-  EXPECT_CALL(mcb, reset()).Times(1);
-  EXPECT_CALL(mcb, switch_role(mcb_if::MCB_ROLE_SLAVE)).Times(1);
+  EXPECT_CALL(mcb, reset(mcb_if::MCB_ROLE_SLAVE)).Times(1);
   ldp_slave_impl s(&mcb);
 
   /* Extra error is not required in slave implementation */

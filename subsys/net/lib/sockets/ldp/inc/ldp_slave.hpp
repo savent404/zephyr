@@ -18,8 +18,7 @@ namespace cif {
 
 template <typename T_cache> struct ldp_slave : public ldp_basic {
   explicit ldp_slave(mcb_if *mcb) : mcb_(mcb), next_id_(0) {
-    mcb->reset();
-    mcb->switch_role(mcb_if::MCB_ROLE_SLAVE);
+    mcb->reset(mcb_if::MCB_ROLE_SLAVE);
   }
 
   virtual ~ldp_slave() {

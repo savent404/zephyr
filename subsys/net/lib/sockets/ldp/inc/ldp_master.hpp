@@ -28,8 +28,7 @@ template <typename T_mempool, typename T_cache> struct ldp_master: public ldp_ba
 	explicit ldp_master(mcb_if *mcb, work_queue_if *wq)
 		: next_id_(0), mcb_(mcb), work_queue_(wq)
 	{
-		mcb->reset();
-		mcb->switch_role(mcb_if::MCB_ROLE_MASTER);
+		mcb->reset(mcb_if::MCB_ROLE_MASTER);
 
 		/* Create a work queue for sync handler */
 		sync_wq_id_ = work_queue_->enqueue(

@@ -45,16 +45,10 @@ struct mcb_if {
   /**
    * @brief Reset MCB to initial state
    *
+   * @param role MCB_ROLE_MASTER or MCB_ROLE_SLAVE
    * Make sure all the port is disabled, and all the status is cleared
    */
-  virtual void reset() = 0;
-
-  /**
-   * @brief Switch role of MCB
-   *
-   * @param role MCB_ROLE_MASTER or MCB_ROLE_SLAVE
-   */
-  virtual void switch_role(uint8_t role) = 0;
+  virtual void reset(uint8_t role) = 0;
 
   /**
    * @brief Set poll time for MCB
