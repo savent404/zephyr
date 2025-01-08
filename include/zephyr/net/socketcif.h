@@ -78,6 +78,19 @@ struct cif_error_filter {
 	unsigned int flags;
 
 	/* directory: IN/OUT */
+#define CIF_ERR_R_ERROR       BIT(11) /* R_ERROR, redundancy error. One of the A/B frames lost */
+#define CIF_ERR_I_ERROR       BIT(12) /* CRC error */
+#define CIF_ERR_MAY_LOST      BIT(13) /* XID mismatch, means previous packet may be lost */
+#define CIF_ERR_PREEMPT       BIT(14) /* Preempted by R=1 frame */
+#define CIF_ERR_PREV_T_ERROR  BIT(15) /* T_ERROR happened in previous operation */
+#define CIF_ERR_PREV_R_ERROR  BIT(16) /* R_ERROR happened in previous operation */
+#define CIF_ERR_PREV_I_ERROR  BIT(17) /* I_ERROR happened in previous operation */
+#define CIF_ERR_PREV_P_ERROR  BIT(18) /* P_ERROR happened in previous operation */
+#define CIF_ERR_PREV_MAY_LOST BIT(19) /* Previous packet may be lost */
+#define CIF_ERR_PREV_PREEMPT  BIT(20) /* R=1 frame receive in previous operation */
+#define CIF_ERR_PREV_INVALID_ASYNC_PACK                                                            \
+	BIT(21) /* Invalid async packet happened in previous operation */
+#define CIF_ERR_MASK (BIT(22) - 1)
 	uint32_t error_mask;
 };
 
@@ -105,9 +118,9 @@ enum {
  */
 struct sockaddr_cif {
 	sa_family_t cif_family; /**< Address family */
-	uint8_t bus;            /* see CIF_BUS_* */
-	uint8_t slot;
-	uint8_t port;
+	uint8_t bus;            /* see CIF_BUS_*. Only works for bind() */
+	uint8_t slot;           /* slot number, not used in bind() */
+	uint8_t port;           /* port number , not used in bind() */
 };
 
 /** @} */

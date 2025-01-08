@@ -312,7 +312,7 @@ static ssize_t cif_sock_sendto(struct net_context *ctx, const void *buf, size_t 
 
 	auto conn_it = usr_data->conns.find(id);
 	if (conn_it == usr_data->conns.end()) {
-		return -ECONNREFUSED;
+		return -ENOENT;
 	}
 
 	auto conn = conn_it->second.conn_id;
@@ -332,7 +332,7 @@ static ssize_t cif_sock_recvfrom(struct net_context *ctx, void *buf, size_t max_
 
 	auto conn_it = usr_data->conns.find(id);
 	if (conn_it == usr_data->conns.end()) {
-		return -ECONNREFUSED;
+		return -ENOENT;
 	}
 
 	auto conn = conn_it->second.conn_id;
@@ -366,7 +366,7 @@ static int cif_sock_getsockopt(struct net_context *ctx, int level, int optname, 
 			conn_idx{reinterpret_cast<cif_raw_port_config *>(optval)->port,
 				 reinterpret_cast<cif_raw_port_config *>(optval)->slot});
 		if (conn_it == usr_data->conns.end()) {
-			return -ECONNREFUSED;
+			return -ENOENT;
 		}
 		memcpy(optval, &conn_it->second.config, sizeof(cif_raw_port_config));
 		break;
