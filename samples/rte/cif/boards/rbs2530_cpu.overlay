@@ -8,7 +8,7 @@
 
 / {
 	aliases {
-		mcbl= &mcb0;
-		mcbh= &mcb1;
+		mcbl = &mcb0;
+		mcbh = &mcb1;
 	};
 };
