@@ -1,0 +1,17 @@
+# Copyright (c) 2025 SYSTech Co.
+# SPDX-License-Identifier: Apache-2.0
+
+mainmenu "cif"
+
+config CIF_SLAVE
+	bool "CIF Slave mode"
+	default n
+	help
+	  Enable this option to run the CIF in slave mode.
+config CIF_WORKAROUND
+	bool "CIF Workaround"
+	default n
+	help
+	  Enable this option to run the CIF with a workaround solution.
+
+source "Kconfig.zephyr"

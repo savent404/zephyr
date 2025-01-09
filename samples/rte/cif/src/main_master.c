@@ -7,10 +7,18 @@
 #include <zephyr/net/socketcif.h>
 #include <zephyr/logging/log.h>
 
-#define SYNC_CCYCLE_TIME        2000   /* 2ms */
+#define SYNC_CYCLE_TIME         2000   /* 2ms */
 #define ASYNC_INTERVAL_TIME     10000  /* 10ms */
 #define ASYNC_TIMEOUT_TIME      100000 /* 100ms */
 #define ASYNC_DEFAULT_BANDWIDTH 0      /* no limitation */
+
+#if !CONFIG_CIF_WORKAROUND
+#define PORT_ID_CFG 0x10
+#define PORT_ID_IO  0x40
+#else
+#define PORT_ID_CFG 1
+#define PORT_ID_IO  2
+#endif
 
 LOG_MODULE_REGISTER(main, LOG_LEVEL_DBG);
 
@@ -31,7 +39,8 @@ static bool dev_discovery(int cif_sock, uint8_t slot)
 		return false;
 	}
 
-	k_sleep(K_USEC(SYNC_CCYCLE_TIME));
+	/* Wait for LDP query discovery response automatically */
+	k_sleep(K_USEC(SYNC_CYCLE_TIME));
 
 	static uint8_t buf[CIF_MTU];
 	ssize_t len;
@@ -141,17 +150,19 @@ int main(void)
 	/**
 	 * Step 5: Do the general initialization
 	 */
-	for (uint8_t slot = 0; slot < 2; slot++) {
-		if (!exist[slot]) {
+	for (uint8_t slot_idx = 0; slot_idx < 2; slot_idx++) {
+		uint8_t slot = slot_idx + 1;
+
+		if (!exist[slot_idx]) {
 			continue;
 		}
 
 		/* establish sync connection */
-		if (dev_general_init(sock, slot, 0x40)) {
+		if (dev_general_init(sock, slot, PORT_ID_IO)) {
 			struct sockaddr_cif remote = {
 				.cif_family = AF_CIF,
 				.slot = slot,
-				.port = 0x40,
+				.port = PORT_ID_IO,
 			};
 			ret = sendto(sock, "Hello", 5, 0, (struct sockaddr *)&remote,
 				     sizeof(remote));
@@ -163,13 +174,13 @@ int main(void)
 		uint32_t max_try = 10;
 
 		/* Do configuration */
-		if (dev_general_init(sock, slot, 0x10)) {
+		if (dev_general_init(sock, slot, PORT_ID_CFG)) {
 			static const char config_data[] = "some configure";
 			char response[64];
 			struct sockaddr_cif remote = {
 				.cif_family = AF_CIF,
 				.slot = slot,
-				.port = 0x10,
+				.port = PORT_ID_CFG,
 			};
 			socklen_t addrlen = sizeof(remote);
 
@@ -186,7 +197,6 @@ int main(void)
 						   (socklen_t *)(&addrlen));
 
 				if (ret < 0 && errno == EAGAIN) {
-					k_sleep(K_USEC(ASYNC_INTERVAL_TIME));
 					LOG_DBG("Wait for configuration done\n");
 				} else if (ret < 0) {
 					LOG_ERR("Failed to receive data, errno %d\n", errno);
@@ -198,6 +208,7 @@ int main(void)
 					}
 					break;
 				}
+				k_sleep(K_USEC(ASYNC_INTERVAL_TIME));
 			}
 
 			if (!max_try) {
@@ -219,7 +230,7 @@ int main(void)
 			struct sockaddr_cif remote = {
 				.cif_family = AF_CIF,
 				.slot = slot,
-				.port = 0x40,
+				.port = PORT_ID_IO,
 			};
 
 			ret = sendto(sock, out_buf[slot], sizeof(out_buf[slot]), 0,
@@ -290,7 +301,7 @@ int main(void)
 			struct sockaddr_cif remote = {
 				.cif_family = AF_CIF,
 				.slot = slot,
-				.port = 0x40,
+				.port = PORT_ID_IO,
 			};
 			int len = sendto(sock, in_buf[slot], sizeof(in_buf[slot]), 0,
 					 (struct sockaddr *)&remote, sizeof(remote));
@@ -301,8 +312,8 @@ int main(void)
 			}
 		}
 
-		/* loop interval: SYNC_CCYCLE_TIME(2ms) */
-		k_sleep(K_USEC(SYNC_CCYCLE_TIME));
+		/* loop interval: SYNC_CYCLE_TIME(2ms) */
+		k_sleep(K_USEC(SYNC_CYCLE_TIME));
 	}
 
 	close(sock);
