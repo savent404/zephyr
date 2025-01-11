@@ -381,6 +381,48 @@ TEST_F(test_ldp_sm, async_handle_extra_errors)
 	EXPECT_TRUE(err & (1 << err::LDP_ERR_PREV_I_ERROR));
 }
 
+TEST_F(test_ldp_sm, master_strong_order)
+{
+	/* Master will drop the first response after port is opened
+	 * Which is used for register mode */
+	simu_work_queue wq;
+	simu_mcb bus_m(0), bus_s(1);
+	ldp_master_impl m(&bus_m, &wq);
+	ldp_slave_impl s(&bus_s);
+
+	ldp_master_async_config ma_cfg;
+	ldp_slave_async_config sa_cfg;
+
+	sa_cfg.port = 0x10;
+	sa_cfg.max_recv_len = 8;
+	auto sa_conn = s.create(true, &sa_cfg);
+	ASSERT_EQ(sa_conn, 0);
+	ASSERT_EQ(s.send(sa_conn, (uint8_t *)"Hello, ", 8), 8); /* Tx Buffer is ready */
+
+	ma_cfg.port = 0x10;
+	ma_cfg.dst = 0x1;
+	ma_cfg.cycle_time = 1;
+	ma_cfg.timeout = 3;
+	ma_cfg.one_shot = false;
+	ma_cfg.preempt = false;
+	ma_cfg.strong_order = true;
+	auto ma_conn = m.create(true, &ma_cfg);
+	ASSERT_EQ(ma_conn, 0);
+
+	/* Master will recv this rsp and drop it */
+	wq.sync();
+
+	uint8_t rx_buf[16];
+	auto ret = m.recv(ma_conn, &rx_buf[0], sizeof(rx_buf));
+	ASSERT_EQ(ret, -err::LDP_ERR_AGAIN);
+
+	ASSERT_EQ(s.send(sa_conn, (uint8_t *)"Hello, ", 8), 8);
+	wq.sync();
+	ret = m.recv(ma_conn, &rx_buf[0], sizeof(rx_buf));
+	ASSERT_EQ(ret, 8);
+	ASSERT_STREQ((const char *)&rx_buf[0], "Hello, ");
+}
+
 TEST_F(test_ldp_sm, combined_handle_extra_errors)
 {
 	simu_work_queue wq;

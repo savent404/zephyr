@@ -108,6 +108,7 @@ template <typename T_mempool, typename T_cache> struct ldp_master: public ldp_ba
 			ci->timeout_allowed = cfg->timeout / cfg->cycle_time;
 			ci->timeout_cnt = ci->timeout_allowed;
 			ci->flg_wait_for_rx = false;
+			ci->flg_strong_order = cfg->strong_order;
 			ci->flg_one_shot = cfg->one_shot;
 			ci->stat_rx_packet = 0;
 			ci->last_err = 0;
@@ -354,6 +355,7 @@ template <typename T_mempool, typename T_cache> struct ldp_master: public ldp_ba
 		bool flg_wait_for_rx;     /* This is the flag to activate timeout mechanism
 					 Rising edge means reset timeout, activate timer
 					 Falling edge means deactivate timer */
+		bool flg_strong_order;    /* only accept response if rsp.xid == req.rxid+1 */
 		uint8_t xid;              /* transaction id */
 		int rxid;                 /* last received transaction id, -1 means no
 					     response received */
@@ -503,10 +505,16 @@ template <typename T_mempool, typename T_cache> struct ldp_master: public ldp_ba
 			uint8_t *tx_data;
 			uint32_t status;
 			async_buf abuf = {nullptr, 0};
-			bool data_ready, data_timeout, p_error;
-			bool is_response_invalid = false, is_new_response = false,
-			     is_rxid_mismatch = false, is_tx_acknowledged = false;
 			volatile ldp_a_header *tx_hdr;
+			bool data_ready, data_timeout, p_error;
+			bool is_invalid_rsp = false; /* header is craped */
+			bool is_new_rsp = false;     /* rsp.xid != req.rxid */
+			bool is_ordered_rsp = false; /* rsp.xid = req.rxid+1*/
+			bool is_ack_rsp = false;     /* rsp.rxid = req.xid */
+			bool is_first_rsp = false;   /* first rsp */
+			bool is_unordered_rsp =
+				false; /* new rsp but not ordered(including first rsp)*/
+			bool is_accept_rsp = false; /* accept rsp */
 
 			/* prefetch tx buffer */
 			if (!ci->tx_bufs.empty()) {
@@ -556,16 +564,18 @@ template <typename T_mempool, typename T_cache> struct ldp_master: public ldp_ba
 				uint8_t *rx_data = rx_buf + hdr_size;
 
 				cache_if::rmb(); /* make sure buffer is updated */
-				is_response_invalid =
-					rx_len < hdr_size || rx_hdr->magic != LDP_MAGIC;
-				is_new_response = !is_response_invalid &&
-						  (rx_hdr->xid == (ci->rxid + 1) || ci->rxid == -1);
-				is_rxid_mismatch = !is_response_invalid && !is_new_response &&
-						   rx_hdr->xid != ci->rxid;
-				is_tx_acknowledged =
-					!is_response_invalid && rx_hdr->rxid == tx_hdr->xid;
+				is_invalid_rsp = rx_len < hdr_size || rx_hdr->magic != LDP_MAGIC;
+				is_first_rsp = !is_invalid_rsp && ci->rxid == -1;
+				is_ordered_rsp = !is_invalid_rsp && !is_first_rsp &&
+						 (rx_hdr->xid == ((ci->rxid + 1) & 0xFF));
+				is_new_rsp = (!is_invalid_rsp && (rx_hdr->xid != ci->rxid));
+				is_unordered_rsp = is_new_rsp && !is_ordered_rsp;
+				is_ack_rsp = !is_invalid_rsp && (rx_hdr->rxid == tx_hdr->xid);
+				is_accept_rsp = is_new_rsp &&
+						(ci->flg_strong_order ? is_ordered_rsp : true);
 
-				if (is_new_response || is_rxid_mismatch) {
+				if (is_accept_rsp) {
+					/* If strong order is set, only accept ordered response */
 					async_buf rx_abuf;
 
 					rx_abuf.len = rx_len - hdr_size;
@@ -575,22 +585,26 @@ template <typename T_mempool, typename T_cache> struct ldp_master: public ldp_ba
 						memcpy(rx_abuf.buf, rx_data, rx_abuf.len);
 						ci->rx_bufs.push_back(std::move(rx_abuf));
 					}
-					/* new data received */
+				}
+
+				if (is_new_rsp) {
+					/* new data received (even if is wrong data) */
 					reset_timeout_flag = true;
+					should_continue = max_continue;
+
 					/* ready for ack */
 					ci->rxid = rx_hdr->xid;
 				}
 
-				if (is_tx_acknowledged) {
+				if (is_ack_rsp) {
+					/* Slave accepted the previous transmit data.
+					 * Drop the tx buffer then.
+					 */
 					ci->tx_bufs.pop_front();
 					if (abuf.buf) {
 						mempool_if::free(abuf.buf);
 					}
 					ci->xid++;
-				}
-				/* Any response should be watched */
-				if (is_tx_acknowledged || is_rxid_mismatch || is_new_response) {
-					should_continue = max_continue;
 				}
 				mcb_->clr_rx(ci->port);
 			}
@@ -606,12 +620,12 @@ template <typename T_mempool, typename T_cache> struct ldp_master: public ldp_ba
 						    LDP_ERR_PREV_P_ERROR);
 			ci->last_err = handle_error(status & mcb_if::MCB_ERR_PREEMPT, ci->last_err,
 						    LDP_ERR_PREEMPT, LDP_ERR_PREV_PREEMPT);
-			ci->last_err = handle_error(is_response_invalid, ci->last_err,
+			ci->last_err = handle_error(is_invalid_rsp, ci->last_err,
 						    LDP_ERR_INVALID_ASYNC_PACK,
 						    LDP_ERR_PREV_INVALID_ASYNC_PACK);
-			ci->last_err = handle_error(is_rxid_mismatch, ci->last_err,
+			ci->last_err = handle_error(is_unordered_rsp, ci->last_err,
 						    LDP_ERR_MAY_LOST, LDP_ERR_PREV_MAY_LOST);
-			if (is_new_response) {
+			if (is_accept_rsp) {
 				ci->stat_rx_packet++;
 			}
 			mcb_->clr_status(status);

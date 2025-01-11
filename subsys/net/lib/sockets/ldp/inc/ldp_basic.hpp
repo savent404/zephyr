@@ -42,6 +42,7 @@ struct ldp_master_async_config: ldp_config {
 	unsigned timeout;    /* async timeout in microseconds */
 	bool preempt;        /* set R flag, means want to take over the bus */
 	bool one_shot;       /* one shot mode, keep sync till receive response */
+	bool strong_order;   /* Only accept ordered response (rsp.xid == req.rxid+1) */
 };
 
 struct ldp_slave_sync_config: ldp_config {

@@ -154,7 +154,7 @@ template <typename T_cache> struct ldp_slave: public ldp_basic {
 			bool data_acked = rx_valid && rx_hdr->rxid == tx_hdr->xid;
 
 			// wait for previous packet to be acknowledged
-			if (!first_tx && (!rx_valid || !data_acked)) {
+			if (!first_tx && !data_acked) {
 				return -LDP_ERR_AGAIN;
 			}
 
