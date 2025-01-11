@@ -509,6 +509,7 @@ __attribute__((optimize("O0"))) static int cif_ctrl_port(struct net_context *ctx
 		bool is_preempt = cfg->flags & CIF_PORT_FLG_PREEMPT;
 		bool is_one_shot = cfg->flags & CIF_PORT_FLG_ONE_SHOT;
 		bool is_allow_write = cfg->flags & CIF_PORT_FLG_ALLOW_WRITE;
+		bool is_strong_order = cfg->flags & CIF_PORT_FLG_STRONG_ORDER;
 
 		if (CIF_IS_UNKNOWN_PORT(cfg->port)) {
 			return -EINVAL;
@@ -532,6 +533,7 @@ __attribute__((optimize("O0"))) static int cif_ctrl_port(struct net_context *ctx
 			config.timeout = cfg->async_timeout;
 			config.preempt = is_preempt;
 			config.one_shot = is_one_shot;
+			config.strong_order = is_strong_order;
 			conn.conn_id = (*usr_data->ldp).create(true, &config);
 		} else if (!is_master && !is_async) {
 			/* slave sync port */

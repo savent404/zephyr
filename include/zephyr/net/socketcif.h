@@ -58,10 +58,11 @@ struct cif_raw_port_config {
 	uint8_t slot;
 
 	/* directory: IN */
-#define CIF_PORT_FLG_ENABLE      0x01
-#define CIF_PORT_FLG_ONE_SHOT    0x02
-#define CIF_PORT_FLG_PREEMPT     0x04
-#define CIF_PORT_FLG_ALLOW_WRITE 0x08
+#define CIF_PORT_FLG_ENABLE       0x01
+#define CIF_PORT_FLG_ONE_SHOT     0x02
+#define CIF_PORT_FLG_PREEMPT      0x04
+#define CIF_PORT_FLG_ALLOW_WRITE  0x08
+#define CIF_PORT_FLG_STRONG_ORDER 0x10   /* Drop rsp if rsp.xid!=req.rxid or the first one */
 	unsigned int flags;              /* see CIF_PORT_FLG_* */
 	unsigned int async_interval;     /* query interval while port is idle. (in microseconds) */
 	unsigned int async_timeout;      /* async timeout. (in microseconds) */

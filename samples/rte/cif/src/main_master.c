@@ -65,12 +65,12 @@ static bool dev_discovery(int cif_sock, uint8_t slot)
 	return exist;
 }
 
-static bool dev_general_init(int cif_sock, uint8_t slot, uint8_t port)
+static bool dev_general_init(int cif_sock, uint8_t slot, uint8_t port, uint32_t ext_flg)
 {
 	struct cif_raw_port_config port_cfg = {
 		.port = port,
 		.slot = slot,
-		.flags = CIF_PORT_FLG_ENABLE,
+		.flags = CIF_PORT_FLG_ENABLE | ext_flg,
 
 		/** async configuration */
 		.async_interval = ASYNC_INTERVAL_TIME,
@@ -158,7 +158,7 @@ int main(void)
 		}
 
 		/* establish sync connection */
-		if (dev_general_init(sock, slot, PORT_ID_IO)) {
+		if (dev_general_init(sock, slot, PORT_ID_IO, 0)) {
 			struct sockaddr_cif remote = {
 				.cif_family = AF_CIF,
 				.slot = slot,
@@ -174,7 +174,7 @@ int main(void)
 		uint32_t max_try = 10;
 
 		/* Do configuration */
-		if (dev_general_init(sock, slot, PORT_ID_CFG)) {
+		if (dev_general_init(sock, slot, PORT_ID_CFG, CIF_PORT_FLG_STRONG_ORDER)) {
 			static const char config_data[] = "some configure";
 			char response[64];
 			struct sockaddr_cif remote = {
