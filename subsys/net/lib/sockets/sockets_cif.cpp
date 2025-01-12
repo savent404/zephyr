@@ -620,6 +620,7 @@ int zcif_socket(int family, net_sock_type type, int proto)
 	ret = net_context_get(family, type, proto, &ctx);
 	if (ret < 0) {
 		zvfs_free_fd(fd);
+		delete usr_data;
 		errno = -ret;
 		return -1;
 	}
