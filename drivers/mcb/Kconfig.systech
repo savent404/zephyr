@@ -7,3 +7,10 @@ config MCB_SYSTECH
 		depends on DT_HAS_SYSTECH_MCB_ENABLED
 		help
 			Enable Systech MCB driver.
+
+config MCB_SYSTECH_HW_WORKAROUND
+		bool "HW temporary solution"
+		default y
+		depends on MCB_SYSTECH
+		help
+			This is for HW workaround solutions

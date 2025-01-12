@@ -24,6 +24,25 @@ LOG_MODULE_REGISTER(mcb_systech);
 #define DEV_CFG(_dev)  ((const struct mcb_systech_config *const)(_dev)->config)
 #define DEV_DATA(_dev) ((struct mcb_systech_data *const)(_dev)->data)
 
+static inline void mcb_write(uint32_t value, uint32_t addr)
+{
+	sys_write32(value, addr);
+}
+
+static inline uint32_t mcb_read(uint32_t addr)
+{
+	uint32_t val;
+
+#if CONFIG_MCB_SYSTECH_HW_WORKAROUND
+	/* FIXME: For the crap hw design. register shall be read out at least 3 times */
+	val = sys_read32(addr);
+	val = sys_read32(addr);
+#endif
+	val = sys_read32(addr);
+
+	return val;
+}
+
 struct mcb_systech_data {
 	DEVICE_MMIO_NAMED_RAM(reg);
 	DEVICE_MMIO_NAMED_RAM(rx_buf);
@@ -45,38 +64,38 @@ void mcb_systech_reset(const struct device *dev, uint8_t role)
 	uint32_t val;
 
 	/* Clear CTRL/STATUS register */
-	sys_write32(0, reg_base + MCB_REG_CTRL1);
-	sys_write32(0, reg_base + MCB_REG_CTRL2);
-	sys_write32(0, reg_base + MCB_REG_STATUS1);
-	sys_write32(0, reg_base + MCB_REG_I_A_COUNT);
-	sys_write32(0, reg_base + MCB_REG_I_B_COUNT);
+	mcb_write(0, reg_base + MCB_REG_CTRL1);
+	mcb_write(0, reg_base + MCB_REG_CTRL2);
+	mcb_write(0, reg_base + MCB_REG_STATUS1);
+	mcb_write(0, reg_base + MCB_REG_I_A_COUNT);
+	mcb_write(0, reg_base + MCB_REG_I_B_COUNT);
 
 	for (uint32_t addr = MCB_REG_PORT_MASK0; addr <= MCB_REG_PORT_MASK3; addr += 4) {
-		sys_write32(0, reg_base + addr);
+		mcb_write(0, reg_base + addr);
 	}
 
 	for (uint32_t addr = MCB_REG_PORT_RDY_MASK0; addr <= MCB_REG_PORT_RDY_MASK3; addr += 4) {
-		sys_write32(0, reg_base + addr);
+		mcb_write(0, reg_base + addr);
 	}
 
 	for (uint32_t addr = MCB_REG_PORT_W_MASK0; addr <= MCB_REG_PORT_W_MASK3; addr += 4) {
-		sys_write32(0, reg_base + addr);
+		mcb_write(0, reg_base + addr);
 	}
 
 	for (uint32_t addr = MCB_REG_PORT_RX_LEN(0); addr <= MCB_REG_PORT_RX_LEN(0x80); addr += 4) {
-		sys_write32(0, reg_base + addr);
+		mcb_write(0, reg_base + addr);
 	}
 
 	for (uint32_t addr = MCB_REG_PORT_RX_MAX(0); addr <= MCB_REG_PORT_RX_MAX(0x80); addr += 4) {
-		sys_write32(0, reg_base + addr);
+		mcb_write(0, reg_base + addr);
 	}
 
 	for (uint32_t addr = MCB_REG_PORT_TX_LEN(0); addr <= MCB_REG_PORT_TX_LEN(0x80); addr += 4) {
-		sys_write32(0, reg_base + addr);
+		mcb_write(0, reg_base + addr);
 	}
 
 	for (uint32_t addr = MCB_REG_PORT_RX_SID(0); addr <= MCB_REG_PORT_RX_SID(0x80); addr += 4) {
-		sys_write32(0, reg_base + addr);
+		mcb_write(0, reg_base + addr);
 	}
 
 	/* FIXME: Set DT and DR via DeviceTree or user configuration */
@@ -91,10 +110,10 @@ void mcb_systech_reset(const struct device *dev, uint8_t role)
 		LOG_DBG("Set MCB to slave mode");
 		break;
 	}
-	sys_write32(val, reg_base + MCB_REG_CTRL2);
+	mcb_write(val, reg_base + MCB_REG_CTRL2);
 
 	/* Enable RxEN as default */
-	sys_write32(b_MCB_CTRL1_RxEN, reg_base + MCB_REG_CTRL1);
+	mcb_write(b_MCB_CTRL1_RxEN, reg_base + MCB_REG_CTRL1);
 }
 
 void mcb_systech_poll_time(const struct device *dev, uint32_t timeout)
@@ -105,10 +124,10 @@ void mcb_systech_poll_time(const struct device *dev, uint32_t timeout)
 
 	timeout = timeout / 10; /* Register POLL_TIME is in 10ns unit */
 	data->pool_time = timeout;
-	val = sys_read32(reg_base + MCB_REG_CTRL1);
+	val = mcb_read(reg_base + MCB_REG_CTRL1);
 	val &= ~_REG_MASK(CTRL2, PT);
 	val |= VALUE2REG(CTRL2, PT, timeout);
-	sys_write32(val, reg_base + MCB_REG_CTRL1);
+	mcb_write(val, reg_base + MCB_REG_CTRL1);
 
 	LOG_DBG("Set poll time to %dns", timeout * 10);
 }
@@ -121,21 +140,21 @@ static inline void _config_port_general(const struct device *dev, uint8_t port, 
 	uint32_t port_idx = port / 32;
 	uint32_t port_bit = BIT(port % 32);
 	/* setup none-critical parts */
-	sys_write32(max_rx_len, reg_base + MCB_REG_PORT_RX_MAX(port));
-	sys_write32(0, reg_base + MCB_REG_PORT_RX_SID(port));
-	sys_write32(0, reg_base + MCB_REG_PORT_RX_LEN(port));
-	sys_write32(0, reg_base + MCB_REG_PORT_TX_LEN(port));
+	mcb_write(max_rx_len, reg_base + MCB_REG_PORT_RX_MAX(port));
+	mcb_write(0, reg_base + MCB_REG_PORT_RX_SID(port));
+	mcb_write(0, reg_base + MCB_REG_PORT_RX_LEN(port));
+	mcb_write(0, reg_base + MCB_REG_PORT_TX_LEN(port));
 
 	/* clear port ready mask */
-	val = sys_read32(reg_base + MCB_REG_PORT_RDY_MASK0 + port_idx * 4);
+	val = mcb_read(reg_base + MCB_REG_PORT_RDY_MASK0 + port_idx * 4);
 	val &= ~port_bit;
-	sys_write32(val, reg_base + MCB_REG_PORT_RDY_MASK0 + port_idx * 4);
+	mcb_write(val, reg_base + MCB_REG_PORT_RDY_MASK0 + port_idx * 4);
 
 	/* reset write mask */
-	val = sys_read32(reg_base + MCB_REG_PORT_W_MASK0 + port_idx * 4);
+	val = mcb_read(reg_base + MCB_REG_PORT_W_MASK0 + port_idx * 4);
 	val &= ~port_bit;
 	val |= write ? port_bit : 0;
-	sys_write32(val, reg_base + MCB_REG_PORT_W_MASK0 + port_idx * 4);
+	mcb_write(val, reg_base + MCB_REG_PORT_W_MASK0 + port_idx * 4);
 
 	/* at least wipe potemtial ldp_a_header */
 	memset(mcb_get_tx_buf(dev, port), 0, 4);
@@ -160,14 +179,14 @@ void mcb_systech_config_port(const struct device *dev, uint8_t port, bool enable
 		_config_port_general(dev, port, enable, write, max_rx_len);
 
 		/* enable port */
-		val = sys_read32(reg_base + MCB_REG_PORT_MASK0 + port_idx * 4);
+		val = mcb_read(reg_base + MCB_REG_PORT_MASK0 + port_idx * 4);
 		val |= port_bit;
-		sys_write32(val, reg_base + MCB_REG_PORT_MASK0 + port_idx * 4);
+		mcb_write(val, reg_base + MCB_REG_PORT_MASK0 + port_idx * 4);
 	} else {
 		/* disable port */
-		val = sys_read32(reg_base + MCB_REG_PORT_MASK0 + port_idx * 4);
+		val = mcb_read(reg_base + MCB_REG_PORT_MASK0 + port_idx * 4);
 		val &= ~port_bit;
-		sys_write32(val, reg_base + MCB_REG_PORT_MASK0 + port_idx * 4);
+		mcb_write(val, reg_base + MCB_REG_PORT_MASK0 + port_idx * 4);
 
 		_config_port_general(dev, port, enable, write, max_rx_len);
 	}
@@ -183,13 +202,13 @@ void mcb_systech_tx(const struct device *dev, uint8_t sid, uint8_t port)
 		return;
 	}
 
-	val = sys_read32(reg_base + MCB_REG_CTRL1);
+	val = mcb_read(reg_base + MCB_REG_CTRL1);
 	val |= b_MCB_CTRL1_TxEN;
 	val &= _REG_MASK(CTRL1, D_SID);
 	val |= VALUE2REG(CTRL1, D_SID, sid);
 	val &= _REG_MASK(CTRL1, PORT);
 	val |= VALUE2REG(CTRL1, PORT, port);
-	sys_write32(val, reg_base + MCB_REG_CTRL1);
+	mcb_write(val, reg_base + MCB_REG_CTRL1);
 }
 
 void mcb_systech_get_status(const struct device *dev, uint32_t *s)
@@ -197,7 +216,7 @@ void mcb_systech_get_status(const struct device *dev, uint32_t *s)
 	uint32_t reg_base = DEVICE_MMIO_NAMED_GET(dev, reg);
 	uint32_t val, status = 0;
 
-	val = sys_read32(reg_base + MCB_REG_STATUS1);
+	val = mcb_read(reg_base + MCB_REG_STATUS1);
 
 	/* Do the mapping work */
 	if (val & b_MCB_STATUS1_RE) {
@@ -226,7 +245,7 @@ void mcb_systech_clr_status(const struct device *dev, uint32_t bits)
 	uint32_t reg_base = DEVICE_MMIO_NAMED_GET(dev, reg);
 	uint32_t val;
 
-	val = sys_read32(reg_base + MCB_REG_STATUS1);
+	val = mcb_read(reg_base + MCB_REG_STATUS1);
 
 	if (bits & _MCB_ERR_R_ERR) {
 		val &= ~b_MCB_STATUS1_RE;
@@ -244,7 +263,7 @@ void mcb_systech_clr_status(const struct device *dev, uint32_t bits)
 		val &= ~b_MCB_STATUS1_PE;
 	}
 
-	sys_write32(val, reg_base + MCB_REG_STATUS1);
+	mcb_write(val, reg_base + MCB_REG_STATUS1);
 }
 
 void *mcb_systech_get_rx_buf(const struct device *dev, uint8_t port)
@@ -280,7 +299,7 @@ uint16_t mcb_systech_get_rx_len(const struct device *dev, uint8_t port)
 		LOG_ERR("Invalid port number");
 		return 0;
 	}
-	val = sys_read32(reg_base + MCB_REG_PORT_RX_LEN(port));
+	val = mcb_read(reg_base + MCB_REG_PORT_RX_LEN(port));
 	return val;
 }
 
@@ -293,7 +312,7 @@ uint16_t mcb_systech_get_tx_len(const struct device *dev, uint8_t port)
 		LOG_ERR("Invalid port number");
 		return 0;
 	}
-	val = sys_read32(reg_base + MCB_REG_PORT_TX_LEN(port));
+	val = mcb_read(reg_base + MCB_REG_PORT_TX_LEN(port));
 	return val;
 }
 
@@ -305,7 +324,7 @@ void mcb_systech_set_tx_len(const struct device *dev, uint8_t port, uint16_t len
 		LOG_ERR("Invalid port number");
 		return;
 	}
-	sys_write32(len, reg_base + MCB_REG_PORT_TX_LEN(port));
+	mcb_write(len, reg_base + MCB_REG_PORT_TX_LEN(port));
 }
 
 void mcb_systech_rx_clr(const struct device *dev, uint8_t port)
@@ -313,17 +332,17 @@ void mcb_systech_rx_clr(const struct device *dev, uint8_t port)
 	uint32_t reg_base = DEVICE_MMIO_NAMED_GET(dev, reg);
 	uint32_t val;
 
-	val = sys_read32(reg_base + MCB_REG_STATUS1);
+	val = mcb_read(reg_base + MCB_REG_STATUS1);
 	val &= ~b_MCB_STATUS1_RDY;
-	sys_write32(val, reg_base + MCB_REG_STATUS1);
+	mcb_write(val, reg_base + MCB_REG_STATUS1);
 
 	if (port >= MCB_MAX_PORT) {
 		LOG_ERR("Invalid port number");
 		return;
 	}
-	val = sys_read32(reg_base + MCB_REG_PORT_RDY_MASK0 + (port / 32) * 4);
+	val = mcb_read(reg_base + MCB_REG_PORT_RDY_MASK0 + (port / 32) * 4);
 	val &= ~BIT(port % 32);
-	sys_write32(val, reg_base + MCB_REG_PORT_RDY_MASK0 + (port / 32) * 4);
+	mcb_write(val, reg_base + MCB_REG_PORT_RDY_MASK0 + (port / 32) * 4);
 }
 
 int mcb_systech_rx_is_ready(const struct device *dev, uint8_t port)
@@ -337,7 +356,7 @@ int mcb_systech_rx_is_ready(const struct device *dev, uint8_t port)
 	}
 
 	reg = MCB_REG_PORT_RDY_MASK0 + (port / 32) * 4;
-	val = sys_read32(reg_base + reg);
+	val = mcb_read(reg_base + reg);
 	if (val & BIT(port % 32)) {
 		return 1;
 	}
