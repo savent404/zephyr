@@ -355,11 +355,24 @@ int mcb_systech_rx_is_ready(const struct device *dev, uint8_t port)
 		return -EINVAL;
 	}
 
+#if CONFIG_MCB_SYSTECH_HW_WORKAROUND
 	reg = MCB_REG_PORT_RDY_MASK0 + (port / 32) * 4;
 	val = mcb_read(reg_base + reg);
 	if (val & BIT(port % 32)) {
 		return 1;
 	}
+#else
+	reg = MCB_REG_STATUS1;
+	val = mcb_read(reg_base + reg);
+	if (val & b_MCB_STATUS1_RDY) {
+		if (REG2VALUE(STATUS1, RxPort, val) != port) {
+			LOG_WRN_ONCE("Data ready but not for port %d, the actual one is %d", port,
+				     REG2VALUE(STATUS1, RxPort, val));
+		}
+		return 1;
+	}
+#endif
+
 	return 0;
 }
 
