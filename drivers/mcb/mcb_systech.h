@@ -58,8 +58,8 @@
 #define DR_EXT_B            0x02
 #define DR_IO               0x03
 #define DR_ETH              0x04
-#define DR_MPU_P            0x80
-#define DR_EXT_P            0x81
+#define DR_MPU_P            0x81
+#define DR_EXT_P            0x82
 #define r_MCB_CTRL2_DT_pos  8
 #define r_MCB_CTRL2_DT_mask (BIT(8) - 1)
 #define DT_Unknown          0x00
