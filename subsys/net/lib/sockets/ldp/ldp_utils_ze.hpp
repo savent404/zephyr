@@ -33,10 +33,12 @@ struct ldp_cache_if {
 	static inline void rmb()
 	{
 		barrier_dsync_fence_full();
+		barrier_dmem_fence_full();
 	}
 	static inline void wmb()
 	{
 		barrier_dsync_fence_full();
+		barrier_dmem_fence_full();
 	}
 };
 

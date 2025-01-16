@@ -109,15 +109,10 @@ enum {
 	CIF_BUS_MAX,
 };
 
-#if !CONFIG_CIF_WORKAROUND
+/* This is for CIF socket address */
 #define CIF_IS_SYNC_PORT(port)    ((port < 0x10) || (port >= 0x40 && port < 0x60))
 #define CIF_IS_ASYNC_PORT(port)   ((port >= 0x10 && port < 0x40) || (port >= 0x60 && port < 0x80))
 #define CIF_IS_UNKNOWN_PORT(port) (!(CIF_IS_SYNC_PORT(port) || CIF_IS_ASYNC_PORT(port)))
-#else
-#define CIF_IS_SYNC_PORT(port)    (port == 0 || port == 1)
-#define CIF_IS_ASYNC_PORT(port)   (port == 2)
-#define CIF_IS_UNKNOWN_PORT(port) (!(CIF_IS_SYNC_PORT(port) || CIF_IS_ASYNC_PORT(port)))
-#endif
 
 /**
  * struct sockaddr_can - The sockaddr structure for CIF sockets
