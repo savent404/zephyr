@@ -460,8 +460,8 @@ struct z_device_mmio_rom {
  * @param name Member name within config for the MMIO region
  * @param node_id DTS node identifier
  */
-#define DEVICE_MMIO_NAMED_ROM_INIT(name, node_id) \
-	.name = Z_DEVICE_MMIO_ROM_INITIALIZER(node_id)
+#define DEVICE_MMIO_NAMED_ROM_INIT(name, node_id)                                                  \
+	.name = Z_DEVICE_MMIO_NAMED_ROM_INITIALIZER(name, node_id)
 
 /**
  * @brief Initialize a named DEVICE_MMIO_NAMED_ROM member using a named DT
