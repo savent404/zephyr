@@ -147,11 +147,11 @@ template <typename T_cache> struct ldp_slave: public ldp_basic {
 			uint16_t rx_len = mcb_->get_rx_len(port);
 			uint16_t tx_len = mcb_->get_tx_len(port);
 			constexpr unsigned offset = sizeof(ldp_a_header);
-			auto *tx_hdr = reinterpret_cast<volatile ldp_a_header *>(tx_buf);
-			auto *rx_hdr = reinterpret_cast<volatile ldp_a_header *>(rx_buf);
+			ldp_a_header tx_hdr(*reinterpret_cast<volatile uint32_t *>(tx_buf));
+			ldp_a_header rx_hdr(*reinterpret_cast<volatile uint32_t *>(rx_buf));
 			bool first_tx = tx_len == sizeof(ldp_a_header);
-			bool rx_valid = rx_hdr->magic == LDP_MAGIC && rx_len >= offset;
-			bool data_acked = rx_valid && rx_hdr->rxid == tx_hdr->xid;
+			bool rx_valid = rx_hdr.magic == LDP_MAGIC && rx_len >= offset;
+			bool data_acked = rx_valid && rx_hdr.rxid == tx_hdr.xid;
 
 			// wait for previous packet to be acknowledged
 			if (!first_tx && !data_acked) {
@@ -159,7 +159,12 @@ template <typename T_cache> struct ldp_slave: public ldp_basic {
 			}
 
 			memcpy(tx_buf + offset, buf, len);
-			tx_hdr->xid++;
+
+			/* update header(32-bit aligned) */
+			ldp_a_header tmp;
+			tmp.xid = tx_hdr.xid + 1;
+			tmp.rxid = tx_hdr.rxid;
+			*reinterpret_cast<volatile uint32_t *>(tx_buf) = tmp();
 			cache_if::wmb(); /* make sure buffer is updated */
 			mcb_->set_tx_len(port, len + offset);
 		}
@@ -182,34 +187,34 @@ template <typename T_cache> struct ldp_slave: public ldp_basic {
 			uint8_t *rx_buf;
 
 			if (!mcb_->has_rx(port)) {
-				return 0;
+				return -LDP_ERR_AGAIN;
 			}
+			mcb_->clr_rx(port);
 			rx_buf = mcb_->get_rx_buf(port);
 			rx_len = mcb_->get_rx_len(port);
 			if (rx_len <= len) {
 				memcpy(buf, rx_buf, rx_len);
-				mcb_->clr_rx(port);
 			} else {
 				return -LDP_ERR_RX_BUF_TOO_SMALL;
 			}
 		} else {
 			constexpr size_t offset = sizeof(ldp_a_header);
-			volatile ldp_a_header *rx_hdr, *tx_hdr;
 			uint8_t *rx_buf;
 			uint8_t port = (*it)->port;
 			bool new_data;
 
 			if (!mcb_->has_rx(port)) {
-				return 0;
+				return -LDP_ERR_AGAIN;
 			}
-
+			mcb_->clr_rx(port);
 			rx_len = mcb_->get_rx_len(port);
 			rx_buf = mcb_->get_rx_buf(port);
-			rx_hdr = reinterpret_cast<volatile ldp_a_header *>(rx_buf);
-			tx_hdr = reinterpret_cast<volatile ldp_a_header *>(mcb_->get_tx_buf(port));
+			ldp_a_header rx_hdr(*reinterpret_cast<volatile uint32_t *>(rx_buf));
+			ldp_a_header tx_hdr(
+				*reinterpret_cast<volatile uint32_t *>(mcb_->get_tx_buf(port)));
 
 			cache_if::rmb(); /* make sure buffer is updated */
-			if (rx_hdr->magic != LDP_MAGIC || rx_len < offset) {
+			if (rx_hdr.magic != LDP_MAGIC || (size_t)rx_len < offset) {
 				return -LDP_ERR_INVALID_ASYNC_PACK;
 			}
 			rx_buf = rx_buf + offset;
@@ -218,14 +223,28 @@ template <typename T_cache> struct ldp_slave: public ldp_basic {
 				return -LDP_ERR_RX_BUF_TOO_SMALL;
 			}
 
-			new_data = tx_hdr->rxid != rx_hdr->xid;
+			new_data = tx_hdr.rxid != rx_hdr.xid;
 			if (!new_data) {
 				rx_len = -LDP_ERR_AGAIN;
 			} else {
-				memcpy(buf, rx_buf, rx_len);
-				tx_hdr->rxid = rx_hdr->xid;
+				ldp_a_header tmp;
+				auto ptr = reinterpret_cast<volatile uint32_t *>(
+					mcb_->get_tx_buf(port));
+
+				/* NOTE: 32-bit aligned */
+				for (int i = 0; i < rx_len; i += 4) {
+					uint32_t val =
+						*reinterpret_cast<volatile uint32_t *>(rx_buf + i);
+
+					/* Put it by byte order */
+					for (int j = 0; j < 4 && (j + i) < rx_len; j++) {
+						buf[i + j] = (val >> (j * 8)) & 0xFF;
+					}
+				}
+				tmp.xid = tx_hdr.xid;
+				tmp.rxid = rx_hdr.xid;
+				*ptr = tmp();
 			}
-			mcb_->clr_rx(port);
 		}
 		return rx_len;
 	}
@@ -243,7 +262,7 @@ template <typename T_cache> struct ldp_slave: public ldp_basic {
 	struct conn_info {
 		conn id;
 		bool is_async;
-		int port;
+		uint8_t port;
 	};
 	using conn_info_ptr = std::unique_ptr<conn_info>;
 	using conn_list = std::list<conn_info_ptr>;

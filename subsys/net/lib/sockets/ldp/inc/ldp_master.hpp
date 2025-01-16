@@ -12,6 +12,7 @@
 #pragma once
 
 #include "ldp_basic.hpp"
+#include <zephyr/kernel.h>
 
 namespace systech
 {
@@ -36,7 +37,7 @@ template <typename T_mempool, typename T_cache> struct ldp_master: public ldp_ba
 				auto self = static_cast<ldp_master *>(arg);
 				self->sync_handler();
 			},
-			this, nullptr, 100);
+			this, nullptr, 10000);
 		wqs_.push_back(sync_wq_id_);
 	}
 
@@ -434,7 +435,7 @@ template <typename T_mempool, typename T_cache> struct ldp_master: public ldp_ba
 			uint8_t *rx_buf, *tx_buf;
 			uint16_t rx_len;
 			uint32_t status;
-			bool data_ready, data_timeout;
+			bool data_ready, data_timeout, port_rejected;
 
 			if (ci->flg_one_shot && ci->stat_rx_packet) {
 				continue;
@@ -442,6 +443,14 @@ template <typename T_mempool, typename T_cache> struct ldp_master: public ldp_ba
 
 			/* prepare frame */
 			mcb_->config_port(ci->port, true, true, mcb_if::MCB_MAX_FRAME_LEN);
+
+#if CONFIG_MCB_SYSTECH_HW_WORKAROUND
+			/* force to output, HW can't send frame if len==0 */
+			/* FIXME: HW bug, if tx_len is 0, the function will not work */
+			if (ci->tx_len == 0) {
+				ci->tx_len = 4;
+			}
+#endif
 			mcb_->set_tx_len(ci->port, ci->tx_len);
 			tx_buf = mcb_->get_tx_buf(ci->port);
 			if (ci->tx_len) {
@@ -455,7 +464,17 @@ template <typename T_mempool, typename T_cache> struct ldp_master: public ldp_ba
 				status = mcb_->get_status();
 				data_ready = mcb_->has_rx(ci->port);
 				data_timeout = status & mcb_if::MCB_ERR_T_ERR;
-			} while (!data_ready && !data_timeout);
+				port_rejected = status & mcb_if::MCB_ERR_P_ERR;
+			} while (!data_ready && !data_timeout && !port_rejected);
+
+#if CONFIG_MCB_SYSTECH_HW_WORKAROUND
+			/* FIXME: HW bug, single transmit will trigger timeout and ready at the same
+			 * time
+			 */
+			if (data_ready) {
+				data_timeout = 0;
+			}
+#endif
 
 			/* handle received frame */
 			if (data_ready) {
@@ -504,7 +523,12 @@ template <typename T_mempool, typename T_cache> struct ldp_master: public ldp_ba
 			uint8_t *tx_buf;
 			uint8_t *tx_data;
 			uint32_t status;
+#if CONFIG_MCB_SYSTECH_HW_WORKAROUND
+			/* HW bug, if payload is empty, the function will not work */
+			async_buf abuf = {(uint8_t *)"empt", 4};
+#else
 			async_buf abuf = {nullptr, 0};
+#endif
 			volatile ldp_a_header *tx_hdr;
 			bool data_ready, data_timeout, p_error;
 			bool is_invalid_rsp = false; /* header is craped */
@@ -516,6 +540,14 @@ template <typename T_mempool, typename T_cache> struct ldp_master: public ldp_ba
 				false; /* new rsp but not ordered(including first rsp)*/
 			bool is_accept_rsp = false; /* accept rsp */
 
+			if (ci->flg_one_shot && ci->stat_rx_packet) {
+				/* FIXME: This is not a good way to handle one shot connection
+				 * because we must deal it till the connection is destroyed */
+				/* this is for syncing rxid to slave. To notice slave that
+				 * master received the response */
+				break;
+			}
+
 			/* prefetch tx buffer */
 			if (!ci->tx_bufs.empty()) {
 				abuf = ci->tx_bufs.front();
@@ -524,7 +556,16 @@ template <typename T_mempool, typename T_cache> struct ldp_master: public ldp_ba
 			/* prepare to tx, assume port is reused by other connection. so we need to
 			 * reconfig at every tx */
 			mcb_->config_port(ci->port, true, true, mcb_if::MCB_MAX_FRAME_LEN);
+#if CONFIG_MCB_SYSTECH_HW_WORKAROUND
+			/* FIXME: This is a hardware bug, if update tx_len from 13 to 8, the
+			 * function will not work. So we can only update tx_len for once.
+			 */
+			if (mcb_->get_tx_len(ci->port) == 0) {
+				mcb_->set_tx_len(ci->port, abuf.len + sizeof(ldp_a_header));
+			}
+#else
 			mcb_->set_tx_len(ci->port, abuf.len + sizeof(ldp_a_header));
+#endif
 			tx_buf = mcb_->get_tx_buf(ci->port);
 			tx_data = tx_buf + sizeof(ldp_a_header);
 			tx_hdr = reinterpret_cast<volatile ldp_a_header *>(tx_buf);
@@ -536,21 +577,21 @@ template <typename T_mempool, typename T_cache> struct ldp_master: public ldp_ba
 			}
 			cache_if::wmb(); /* make sure buffer is updated */
 			mcb_->tx(ci->port, ci->sid, ci->preempt);
-
-			if (ci->flg_one_shot && ci->stat_rx_packet) {
-				/* FIXME: This is not a good way to handle one shot connection
-				 * because we must deal it till the connection is destroyed */
-				/* this is for syncing rxid to slave. To notice slave that
-				 * master received the response */
-				break;
-			}
-
 			/* wait for response */
 			do {
 				status = mcb_->get_status();
 				data_ready = mcb_->has_rx(ci->port);
 				data_timeout = status & mcb_if::MCB_ERR_T_ERR;
 			} while (!data_ready && !data_timeout);
+
+#if CONFIG_MCB_SYSTECH_HW_WORKAROUND
+			/* FIXME: HW bug, single transmit will trigger timeout and ready at the same
+			 * time
+			 */
+			if (data_ready) {
+				data_timeout = 0;
+			}
+#endif
 
 			p_error = status & mcb_if::MCB_ERR_P_ERR;
 
