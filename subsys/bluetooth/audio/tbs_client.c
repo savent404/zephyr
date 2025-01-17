@@ -857,11 +857,42 @@ static bool can_add_string_to_net_buf(const struct net_buf_simple *buf, size_t l
 }
 
 /* Common function to read tbs_client strings which may require long reads */
-static uint8_t handle_string_long_read(struct bt_tbs_instance *inst, uint8_t err, const void *data,
-				       uint16_t offset, uint16_t length, bool truncatable)
+static uint8_t handle_string_long_read(struct bt_conn *conn, uint8_t err,
+				       struct bt_gatt_read_params *params,
+				       const void *data,
+				       uint16_t length,
+				       bt_tbs_client_read_string_cb cb,
+				       bool truncatable)
 {
-	if (err != 0) {
-		LOG_DBG("err: %u", err);
+	struct bt_tbs_instance *inst = CONTAINER_OF(params,
+						    struct bt_tbs_instance,
+						    read_params);
+	uint16_t offset = params->single.offset;
+	uint8_t inst_index = tbs_index(conn, inst);
+	const char *received_string;
+	uint16_t str_length;
+	int tbs_err = err;
+
+	if ((tbs_err == 0) && (data != NULL) &&
+	    (net_buf_simple_tailroom(&inst->net_buf) < length)) {
+		LOG_DBG("Read length %u: String buffer full", length);
+		if (truncatable) {
+			/* Use the remaining buffer and continue reading */
+			LOG_DBG("Truncating string");
+			length = net_buf_simple_tailroom(&inst->net_buf);
+		} else {
+			tbs_err = BT_ATT_ERR_INSUFFICIENT_RESOURCES;
+		}
+	}
+
+	if (tbs_err != 0) {
+		LOG_DBG("err: %d", tbs_err);
+
+		tbs_client_gatt_read_complete(inst);
+
+		if (cb != NULL) {
+			cb(conn, tbs_err, inst_index, NULL);
+		}
 
 		return BT_GATT_ERR(err);
 	}
@@ -880,16 +911,51 @@ static uint8_t handle_string_long_read(struct bt_tbs_instance *inst, uint8_t err
 				length = net_buf_simple_tailroom(&inst->net_buf) - sizeof('\0');
 				net_buf_simple_add_mem(&inst->net_buf, data, length);
 
-				/* Ensure that the data is correctly truncated */
-				utf8_trunc(inst->net_buf.data);
-			} else {
-				return BT_GATT_ERR(BT_ATT_ERR_INSUFFICIENT_RESOURCES);
-			}
-		} else {
-			net_buf_simple_add_mem(&inst->net_buf, data, length);
+		return BT_GATT_ITER_CONTINUE;
+	}
 
-			return BT_GATT_ITER_CONTINUE;
+	str_length = inst->net_buf.len;
+
+	/* Ensure there is space for string termination */
+	if (net_buf_simple_tailroom(&inst->net_buf) < 1) {
+		LOG_DBG("Truncating string");
+		if (truncatable) {
+			/* Truncate */
+			str_length--;
+		} else {
+			tbs_err = BT_ATT_ERR_INSUFFICIENT_RESOURCES;
 		}
+	}
+
+	if (tbs_err == 0) {
+		char *str_data;
+
+		/* Get a reference to the string buffer */
+		str_data = net_buf_simple_pull_mem(&inst->net_buf, inst->net_buf.len);
+
+		/* All strings are UTF-8, truncate properly if needed */
+		str_data[str_length] = '\0';
+		received_string = utf8_trunc(str_data);
+
+		/* The string might have been truncated */
+		if (strlen(received_string) < str_length) {
+			LOG_DBG("Truncating string");
+			if (!truncatable) {
+				tbs_err = BT_ATT_ERR_INSUFFICIENT_RESOURCES;
+			}
+		}
+
+		LOG_DBG("%s", received_string);
+	}
+
+	if (tbs_err) {
+		received_string = NULL;
+	}
+
+	tbs_client_gatt_read_complete(inst);
+
+	if (cb != NULL) {
+		cb(conn, tbs_err, inst_index, received_string);
 	}
 
 	return BT_GATT_ITER_STOP;
@@ -1054,23 +1120,14 @@ static uint8_t read_uri_list_cb(struct bt_conn *conn, uint8_t err,
 	const uint8_t inst_index = tbs_index(conn, inst);
 	int ret;
 
-	LOG_DBG("");
+	LOG_DBG("Read bearer URI list");
 
-	ret = handle_string_long_read(inst, err, data, params->single.offset, length, true);
-	if (ret != BT_GATT_ITER_CONTINUE) {
-		if (ret == BT_GATT_ITER_STOP) {
-			/* At this point the inst->net_buf.data contains a NULL terminator string */
-			uri_list_changed(conn, 0, inst_index, (char *)inst->net_buf.data);
-		} else {
-			uri_list_changed(conn, ret, inst_index, NULL);
-		}
-
-		tbs_client_gatt_read_complete(inst);
-
-		return BT_GATT_ITER_STOP;
+	if (tbs_client_cbs != NULL && tbs_client_cbs->uri_list != NULL) {
+		cb = tbs_client_cbs->uri_list;
 	}
 
-	return BT_GATT_ITER_CONTINUE;
+	return handle_string_long_read(conn, err, params, data,
+				       length, cb, false);
 }
 #endif /* defined(CONFIG_BT_TBS_CLIENT_BEARER_URI_SCHEMES_SUPPORTED_LIST) */
 
