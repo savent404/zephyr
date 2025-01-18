@@ -1,0 +1,17 @@
+/ {
+	aliases {
+		my-i2c = &i2c0;
+	};
+};
+
+&i2c0 {
+	pinctrl-0 = <&i2c0_pins_mio_50>, <&i2c0_pins_mio_51>;
+	pinctrl-names = "default";
+	status = "okay";
+
+	rtc0: pcf8563@51 {
+		compatible = "nxp,pcf8563";
+		status = "okay";
+		reg = <0x51>;
+	};
+};
