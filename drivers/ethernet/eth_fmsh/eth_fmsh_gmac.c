@@ -38,7 +38,11 @@ FGmacPs_PhyConfig_T s_GMAC_PhyCfg = {
 	.phy_device = PHY_YT8521,
 	.speed = FPAR_GMACPS_0_SPEED,
 	.auto_detect_ad_en = 1,
-	.mdio_address = 3,
+	.mdio_address = DT_INST_PROP(0, mdio_addr),
+	.gmii2rgmii_mdio_addr1 = DT_INST_PROP(0, gmii2rgmii_addr1),
+	.gmii2rgmii_mdio_addr2 = DT_INST_PROP(0, gmii2rgmii_addr2),
+	.phy_mode = DT_INST_PROP(0, phy_mode),
+	.phy_delay = DT_INST_PROP(0, phy_delay),
 	.auto_nag_en = 1,
 	.interface = FPAR_GMACPS_0_INTERFACE,
 };
@@ -46,7 +50,7 @@ FGmacPs_PhyConfig_T s_GMAC_PhyCfg = {
 FGmacPs_Instance_T s_GMAC_Instance = {
 	.index = 0,
 	.base_address = (void *)DT_INST_REG_ADDR(0),
-	.mac_address = {0x11, 0x22, 0x33, 044, 0x55, 0x66},
+	.mac_address = DT_INST_PROP(0, local_mac_address),
 	.csr_clk = 5,
 	.wRxListSize = GMAC_RDES_NUM,
 	.wTxListSize = GMAC_TDES_NUM,
@@ -193,8 +197,10 @@ static void eth_fmsh_phy_update(void *arg1, void *arg2, void *arg3)
 	while (1) {
 		k_sleep(K_MSEC(1000));
 		FGmacPs_GmacLink_Updata(ctx->gmac_inst);
-		FGmacPS_Gmii2rgmii_Update_Speed1(ctx->gmac_inst);
-		FGmacPS_Gmii2rgmii_Update_Speed2(ctx->gmac_inst);
+		FGmacPS_Gmii2rgmii_Update_Speed(ctx->gmac_inst,
+						ctx->gmac_inst->phy_cfg->gmii2rgmii_mdio_addr1);
+		FGmacPS_Gmii2rgmii_Update_Speed(ctx->gmac_inst,
+						ctx->gmac_inst->phy_cfg->gmii2rgmii_mdio_addr2);
 	}
 }
 
@@ -454,6 +460,10 @@ static void eth_fmsh_iface_init(struct net_if *iface)
 
 	/* 设置MAC地址 */
 	net_if_set_link_addr(data->iface, data->gmac_inst->mac_address, 6, NET_LINK_ETHERNET);
+	LOG_INF("MAC address: %02x:%02x:%02x:%02x:%02x:%02x", data->gmac_inst->mac_address[0],
+		data->gmac_inst->mac_address[1], data->gmac_inst->mac_address[2],
+		data->gmac_inst->mac_address[3], data->gmac_inst->mac_address[4],
+		data->gmac_inst->mac_address[5]);
 
 	data->napi_budget = 256;
 	atomic_clear(&data->rx_busy);
@@ -521,8 +531,8 @@ void FGmacPs_GmacListener(FGmacPs_Instance_T *pGmac, int32_t ecode)
 		reg = FMSH_IN32_32(pGmacPortMap->GMAC_ISR);
 		if ((reg & GMAC_ISR_RGSMIIIS) != 0) {
 			FMSH_ERROR("RGMII or SMII Interrupt, Link status change");
-			FGmac_Ps_GetLinkStatus(
-				pGmac); /* GLI will be cleared when read these bits */
+			/* GLI will be cleared when read these bits */
+			FGmac_Ps_GetLinkStatus(pGmac);
 		}
 		break;
 	default:
@@ -587,8 +597,10 @@ static int eth_fmsh_init(const struct device *dev)
 	}
 
 	FGmacPs_GmacLink_Updata(data->gmac_inst);
-	FGmacPS_Gmii2rgmii_Update_Speed1(data->gmac_inst);
-	FGmacPS_Gmii2rgmii_Update_Speed2(data->gmac_inst);
+	FGmacPS_Gmii2rgmii_Update_Speed(data->gmac_inst,
+					data->gmac_inst->phy_cfg->gmii2rgmii_mdio_addr1);
+	FGmacPS_Gmii2rgmii_Update_Speed(data->gmac_inst,
+					data->gmac_inst->phy_cfg->gmii2rgmii_mdio_addr2);
 
 	/* 配置中断 */
 	IRQ_CONNECT(DT_INST_IRQN(0), DT_INST_IRQ(0, priority), eth_fmsh_isr, DEVICE_DT_INST_GET(0),

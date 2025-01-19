@@ -107,7 +107,7 @@ int FGmacPs_GmacLink_Updata(FGmacPs_Instance_T *pGmac)
 	return 0;
 }
 
-int FGmacPS_Gmii2rgmii_Update_Speed1(FGmacPs_Instance_T *pGmac)
+int FGmacPS_Gmii2rgmii_Update_Speed(FGmacPs_Instance_T *pGmac, uint8_t gmii2rgmii_addr)
 {
 	static u32 LinkSpeed;
 	u8 ext_phy_address = 0;
@@ -125,7 +125,8 @@ int FGmacPS_Gmii2rgmii_Update_Speed1(FGmacPs_Instance_T *pGmac)
 	LinkSpeed = pGmacLinkSts->link_speed;
 
 	ext_phy_address = pPhyConfig->mdio_address;
-	pPhyConfig->mdio_address = XILINX_GMII2RGMII_MDIO_ADDR1;
+	pPhyConfig->mdio_address = gmii2rgmii_addr;
+
 	switch (LinkSpeed) {
 	case speed_1000:
 		fmsh_mdio_write(pGmac, XILINX_GMII2RGMII_CTRL_REG, XILINX_GMII2RGMII_SPEED_1000);
@@ -140,43 +141,7 @@ int FGmacPS_Gmii2rgmii_Update_Speed1(FGmacPs_Instance_T *pGmac)
 		fmsh_mdio_write(pGmac, XILINX_GMII2RGMII_CTRL_REG, XILINX_GMII2RGMII_SPEED_1000);
 		break;
 	}
-	pPhyConfig->mdio_address = ext_phy_address;
-	return 0;
-}
 
-int FGmacPS_Gmii2rgmii_Update_Speed2(FGmacPs_Instance_T *pGmac)
-{
-	static u32 LinkSpeed;
-	u8 ext_phy_address = 0;
-
-	FGmacPs_PhyConfig_T *pPhyConfig = pGmac->phy_cfg;
-	FGmacPs_LinkStatus_T *pGmacLinkSts = 0;
-
-	FGmac_Ps_GetLinkStatus(pGmac);
-	pGmacLinkSts = pGmac->gmac_link_status;
-
-	if (LinkSpeed == pGmacLinkSts->link_speed) {
-		return 0;
-	}
-
-	LinkSpeed = pGmacLinkSts->link_speed;
-
-	ext_phy_address = pPhyConfig->mdio_address;
-	pPhyConfig->mdio_address = XILINX_GMII2RGMII_MDIO_ADDR2;
-	switch (LinkSpeed) {
-	case speed_1000:
-		fmsh_mdio_write(pGmac, XILINX_GMII2RGMII_CTRL_REG, XILINX_GMII2RGMII_SPEED_1000);
-		break;
-	case speed_100:
-		fmsh_mdio_write(pGmac, XILINX_GMII2RGMII_CTRL_REG, XILINX_GMII2RGMII_SPEED_100);
-		break;
-	case speed_10:
-		fmsh_mdio_write(pGmac, XILINX_GMII2RGMII_CTRL_REG, XILINX_GMII2RGMII_SPEED_10);
-		break;
-	default:
-		fmsh_mdio_write(pGmac, XILINX_GMII2RGMII_CTRL_REG, XILINX_GMII2RGMII_SPEED_1000);
-		break;
-	}
 	pPhyConfig->mdio_address = ext_phy_address;
 	return 0;
 }

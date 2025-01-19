@@ -14,7 +14,6 @@ extern u32 g_link_speed_neg_en;
 extern u32 g_GmacLinkStatus;
 
 int FGmacPs_GmacLink_Updata(FGmacPs_Instance_T *pGmac);
-int FGmacPS_Gmii2rgmii_Update_Speed1(FGmacPs_Instance_T *pGmac);
-int FGmacPS_Gmii2rgmii_Update_Speed2(FGmacPs_Instance_T *pGmac);
+int FGmacPS_Gmii2rgmii_Update_Speed(FGmacPs_Instance_T *pGmac, uint8_t gmii2rgmii_addr);
 
 #endif

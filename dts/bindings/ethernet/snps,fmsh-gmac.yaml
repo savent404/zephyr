@@ -14,6 +14,7 @@ properties:
   local-mac-address:
     type: uint8-array
     required: true
+    description: "MAC address"
 
   clock-frequency:
     type: int
@@ -22,3 +23,31 @@ properties:
   phy-handle:
     type: phandle
     required: true
+
+  mdio-addr:
+    type: int
+    required: true
+    description: "PHY MDIO address"
+
+  gmii2rgmii-addr1:
+    type: int
+    required: true
+    description: "GMII2RGMII converter 1 MDIO address"
+
+  gmii2rgmii-addr2:
+    type: int
+    required: true
+    description: "GMII2RGMII converter 2 MDIO address"
+
+  phy-mode:
+    type: string
+    required: true
+    enum:
+      - "fiber"
+      - "utp"
+    description: "PHY interface mode selection"
+
+  phy-delay:
+    type: int
+    required: true
+    description: "PHY delay configuration value (hex)"

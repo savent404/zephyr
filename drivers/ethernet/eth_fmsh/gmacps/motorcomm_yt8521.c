@@ -52,24 +52,15 @@ u8 yt8521_reg_dump(FGmacPs_Instance_T *pGmac)
 
 u8 yt8521_detect(FGmacPs_Instance_T *pGmac)
 {
-	FGmacPs_PhyConfig_T *pPhyConfig = pGmac->phy_cfg;
-	u32 reg;
-	u8 index = 0;
+	u32 reg1 = yt8521_reg_read(pGmac, PAGE0, YT8521_ID1);
+	u32 reg2 = yt8521_reg_read(pGmac, PAGE0, YT8521_ID2);
 
-	for (index = 1; index < 32; index++) {
-		pPhyConfig->mdio_address = index;
-		reg = yt8521_reg_read(pGmac, PAGE0, YT8521_ID1);
-		if (reg == YT8521_ID1_VAL) {
-			reg = yt8521_reg_read(pGmac, PAGE0, YT8521_ID2);
-			if ((reg) == YT8521_ID2_VAL) {
-				FMSH_DEBUG("YT8521 or alike PHY detect 0x%x \r\n",
-					   pPhyConfig->mdio_address);
-				return ETHERNET_PHY_OK;
-			}
-		}
+	if ((reg1 == YT8521_ID1_VAL) && (reg2 == YT8521_ID2_VAL)) {
+		FMSH_INFO("YT8521 or alike PHY detect 0x%x \r\n", pGmac->phy_cfg->mdio_address);
+		return ETHERNET_PHY_OK;
 	}
-	FMSH_DEBUG("PHY detect fail \r\n");
-	pPhyConfig->mdio_address = 32;
+	FMSH_INFO("PHY detect fail \r\n");
+
 	return ETHERNET_PHY_ERR;
 }
 
@@ -177,7 +168,6 @@ u8 yt8521_cfg(FGmacPs_Instance_T *pGmac)
 	yt8521_reg_write(pGmac, PAGE0, YT8521_ANA, reg);
 
 	/* auto MDI crossover */
-	/* mvl88e1111_MDIautoX(pGmac,3); */
 	/* AN and speed cfg */
 	if (pPhyConfig->auto_nag_en == 0) {
 		/* AN disable */
@@ -216,12 +206,30 @@ u8 yt8521_cfg(FGmacPs_Instance_T *pGmac)
 		yt8521_reg_write(pGmac, PAGE0, YT8521_CTRL, reg);
 	}
 
-	/* utp=>rgmii */
-	/* NOTE: this function shdould not be called more than one for each chip. */
-	reg = ytphy_read_ext(pGmac, PAGE0, 0xa001);
-	reg &= (~7);
-	reg |= 1;
-	ytphy_write_ext(pGmac, PAGE0, 0xa001, reg);
+	/* default use Fiber mode */
+	u32 reg_val = 0x8161;
+
+	if (strcmp(pPhyConfig->phy_mode, "utp") == 0) {
+		reg_val = 0x8160;
+	}
+	fmsh_mdio_write(pGmac, 0x1e, 0xa001);
+	fmsh_mdio_write(pGmac, 0x1f, reg_val);
+	FMSH_INFO("%s<->RGMII\r\n", reg_val == 0x8161 ? "Fiber" : "UTP");
+
+	fmsh_mdio_write(pGmac, 0x1e, 0xa003);
+	fmsh_mdio_write(pGmac, 0x1f, pPhyConfig->phy_delay);
+	FMSH_INFO("PHY delay:0x%x\r\n", pPhyConfig->phy_delay);
+
+	ytphy_write_ext(pGmac, PAGE0, 0xa00c, 0x6FF8);
+	ytphy_write_ext(pGmac, PAGE0, 0xa00d, 0x6FF8);
+	ytphy_write_ext(pGmac, PAGE0, 0xa00e, 0x6FF8);
+
+	reg = ytphy_read_ext(pGmac, PAGE0, 0xa00c);
+	FMSH_INFO("YT Read:0x%x\r\n", reg);
+	reg = ytphy_read_ext(pGmac, PAGE0, 0xa00d);
+	FMSH_INFO("YT Read:0x%x\r\n", reg);
+	reg = ytphy_read_ext(pGmac, PAGE0, 0xa00e);
+	FMSH_INFO("YT Read:0x%x\r\n", reg);
 
 	return ETHERNET_PHY_OK;
 }

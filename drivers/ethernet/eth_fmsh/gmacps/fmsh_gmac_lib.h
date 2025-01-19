@@ -296,7 +296,14 @@ typedef struct _phy_config {
 	u8 mdio_address;
 	u8 link_up;
 	u8 auto_nag_en;
-
+	/* GMII2RGMII converter 1 MDIO address */
+	u8 gmii2rgmii_mdio_addr1;
+	/* GMII2RGMII converter 2 MDIO address */
+	u8 gmii2rgmii_mdio_addr2;
+	/* PHY interface mode: fiber/utp */
+	char *phy_mode;
+	/* PHY delay configuration value */
+	u32 phy_delay;
 	FGmacPs_Speed speed;
 	u8 is_duplex;
 

@@ -1,4 +1,3 @@
 &ethernet0 {
 	status = "okay";
-	local-mac-address = [00 80 E1 00 00 00];
 };
