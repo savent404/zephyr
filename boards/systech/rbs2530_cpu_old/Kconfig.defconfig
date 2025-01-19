@@ -1,0 +1,53 @@
+#
+# Copyright (c) 2024 SYSTech Co.
+# SPDX-License-Identifier: Apache-2.0
+#
+
+if BOARD_RBS2530_CPU_OLD
+
+config BUILD_OUTPUT_BIN
+	default n
+config SYS_CLOCK_TICKS_PER_SEC
+	default 1000
+
+if LOG_PROCESS_THREAD
+
+config LOG_PROCESS_THREAD_STACK_SIZE
+	default 8192
+
+endif # LOG_PROCESS_THREAD
+
+if NETWORKING
+
+config NET_L2_ETHERNET
+	default y
+
+config NET_TX_STACK_SIZE
+	default 8192
+
+config NET_RX_STACK_SIZE
+	default 8192
+
+if NET_TCP
+
+config NET_TCP_WORKQ_STACK_SIZE
+	default 8192
+
+endif # NET_TCP
+
+if NET_MGMT_EVENT
+
+config NET_MGMT_EVENT_STACK_SIZE
+	default 8192
+
+endif # NET_MGMT_EVENT
+
+config TEST_RANDOM_GENERATOR
+	default y
+
+endif # NETWORKING
+
+config SHELL_STACK_SIZE
+	default 8192 if SHELL
+
+endif # BOARD_RBS2530_CPU_OLD

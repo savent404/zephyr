@@ -1,0 +1,101 @@
+/*
+ * Copyright (c) 2024 SYSTech Co.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+/dts-v1/;
+
+#include <freq.h>
+#include <zephyr/dt-bindings/pinctrl/fmql-pinctrl.h>
+#include <fmsh/fmql_psoc.dtsi>
+#include <fmsh/fmql_pinctrl.dtsi>
+
+/ {
+	model = "QEMU Cortex-A7";
+	compatible = "fmsh,fmql20", "arm,cortex-a7";
+	interrupt-parent = <&gic>;
+
+	cpus {
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		cpu@0 {
+			device_type = "cpu";
+			compatible = "arm,cortex-a7";
+			reg = <0>;
+		};
+	};
+
+	sram0: memory@100000 {
+		compatible = "mmio-sram";
+		reg = <0x00100000 DT_SIZE_M(512)>;
+	};
+
+	flash0: flash@0 {
+		reg = <0x00000000 DT_SIZE_M(256)>;
+	};
+
+	mcb0: mcb@0 {
+		compatible = "systech,mcb";
+		reg = <0x20000000 DT_SIZE_K(4)
+			   0x30000000 DT_SIZE_K(512)
+			   0x40000000 DT_SIZE_K(512)>;
+		reg-names = "reg", "rx_buf", "tx_buf";
+		status = "disabled";
+		bandwidth = <DT_FREQ_M(1)>;
+	};
+
+	mcb1: mcb@1 {
+		compatible = "systech,mcb";
+		reg = <0x20000000 DT_SIZE_K(4)
+			   0x30000000 DT_SIZE_K(512)
+			   0x40000000 DT_SIZE_K(512)>;
+		reg-names = "reg", "rx_buf", "tx_buf";
+		status = "disabled";
+		bandwidth = <DT_FREQ_M(40)>;
+	};
+
+	chosen {
+		zephyr,flash      = &flash0;
+		zephyr,sram       = &ddr;
+		zephyr,console    = &uart1;
+		zephyr,shell-uart = &uart1;
+		zephyr,ocm        = &ocm_low;
+		zephyr,uart-pipe  = &uart1;
+	};
+};
+
+&uart1 {
+	status = "okay";
+	current-speed = <115200>;
+	pinctrl-0 = <&uart1_rx_mio_9>, <&uart1_tx_mio_8>;
+	pinctrl-names = "default";
+};
+
+&qspi0_flash {
+	pinctrl-0 = <&qspi0_cs_mio_1>,
+				<&qspi0_io0_mio_2>,
+				<&qspi0_io1_mio_3>,
+				<&qspi0_io2_mio_4>,
+				<&qspi0_io3_mio_5>,
+				<&qspi0_clk_mio_6>;
+	pinctrl-names = "default";
+	cpol = <0>;
+	cpha = <0>;
+	sram-fifo-size = <1024>;
+
+	flat-page-count = <65536>;
+	flat-page-size = <256>;
+};
+
+&ethernet0 {
+	pinctrl-0 = <&mdio0_clk_mio_52>, <&mdio0_data_mio_53>;
+	pinctrl-names = "default";
+	mdio-addr = <3>;
+	gmii2rgmii-addr1 = <0x8>;
+	gmii2rgmii-addr2 = <0x9>;
+	phy-mode = "fiber";  /* fiber or utp */
+	phy-delay = <0x2000>;
+	local-mac-address = [8C 1F 64 5A E1 A0];
+	status = "okay";
+};

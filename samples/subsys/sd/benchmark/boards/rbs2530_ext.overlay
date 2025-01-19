@@ -1,0 +1,10 @@
+/ {
+	aliases {
+		mmc = &mmc0;
+	};
+};
+
+&mmc0 {
+	status = "okay";
+	non-removable;
+};

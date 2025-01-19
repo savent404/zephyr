@@ -1,0 +1,26 @@
+/**
+ * Copyright (c) 2024 SYSTech Co.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+#include <zephyr/dt-bindings/pinctrl/fmql-pinctrl.h>
+
+&qspi0_flash {
+	status = "okay";
+	pinctrl-0 = <&qspi0_cs_mio_1>,
+				<&qspi0_io0_mio_2>,
+				<&qspi0_io1_mio_3>,
+				<&qspi0_io2_mio_4>,
+				<&qspi0_io3_mio_5>,
+				<&qspi0_clk_mio_6>;
+	pinctrl-names = "default";
+	cpol = <0>;
+	cpha = <0>;
+	sram-fifo-size = <1024>;
+};
+
+/ {
+	aliases {
+		flash = &qspi0_flash;
+	};
+};

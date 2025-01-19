@@ -1,0 +1,41 @@
+/**
+ * Copyright (c) 2024 SYSTech Co.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+#include <zephyr/dt-bindings/gpio/gpio.h>
+
+/ {
+	aliases {
+		led0 = &status_led;
+	};
+
+	leds {
+		compatible = "gpio-leds";
+		status_led: led_0 {
+			gpios = <&gpio0 25 GPIO_ACTIVE_HIGH>;
+			label = "Status LED";
+		};
+	};
+};
+
+&pinctrl {
+	// /omit-if-no-ref/ gpio0_comm_rled_mio_23: gpio0_comm_rled_mio_23 {
+	//     pinmux = <FMQL_PINMUX(MIO, 23, PINMUX_GPIO)>;
+	//     io_type = <IO_TYPE_LVCMOS18>;
+	// };
+
+	// /omit-if-no-ref/ gpio0_comm_gled_mio_24: gpio0_comm_gled_mio_24 {
+	//     pinmux = <FMQL_PINMUX(MIO, 24, PINMUX_GPIO)>;
+	//     io_type = <IO_TYPE_LVCMOS18>;
+	// };
+
+	/omit-if-no-ref/ gpio0_reserve_led_mio_25: gpio0_reserve_led_mio_25 {
+		pinmux = <FMQL_PINMUX(MIO, 25, PINMUX_GPIO)>;
+		io_type = <IO_TYPE_LVCMOS18>;
+	};
+};
+
+&gpio0 {
+	status = "okay";
+};
