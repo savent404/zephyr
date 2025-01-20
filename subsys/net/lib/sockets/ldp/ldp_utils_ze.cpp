@@ -92,14 +92,7 @@ void ldp_wq::schedule()
 	 *       But according to the LDP protocol, All the request is scheduled by
 	 *       ourself, so the bus didn't have any request at this point.
 	 */
-	free_time = ((free_time + enclosed_cycle - 1) / enclosed_cycle) * enclosed_cycle;
-
-	if (free_time < prev_fn_cost_) {
-		/* FIXME: bus cycle takes too long,
-		 * but we still need give CPU some time...
-		 */
-		prev_fn_cost_ = 0;
-	}
+	free_time = (free_time + enclosed_cycle - 1) / enclosed_cycle * enclosed_cycle;
 	k_usleep(free_time - prev_fn_cost_);
 
 	do {
@@ -123,6 +116,6 @@ void ldp_wq::schedule()
 					    : UINT32_MAX - curr_cycle + next_cycle;
 	prev_fn_cost_ = k_cyc_to_us_ceil32(time_diff);
 	if (prev_fn_cost_ > enclosed_cycle) {
-		LOG_WRN_ONCE("Work queue overrun %d", prev_fn_cost_);
+		LOG_WRN("Work queue overrun %d", prev_fn_cost_);
 	}
 }

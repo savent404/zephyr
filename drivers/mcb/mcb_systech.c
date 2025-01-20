@@ -17,8 +17,7 @@
 
 #define LOG_LEVEL CONFIG_MCB_LOG_LEVEL
 #include <zephyr/logging/log.h>
-
-LOG_MODULE_REGISTER(mcb_systech, LOG_LEVEL);
+LOG_MODULE_REGISTER(mcb_systech);
 
 #define DT_DRV_COMPAT systech_mcb
 
@@ -28,18 +27,16 @@ LOG_MODULE_REGISTER(mcb_systech, LOG_LEVEL);
 static inline void mcb_write(uint32_t value, uint32_t addr)
 {
 	sys_write32(value, addr);
-	LOG_DBG("Write %08x to %08x", value, addr);
 }
 
 static inline uint32_t mcb_read(uint32_t addr)
 {
-	volatile uint32_t val;
+	uint32_t val;
+
 #if CONFIG_MCB_SYSTECH_HW_WORKAROUND
-	/* FIXME: bus bandwidth is 10Mbps, needs delay for a while
-	 */
-	k_busy_wait(20);
+	/* FIXME: For the crap hw design. register shall be read out at least 3 times */
 	val = sys_read32(addr);
-	k_busy_wait(20);
+	val = sys_read32(addr);
 #endif
 	val = sys_read32(addr);
 
@@ -69,12 +66,7 @@ void mcb_systech_reset(const struct device *dev, uint8_t role)
 	/* Clear CTRL/STATUS register */
 	mcb_write(0, reg_base + MCB_REG_CTRL1);
 	mcb_write(0, reg_base + MCB_REG_CTRL2);
-#if CONFIG_MCB_SYSTECH_HW_WORKAROUND
-	mcb_write(0xFFFFFFFF, reg_base + MCB_REG_STATUS1);
 	mcb_write(0, reg_base + MCB_REG_STATUS1);
-#else
-	mcb_write(0, reg_base + MCB_REG_STATUS1);
-#endif
 	mcb_write(0, reg_base + MCB_REG_I_A_COUNT);
 	mcb_write(0, reg_base + MCB_REG_I_B_COUNT);
 
@@ -83,24 +75,39 @@ void mcb_systech_reset(const struct device *dev, uint8_t role)
 	}
 
 	for (uint32_t addr = MCB_REG_PORT_RDY_MASK0; addr <= MCB_REG_PORT_RDY_MASK3; addr += 4) {
-#if CONFIG_MCB_SYSTECH_HW_WORKAROUND
-		mcb_write(0xFFFFFFFF, reg_base + addr);
-#endif
+		mcb_write(0, reg_base + addr);
+	}
+
+	for (uint32_t addr = MCB_REG_PORT_W_MASK0; addr <= MCB_REG_PORT_W_MASK3; addr += 4) {
+		mcb_write(0, reg_base + addr);
+	}
+
+	for (uint32_t addr = MCB_REG_PORT_RX_LEN(0); addr <= MCB_REG_PORT_RX_LEN(0x80); addr += 4) {
+		mcb_write(0, reg_base + addr);
+	}
+
+	for (uint32_t addr = MCB_REG_PORT_RX_MAX(0); addr <= MCB_REG_PORT_RX_MAX(0x80); addr += 4) {
+		mcb_write(0, reg_base + addr);
+	}
+
+	for (uint32_t addr = MCB_REG_PORT_TX_LEN(0); addr <= MCB_REG_PORT_TX_LEN(0x80); addr += 4) {
+		mcb_write(0, reg_base + addr);
+	}
+
+	for (uint32_t addr = MCB_REG_PORT_RX_SID(0); addr <= MCB_REG_PORT_RX_SID(0x80); addr += 4) {
 		mcb_write(0, reg_base + addr);
 	}
 
 	/* FIXME: Set DT and DR via DeviceTree or user configuration */
 	switch (role) {
 	case _MCB_ROLE_MASTER:
-		val = VALUE2REG(CTRL2, DR, DR_MPU_P) | VALUE2REG(CTRL2, DT, DT_MPU_P) |
-		      (3000 << 16);
-		LOG_DBG("Set MCB to master mode, reg: %08x", val);
+		val = VALUE2REG(CTRL2, DR, DR_MPU_P) | VALUE2REG(CTRL2, DT, DT_MPU_P);
+		LOG_DBG("Set MCB to master mode");
 		break;
 	case _MCB_ROLE_SLAVE:
 	default:
-		val = VALUE2REG(CTRL2, DR, DR_MPU_B) | VALUE2REG(CTRL2, DT, DT_MPU_B) |
-		      (3000 << 16);
-		LOG_DBG("Set MCB to slave mode, reg: %08x", val);
+		val = VALUE2REG(CTRL2, DR, DR_MPU_B) | VALUE2REG(CTRL2, DT, DT_MPU_B);
+		LOG_DBG("Set MCB to slave mode");
 		break;
 	}
 	mcb_write(val, reg_base + MCB_REG_CTRL2);
@@ -117,9 +124,12 @@ void mcb_systech_poll_time(const struct device *dev, uint32_t timeout)
 
 	timeout = timeout / 10; /* Register POLL_TIME is in 10ns unit */
 	data->pool_time = timeout;
-	val = mcb_read(reg_base + MCB_REG_CTRL2);
-	/* FIXME: Set PT via DeviceTree or user configuration */
-	LOG_DBG("Set poll time to %dns, reg: %x", timeout * 10, val);
+	val = mcb_read(reg_base + MCB_REG_CTRL1);
+	val &= ~_REG_MASK(CTRL2, PT);
+	val |= VALUE2REG(CTRL2, PT, timeout);
+	mcb_write(val, reg_base + MCB_REG_CTRL1);
+
+	LOG_DBG("Set poll time to %dns", timeout * 10);
 }
 
 static inline void _config_port_general(const struct device *dev, uint8_t port, bool enable,
@@ -131,27 +141,25 @@ static inline void _config_port_general(const struct device *dev, uint8_t port, 
 	uint32_t port_bit = BIT(port % 32);
 	/* setup none-critical parts */
 	mcb_write(max_rx_len, reg_base + MCB_REG_PORT_RX_MAX(port));
+	mcb_write(0, reg_base + MCB_REG_PORT_RX_SID(port));
+	mcb_write(0, reg_base + MCB_REG_PORT_RX_LEN(port));
+	mcb_write(0, reg_base + MCB_REG_PORT_TX_LEN(port));
 
 	/* clear port ready mask */
-#if CONFIG_MCB_SYSTECH_HW_WORKAROUND
-	mcb_write(port_bit, reg_base + MCB_REG_PORT_RDY_MASK0 + port_idx * 4);
-	mcb_write(0, reg_base + MCB_REG_PORT_RDY_MASK0 + port_idx * 4);
-#else
 	val = mcb_read(reg_base + MCB_REG_PORT_RDY_MASK0 + port_idx * 4);
 	val &= ~port_bit;
 	mcb_write(val, reg_base + MCB_REG_PORT_RDY_MASK0 + port_idx * 4);
-#endif
 
 	/* reset write mask */
-#if !CONFIG_MCB_SYSTECH_HW_WORKAROUND
-	mcb_write(port_bit, reg_base + MCB_REG_PORT_W_MASK0 + port_idx * 4);
-	mcb_write(0, reg_base + MCB_REG_PORT_W_MASK0 + port_idx * 4);
-#else
 	val = mcb_read(reg_base + MCB_REG_PORT_W_MASK0 + port_idx * 4);
 	val &= ~port_bit;
 	val |= write ? port_bit : 0;
 	mcb_write(val, reg_base + MCB_REG_PORT_W_MASK0 + port_idx * 4);
-#endif
+
+	/* at least wipe potemtial ldp_a_header */
+	memset(mcb_get_tx_buf(dev, port), 0, 4);
+	memset(mcb_get_rx_buf(dev, port), 0, 4);
+	/* FIXME: Once buffer cached, need to flush cache */
 }
 
 void mcb_systech_config_port(const struct device *dev, uint8_t port, bool enable, bool write,
@@ -187,39 +195,28 @@ void mcb_systech_config_port(const struct device *dev, uint8_t port, bool enable
 void mcb_systech_tx(const struct device *dev, uint8_t sid, uint8_t port)
 {
 	uint32_t reg_base = DEVICE_MMIO_NAMED_GET(dev, reg);
-	uint32_t val, wanted;
+	uint32_t val;
 
 	if (port >= MCB_MAX_PORT) {
 		LOG_ERR("Invalid port number");
 		return;
 	}
 
-	/* FIXME: assume src sid is 0 */
-	val = VALUE2REG(CTRL1, D_SID, sid) | VALUE2REG(CTRL1, PORT, port) | b_MCB_CTRL1_TxEN |
-	      b_MCB_CTRL1_RxEN;
-	mcb_write(val, reg_base + MCB_REG_CTRL1);
-
-	wanted = val;
 	val = mcb_read(reg_base + MCB_REG_CTRL1);
-	if (val != wanted) {
-		LOG_WRN("tx reg mismatch, reg: %08x, wanted: %08x", val, wanted);
-	}
-	LOG_DBG("Trigger transmission to sid %ld, port %ld, len %d", sid, port,
-		mcb_get_tx_len(dev, port));
-	if (mcb_get_tx_len(dev, port)) {
-		LOG_HEXDUMP_DBG(mcb_get_tx_buf(dev, port), mcb_get_tx_len(dev, port), "BUF");
-	}
+	val |= b_MCB_CTRL1_TxEN;
+	val &= _REG_MASK(CTRL1, D_SID);
+	val |= VALUE2REG(CTRL1, D_SID, sid);
+	val &= _REG_MASK(CTRL1, PORT);
+	val |= VALUE2REG(CTRL1, PORT, port);
+	mcb_write(val, reg_base + MCB_REG_CTRL1);
 }
 
 void mcb_systech_get_status(const struct device *dev, uint32_t *s)
 {
 	uint32_t reg_base = DEVICE_MMIO_NAMED_GET(dev, reg);
-	uint32_t val, status = 0, reg;
+	uint32_t val, status = 0;
 
-	reg = MCB_REG_STATUS1;
-	val = mcb_read(reg_base + reg);
-
-	LOG_DBG("Read status register val = 0x%08x", val);
+	val = mcb_read(reg_base + MCB_REG_STATUS1);
 
 	/* Do the mapping work */
 	if (val & b_MCB_STATUS1_RE) {
@@ -246,39 +243,27 @@ void mcb_systech_get_status(const struct device *dev, uint32_t *s)
 void mcb_systech_clr_status(const struct device *dev, uint32_t bits)
 {
 	uint32_t reg_base = DEVICE_MMIO_NAMED_GET(dev, reg);
-	uint32_t val = 0;
+	uint32_t val;
 
-	if (bits == 0) {
-		return;
-	}
+	val = mcb_read(reg_base + MCB_REG_STATUS1);
 
 	if (bits & _MCB_ERR_R_ERR) {
-		val |= b_MCB_STATUS1_RE;
+		val &= ~b_MCB_STATUS1_RE;
 	}
 	if (bits & _MCB_ERR_T_ERR) {
-		val |= b_MCB_STATUS1_TE;
+		val &= ~b_MCB_STATUS1_TE;
 	}
 	if (bits & _MCB_ERR_I_ERR) {
-		val |= b_MCB_STATUS1_IE;
+		val &= ~b_MCB_STATUS1_IE;
 	}
 	if (bits & _MCB_ERR_PREEMPT) {
-		val |= b_MCB_STATUS1_RF;
+		val &= ~b_MCB_STATUS1_RF;
 	}
 	if (bits & _MCB_ERR_P_ERR) {
-		val |= b_MCB_STATUS1_PE;
+		val &= ~b_MCB_STATUS1_PE;
 	}
 
 	mcb_write(val, reg_base + MCB_REG_STATUS1);
-#if CONFIG_MCB_SYSTECH_HW_WORKAROUND
-	/* FIXME: For the crap hw design, status register shall be cleared twice */
-	mcb_write(0, reg_base + MCB_REG_STATUS1);
-
-	/* Make sure status register is cleared */
-	if (mcb_read(reg_base + MCB_REG_STATUS1) & val) {
-		LOG_WRN_ONCE("Failed to clear status register, val = 0x%x, reg = 0x%x", val,
-			     mcb_read(reg_base + MCB_REG_STATUS1));
-	}
-#endif
 }
 
 void *mcb_systech_get_rx_buf(const struct device *dev, uint8_t port)
@@ -339,43 +324,25 @@ void mcb_systech_set_tx_len(const struct device *dev, uint8_t port, uint16_t len
 		LOG_ERR("Invalid port number");
 		return;
 	}
-
-	if (mcb_systech_get_tx_len(dev, port) == len) {
-		return;
-	}
 	mcb_write(len, reg_base + MCB_REG_PORT_TX_LEN(port));
 }
 
 void mcb_systech_rx_clr(const struct device *dev, uint8_t port)
 {
 	uint32_t reg_base = DEVICE_MMIO_NAMED_GET(dev, reg);
-	uint32_t val, reg;
+	uint32_t val;
 
-	val = b_MCB_STATUS1_RDY;
+	val = mcb_read(reg_base + MCB_REG_STATUS1);
+	val &= ~b_MCB_STATUS1_RDY;
 	mcb_write(val, reg_base + MCB_REG_STATUS1);
-#if CONFIG_MCB_SYSTECH_HW_WORKAROUND
-	mcb_write(0, reg_base + MCB_REG_STATUS1);
-	if (mcb_read(reg_base + MCB_REG_STATUS1) & val) {
-		LOG_WRN_ONCE("Failed to clear rx ready, val = 0x%x, reg = 0x%x", val,
-			     mcb_read(reg_base + MCB_REG_STATUS1));
-	}
-#endif
 
 	if (port >= MCB_MAX_PORT) {
 		LOG_ERR("Invalid port number");
 		return;
 	}
-	val = BIT(port % 32);
-	reg = MCB_REG_PORT_RDY_MASK0 + (port / 32) * 4;
-	mcb_write(val, reg_base + reg);
-#if CONFIG_MCB_SYSTECH_HW_WORKAROUND
-	mcb_write(0, reg_base + reg);
-
-	if (mcb_read(reg_base + reg) & val) {
-		LOG_WRN_ONCE("Failed to clear port ready mask, val = 0x%x, reg = 0x%x", val,
-			     mcb_read(reg_base + reg));
-	}
-#endif
+	val = mcb_read(reg_base + MCB_REG_PORT_RDY_MASK0 + (port / 32) * 4);
+	val &= ~BIT(port % 32);
+	mcb_write(val, reg_base + MCB_REG_PORT_RDY_MASK0 + (port / 32) * 4);
 }
 
 int mcb_systech_rx_is_ready(const struct device *dev, uint8_t port)
@@ -388,17 +355,23 @@ int mcb_systech_rx_is_ready(const struct device *dev, uint8_t port)
 		return -EINVAL;
 	}
 
-	/* FIXME: check status1.rdy bit also. */
+#if CONFIG_MCB_SYSTECH_HW_WORKAROUND
 	reg = MCB_REG_PORT_RDY_MASK0 + (port / 32) * 4;
 	val = mcb_read(reg_base + reg);
-	if (val & BIT((port % 32))) {
-		LOG_INF("Port %d is ready, mask=%08x", port, val);
-		if (mcb_get_rx_len(dev, port)) {
-			LOG_HEXDUMP_INF(mcb_get_rx_buf(dev, port), mcb_get_rx_len(dev, port),
-					"BUF");
+	if (val & BIT(port % 32)) {
+		return 1;
+	}
+#else
+	reg = MCB_REG_STATUS1;
+	val = mcb_read(reg_base + reg);
+	if (val & b_MCB_STATUS1_RDY) {
+		if (REG2VALUE(STATUS1, RxPort, val) != port) {
+			LOG_WRN_ONCE("Data ready but not for port %d, the actual one is %d", port,
+				     REG2VALUE(STATUS1, RxPort, val));
 		}
 		return 1;
 	}
+#endif
 
 	return 0;
 }

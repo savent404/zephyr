@@ -8,12 +8,10 @@ config CIF_SLAVE
 	default n
 	help
 	  Enable this option to run the CIF in slave mode.
-
-config CIF_SHELL
-	bool "CIF Shell"
-	default y
-	select SHELL
+config CIF_WORKAROUND
+	bool "CIF Workaround"
+	default n
 	help
-	  Enable this option to run the CIF with shell.
+	  Enable this option to run the CIF with a workaround solution.
 
 source "Kconfig.zephyr"

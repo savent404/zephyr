@@ -137,7 +137,7 @@ struct ldp_basic {
 	 * @param err error code
 	 * @return const char* error string
 	 */
-	inline static constexpr uint32_t LDP_MAGIC = 0xBEFF;
+	inline static constexpr uint32_t LDP_MAGIC = 0x5151;
 
 	/* initial xid */
 	inline static constexpr uint8_t LDP_INITIAL_XID = 0x80;
@@ -176,16 +176,8 @@ struct ldp_basic {
 		uint32_t xid: 8;  /* transfer xid */
 		uint32_t rxid: 8; /* receiver xid */
 		uint32_t magic: 16;
-		explicit ldp_a_header(const ldp_a_header&) = default;
-		explicit ldp_a_header(uint32_t val) : xid(val & 0xFF), rxid((val >> 8) & 0xFF), magic((val >> 16) & 0xFFFF)
+		ldp_a_header() : xid(LDP_INITIAL_XID), rxid(0), magic(LDP_MAGIC)
 		{
-		}
-		explicit ldp_a_header() : xid(LDP_INITIAL_XID), rxid(0), magic(LDP_MAGIC)
-		{
-		}
-		uint32_t operator()() const
-		{
-			return (xid | (rxid << 8) | (magic << 16));
 		}
 	};
 };

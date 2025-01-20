@@ -287,7 +287,6 @@ static int cif_sock_bind(struct net_context *ctx, const struct sockaddr_cif *add
 		break;
 	case CIF_RAW_SLAVE:
 		usr_data->ldp = new zephyr::ldp_slave_impl(mcb);
-		break;
 	default:
 		return -ENOTSUP;
 	}
@@ -317,12 +316,8 @@ static ssize_t cif_sock_sendto(struct net_context *ctx, const void *buf, size_t 
 	}
 
 	auto conn = conn_it->second.conn_id;
-	int ret = (*usr_data->ldp).send(conn, reinterpret_cast<const uint8_t *>(buf), len);
-
-	if (ret < 0) {
-		cif_ldp_error_to_errno(ret);
-	}
-	return ret;
+	return cif_ldp_error_to_errno(
+		(*usr_data->ldp).send(conn, reinterpret_cast<const uint8_t *>(buf), len));
 }
 
 static ssize_t cif_sock_recvfrom(struct net_context *ctx, void *buf, size_t max_len, int flags,
@@ -341,13 +336,8 @@ static ssize_t cif_sock_recvfrom(struct net_context *ctx, void *buf, size_t max_
 	}
 
 	auto conn = conn_it->second.conn_id;
-	int ret = (*usr_data->ldp).recv(conn, reinterpret_cast<uint8_t *>(buf), max_len);
-
-	if (ret < 0) {
-		ret = cif_ldp_error_to_errno(ret);
-	}
-
-	return ret;
+	return cif_ldp_error_to_errno(
+		(*usr_data->ldp).recv(conn, reinterpret_cast<uint8_t *>(buf), max_len));
 }
 
 static int cif_sock_getsockopt(struct net_context *ctx, int level, int optname, void *optval,
@@ -478,7 +468,7 @@ static int cif_sock_setsockopt(struct net_context *ctx, int level, int optname, 
 	return ret;
 }
 
-static int cif_ctrl_port(struct net_context *ctx,
+__attribute__((optimize("O0"))) static int cif_ctrl_port(struct net_context *ctx,
 							 const struct cif_raw_port_config *cfg)
 {
 	auto usr_data = reinterpret_cast<cif_sock_data *>(ctx->user_data);
@@ -494,7 +484,7 @@ static int cif_ctrl_port(struct net_context *ctx,
 	}
 
 	next_enable = cfg->flags & CIF_PORT_FLG_ENABLE;
-	prev_enable = conn.config.flags & CIF_PORT_FLG_ENABLE && conn.conn_id >= 0;
+	prev_enable = conn.config.flags & CIF_PORT_FLG_ENABLE;
 
 	if (prev_enable && next_enable) {
 		/* Connection already enabled, disable it first. Not support config in run mode */
@@ -505,13 +495,12 @@ static int cif_ctrl_port(struct net_context *ctx,
 		/* Disable connection */
 		if (conn.conn_id >= 0) {
 			ret = (*usr_data->ldp).destroy(conn.conn_id);
+			conn.conn_id = -1;
 
 			if (ret < 0) {
 				ret = cif_ldp_error_to_errno(ret);
 				NET_WARN("Failed to disable connection %d", conn.conn_id);
 			}
-			NET_INFO("Connection %d disabled", conn.conn_id);
-			conn.conn_id = -1;
 		}
 	} else {
 		/* Enable connection */
@@ -573,14 +562,7 @@ static int cif_ctrl_port(struct net_context *ctx,
 			return cif_ldp_error_to_errno(conn.conn_id);
 		}
 	}
-	/* insert or update connection info */
-	/* FIXME: using usr_data->conns[id] = conn; will hang in std::rb_tree::insert_and_rebalance
-	 */
-	if (conn_it != usr_data->conns.end()) {
-		conn_it->second = conn;
-	} else {
-		usr_data->conns.insert(cif_sock_data::conn_list_t::value_type(id, conn));
-	}
+	/* Update connection info */
 	usr_data->conns[id] = conn;
 	return 0;
 }
@@ -612,7 +594,6 @@ static inline int cif_ldp_error_to_errno(int ldp_err)
 	case ldp_error::LDP_ERR_CONN_EXIST:
 		return -EEXIST;
 	default:
-		printk("Unknown error code %d\n", ldp_err);
 		return -EOVERFLOW;
 	}
 	return 0;
@@ -679,7 +660,7 @@ static int ldp_init(void)
 	cif_data.wq_tid = k_thread_create(
 		&cif_data.wq_thread, cif_data.wq_stack, K_THREAD_STACK_SIZEOF(cif_data.wq_stack),
 		wq_background_entry, &cif_data.wq, nullptr, nullptr,
-		K_PRIO_PREEMPT(CONFIG_MAIN_THREAD_PRIORITY + 1), 0, K_NO_WAIT);
+		K_PRIO_COOP(CONFIG_NET_SOCKETS_PRIORITY_DEFAULT), 0, K_NO_WAIT);
 	k_thread_name_set(&cif_data.wq_thread, "cif_wq");
 	return 0;
 }
