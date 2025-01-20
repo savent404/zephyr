@@ -216,9 +216,11 @@ u8 yt8521_cfg(FGmacPs_Instance_T *pGmac)
 	fmsh_mdio_write(pGmac, 0x1f, reg_val);
 	FMSH_INFO("%s<->RGMII\r\n", reg_val == 0x8161 ? "Fiber" : "UTP");
 
-	fmsh_mdio_write(pGmac, 0x1e, 0xa003);
-	fmsh_mdio_write(pGmac, 0x1f, pPhyConfig->phy_delay);
-	FMSH_INFO("PHY delay:0x%x\r\n", pPhyConfig->phy_delay);
+	if (pPhyConfig->phy_delay != 0x0) {
+		fmsh_mdio_write(pGmac, 0x1e, 0xa003);
+		fmsh_mdio_write(pGmac, 0x1f, pPhyConfig->phy_delay);
+		FMSH_INFO("PHY delay:0x%x\r\n", pPhyConfig->phy_delay);
+	}
 
 	ytphy_write_ext(pGmac, PAGE0, 0xa00c, 0x6FF8);
 	ytphy_write_ext(pGmac, PAGE0, 0xa00d, 0x6FF8);

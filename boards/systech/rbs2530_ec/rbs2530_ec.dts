@@ -11,7 +11,7 @@
 &ethernet0 {
 	pinctrl-0 = <&mdio0_clk_mio_52>, <&mdio0_data_mio_53>;
 	pinctrl-names = "default";
-	mdio-addr = <3>;
+	mdio-addr = <1>;
 	gmii2rgmii-addr1 = <0x8>;
 	gmii2rgmii-addr2 = <0x9>;
 	phy-mode = "utp";  /* fiber or utp */
