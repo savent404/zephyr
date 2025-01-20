@@ -244,7 +244,7 @@ int main(void)
 	ctx_.state = STATE_IDLE;
 
 	bool res;
-	uint32_t cnt;
+	uint32_t cnt = 1;
 	static uint8_t in_buf[64];
 
 	while (1) {
@@ -265,7 +265,7 @@ int main(void)
 				dev_general_init(sock, ctx_.target_sid, PORT_ID_CFG,
 						 CIF_PORT_FLG_STRONG_ORDER | CIF_PORT_FLG_ONE_SHOT);
 			if (res) {
-				static const char config_data[] = "some configure";
+				static const char config_data[] = "cfg:123";
 
 				res = dev_general_cfg(sock, ctx_.target_sid, PORT_ID_CFG,
 						      config_data, sizeof(config_data));
@@ -287,7 +287,7 @@ int main(void)
 					.slot = ctx_.target_sid,
 					.port = PORT_ID_IO,
 				};
-				ret = sendto(sock, "Hello", 5, 0, (struct sockaddr *)&remote,
+				ret = sendto(sock, "io:0", 4, 0, (struct sockaddr *)&remote,
 					     sizeof(remote));
 				if (ret < 0) {
 					LOG_ERR("Failed to send data, errno %d", errno);

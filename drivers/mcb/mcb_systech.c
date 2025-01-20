@@ -194,6 +194,19 @@ void mcb_systech_tx(const struct device *dev, uint8_t sid, uint8_t port)
 		return;
 	}
 
+#if CONFIG_MCB_SYSTECH_HW_WORKAROUND
+	if (mcb_get_tx_len(dev, port) == 0) {
+		/* HW bug, can't send empty frame */
+		LOG_WRN("Can't send empty frame, sid %d, port %d", sid, port);
+		k_panic();
+	} else if (mcb_get_tx_len(dev, port) % 4) {
+		/* HW bug, can't send frame with length not multiple of 4 */
+		LOG_WRN("Can't send frame with length not multiple of 4, sid %d, port %d", sid,
+			port);
+		k_panic();
+	}
+#endif
+
 	/* FIXME: assume src sid is 0 */
 	val = VALUE2REG(CTRL1, D_SID, sid) | VALUE2REG(CTRL1, PORT, port) | b_MCB_CTRL1_TxEN |
 	      b_MCB_CTRL1_RxEN;
@@ -204,7 +217,7 @@ void mcb_systech_tx(const struct device *dev, uint8_t sid, uint8_t port)
 	if (val != wanted) {
 		LOG_WRN("tx reg mismatch, reg: %08x, wanted: %08x", val, wanted);
 	}
-	LOG_DBG("Trigger transmission to sid %ld, port %ld, len %d", sid, port,
+	LOG_DBG("Trigger transmission to sid %d, port %d, len %d", sid, port,
 		mcb_get_tx_len(dev, port));
 	if (mcb_get_tx_len(dev, port)) {
 		LOG_HEXDUMP_DBG(mcb_get_tx_buf(dev, port), mcb_get_tx_len(dev, port), "BUF");
