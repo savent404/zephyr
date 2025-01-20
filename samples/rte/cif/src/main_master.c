@@ -36,6 +36,9 @@ struct context {
 #define STATE_IO_START 3
 #define STATE_IO       4
 	uint32_t state;
+
+	struct sockaddr_cif curr;
+	socklen_t curr_len;
 };
 
 static struct context ctx_ = {0};
@@ -287,6 +290,10 @@ int main(void)
 					.slot = ctx_.target_sid,
 					.port = PORT_ID_IO,
 				};
+				ctx_.curr.cif_family = remote.cif_family;
+				ctx_.curr.slot = remote.slot;
+				ctx_.curr.port = remote.port;
+				ctx_.curr_len = sizeof(ctx_.curr);
 				ret = sendto(sock, "io:0", 4, 0, (struct sockaddr *)&remote,
 					     sizeof(remote));
 				if (ret < 0) {
@@ -307,7 +314,8 @@ int main(void)
 				continue;
 			}
 
-			ret = recvfrom(sock, in_buf, sizeof(in_buf), 0, NULL, 0);
+			ret = recvfrom(sock, in_buf, sizeof(in_buf), 0,
+				       (struct sockaddr *)&ctx_.curr, &ctx_.curr_len);
 			if (ret < 0) {
 				LOG_ERR("Failed to receive data, errno %d", errno);
 			} else {
