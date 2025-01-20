@@ -38,6 +38,7 @@ struct cif_master_data {
 	k_tid_t wq_tid;
 	k_thread wq_thread;
 	k_thread_stack_t wq_stack[9216];
+	k_mutex x_lock_;
 };
 
 struct cif_sock_data {
@@ -111,7 +112,9 @@ static int cif_sock_close_vmeth(void *obj)
 {
 	int ret;
 
+	k_mutex_lock(&cif_data.x_lock_, K_FOREVER);
 	ret = cif_sock_close(reinterpret_cast<struct net_context *>(obj));
+	k_mutex_unlock(&cif_data.x_lock_);
 	if (ret < 0) {
 		NET_DBG("Cannot detach net_context %p (%d)", obj, ret);
 
@@ -126,8 +129,10 @@ static int cif_sock_bind_vmeth(void *obj, const struct sockaddr *addr, socklen_t
 	int ret;
 
 	if (addr && addrlen == sizeof(struct sockaddr_cif)) {
+		k_mutex_lock(&cif_data.x_lock_, K_FOREVER);
 		ret = cif_sock_bind(reinterpret_cast<struct net_context *>(obj),
 				    reinterpret_cast<const struct sockaddr_cif *>(addr));
+		k_mutex_unlock(&cif_data.x_lock_);
 		if (ret < 0) {
 			NET_DBG("Cannot bind net_context %p (%d)", obj, ret);
 			errno = -ret;
@@ -145,8 +150,10 @@ static int cif_sock_sendto_vmeth(void *obj, const void *buf, size_t len, int fla
 	int ret;
 
 	if (buf && len && addr && addrlen == sizeof(struct sockaddr_cif)) {
+		k_mutex_lock(&cif_data.x_lock_, K_FOREVER);
 		ret = cif_sock_sendto(reinterpret_cast<struct net_context *>(obj), buf, len, flags,
 				      reinterpret_cast<const struct sockaddr_cif *>(addr));
+		k_mutex_unlock(&cif_data.x_lock_);
 		if (ret < 0) {
 			NET_DBG("Cannot sendto net_context %p (%d)", obj, ret);
 			errno = -ret;
@@ -164,9 +171,11 @@ static int cif_sock_recvfrom_vmeth(void *obj, void *buf, size_t max_len, int fla
 	int ret;
 
 	if (buf && max_len && src_addr && *addrlen == sizeof(struct sockaddr_cif)) {
+		k_mutex_lock(&cif_data.x_lock_, K_FOREVER);
 		ret = cif_sock_recvfrom(reinterpret_cast<struct net_context *>(obj), buf, max_len,
 					flags,
 					reinterpret_cast<const struct sockaddr_cif *>(src_addr));
+		k_mutex_unlock(&cif_data.x_lock_);
 		if (ret < 0) {
 			NET_DBG("Cannot recvfrom net_context %p (%d)", obj, ret);
 			errno = -ret;
@@ -185,8 +194,10 @@ static int cif_sock_getsockopt_vmeth(void *obj, int level, int optname, void *op
 	int ret;
 
 	if (level == SOL_CIF_RAW && optname >= 0 && optname < CIF_OPT_MAX) {
+		k_mutex_lock(&cif_data.x_lock_, K_FOREVER);
 		ret = cif_sock_getsockopt(reinterpret_cast<struct net_context *>(obj), level,
 					  optname, optval, optlen);
+		k_mutex_unlock(&cif_data.x_lock_);
 		if (ret < 0) {
 			NET_DBG("Cannot getsockopt net_context %p (%d)", obj, ret);
 			errno = -ret;
@@ -204,8 +215,10 @@ static int cif_sock_setsockopt_vmeth(void *obj, int level, int optname, const vo
 	int ret;
 
 	if (level == SOL_CIF_RAW && optname >= 0 && optname < CIF_OPT_MAX) {
+		k_mutex_lock(&cif_data.x_lock_, K_FOREVER);
 		ret = cif_sock_setsockopt(reinterpret_cast<struct net_context *>(obj), level,
 					  optname, optval, optlen);
+		k_mutex_unlock(&cif_data.x_lock_);
 		if (ret < 0) {
 			NET_DBG("Cannot setsockopt net_context %p (%d)", obj, ret);
 			errno = -ret;
@@ -478,8 +491,7 @@ static int cif_sock_setsockopt(struct net_context *ctx, int level, int optname, 
 	return ret;
 }
 
-static int cif_ctrl_port(struct net_context *ctx,
-							 const struct cif_raw_port_config *cfg)
+static int cif_ctrl_port(struct net_context *ctx, const struct cif_raw_port_config *cfg)
 {
 	auto usr_data = reinterpret_cast<cif_sock_data *>(ctx->user_data);
 	conn_idx id{cfg->port, cfg->slot};
@@ -669,13 +681,20 @@ static void wq_background_entry(void *arg1, void *arg2, void *arg3)
 	auto wq = reinterpret_cast<cif_master_data::ldp_wq *>(arg1);
 
 	while (true) {
-		wq->schedule();
-		NET_DBG("WQ scheduled");
+		if (wq->empty()) {
+			k_sleep(K_MSEC(10));
+		} else {
+			k_mutex_lock(&cif_data.x_lock_, K_FOREVER);
+			wq->schedule();
+			k_mutex_unlock(&cif_data.x_lock_);
+			NET_DBG("WQ scheduled");
+		}
 	}
 }
 
 static int ldp_init(void)
 {
+	k_mutex_init(&cif_data.x_lock_);
 	cif_data.wq_tid = k_thread_create(
 		&cif_data.wq_thread, cif_data.wq_stack, K_THREAD_STACK_SIZEOF(cif_data.wq_stack),
 		wq_background_entry, &cif_data.wq, nullptr, nullptr,
