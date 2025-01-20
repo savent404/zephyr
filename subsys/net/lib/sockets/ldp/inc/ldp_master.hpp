@@ -523,12 +523,7 @@ template <typename T_mempool, typename T_cache> struct ldp_master: public ldp_ba
 			uint8_t *tx_buf;
 			uint8_t *tx_data;
 			uint32_t status;
-#if CONFIG_MCB_SYSTECH_HW_WORKAROUND
-			/* HW bug, if payload is empty, the function will not work */
-			async_buf abuf = {(uint8_t *)"empt", 4};
-#else
 			async_buf abuf = {nullptr, 0};
-#endif
 			volatile ldp_a_header *tx_hdr;
 			bool data_ready, data_timeout, p_error;
 			bool is_invalid_rsp = false; /* header is craped */
@@ -641,7 +636,9 @@ template <typename T_mempool, typename T_cache> struct ldp_master: public ldp_ba
 					/* Slave accepted the previous transmit data.
 					 * Drop the tx buffer then.
 					 */
-					ci->tx_bufs.pop_front();
+					if (ci->tx_bufs.size()) {
+						ci->tx_bufs.pop_front();
+					}
 					if (abuf.buf) {
 						mempool_if::free(abuf.buf);
 					}
