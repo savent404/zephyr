@@ -76,7 +76,7 @@ void ldp_wq::schedule()
 		work_sem_.take();
 	}
 
-	do {
+	{
 		std::lock_guard lock(x_lock_);
 		/* Find the next work item based on the left time */
 		for (auto &wi : work_items_) {
@@ -84,7 +84,7 @@ void ldp_wq::schedule()
 				free_time = wi.left;
 			}
 		}
-	} while (0);
+	}
 
 	/* Schedule the work item
 	 * NOTE: Since the work item is scheduled by the software timer, the
@@ -102,7 +102,7 @@ void ldp_wq::schedule()
 	}
 	k_usleep(free_time - prev_fn_cost_);
 
-	do {
+	{
 		curr_cycle = k_cycle_get_32();
 		std::lock_guard lock(x_lock_);
 		/* Execute the work item */
@@ -116,7 +116,7 @@ void ldp_wq::schedule()
 		}
 
 		next_cycle = k_cycle_get_32();
-	} while (0);
+	}
 
 	/* Check if the work queue overrun */
 	time_diff = next_cycle > curr_cycle ? next_cycle - curr_cycle

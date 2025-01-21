@@ -647,6 +647,9 @@ static inline uint32_t fmsh_clkc_get_wdt_freq(uint32_t ps_clk)
 		DBG_PRINTK("WDT source: MIO/EMIO\n");
 		DBG_PRINTK("Can't find the frequency of MIO/EMIO\n");
 		break;
+	default:
+		DBG_PRINTK("WDT source: Unknown\n");
+		break;
 	}
 	DBG_PRINTK("\tWDT freq(%d)\n", clk_freq);
 	return clk_freq;
@@ -834,11 +837,12 @@ static int fmsh_clkc_init(const struct device *dev)
 	return 0;
 }
 
-DEVICE_DT_DEFINE(CLKC, fmsh_clkc_init, NULL, NULL, &config, PRE_KERNEL_1,
 /* FIXME: SYSCON should be initialized before clock_control */
 #ifndef CONFIG_SYSCON
-		 CONFIG_CLOCK_CONTROL_INIT_PRIORITY,
+#define INIT_PRIORITY CONFIG_CLOCK_CONTROL_INIT_PRIORITY
 #else
-		 CONFIG_SYSCON_INIT_PRIORITY,
+#define INIT_PRIORITY CONFIG_SYSCON_INIT_PRIORITY
 #endif
+
+DEVICE_DT_DEFINE(CLKC, fmsh_clkc_init, NULL, NULL, &config, PRE_KERNEL_1, INIT_PRIORITY,
 		 &clock_control_fmsh_api);
