@@ -25,6 +25,8 @@ jobs:
       matrix:
         os: [ubuntu-22.04]
     runs-on: ${{ matrix.os }}
+    env:
+      BUILD_WRAPPER_OUT_DIR: ${{ github.workspace }}/zephyr/bw-output
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -58,6 +60,9 @@ jobs:
           toolchains: arm-zephyr-eabi
           manifest-file-name: rbs2530_west.yml
 
+      - name: Install Build Wrapper
+        uses: SonarSource/sonarqube-scan-action/install-build-wrapper@v4
+
       - name: Build firmware
         working-directory: zephyr
         shell: bash
@@ -69,7 +74,18 @@ jobs:
           else
             EXTRA_TWISTER_FLAGS="-p rbs2530_cpu --build-only"
           fi
-          ./scripts/twister --force-color --inline-logs -T samples/rte -v $EXTRA_TWISTER_FLAGS
+          build-wrapper-linux-x86-64 --out-dir ${{ env.BUILD_WRAPPER_OUT_DIR }} ./scripts/twister --force-color --inline-logs -T samples/rte -v $EXTRA_TWISTER_FLAGS
+
+      - name: SonarQube Scan
+        uses: SonarSource/sonarqube-scan-action@v4
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        with:
+          args: >
+            --define sonar.cfamily.compile-commands="${{ env.BUILD_WRAPPER_OUT_DIR }}/compile_commands.json"
+            --define sonar.projectKey=SysFly_zephyr
+            --define sonar.organization=sysfly
+            --define sonar.sources=.
 
       - name: Upload artifacts
         if: failure()
