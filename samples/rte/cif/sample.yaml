@@ -1,0 +1,12 @@
+sample:
+  description: rbs2530 cif sample
+  name: rbs2530 cif
+common:
+  tags: app
+tests:
+  sample.rbs2530.rte.cif:
+    tags: app
+    platform_allow:
+      - rbs2530_cpu
+      - rbs2530_ec
+      - rbs2530_ext

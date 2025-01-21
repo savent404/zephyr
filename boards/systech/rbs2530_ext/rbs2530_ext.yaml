@@ -1,0 +1,14 @@
+#
+# Copyright (c) 2025, Systech Co.
+#
+# SPDX-License-Identifier: Apache-2.0
+#
+
+identifier: rbs2530_ext
+name: External MPU module for RBS2530
+type: mcu
+arch: arm
+toolchain:
+  - zephyr
+  - gnuarmemb
+vendor: fmsh
