@@ -43,16 +43,14 @@ struct sdhc_dw_config {
 static uint32_t _res_opcode_convert(bool is_spi_mode, uint32_t z_opcode, struct sdhc_dw_data *data)
 {
 	/* NOTE: CMD_SWITCH and ACMD_SWITCH_BUS_WIDTH are the same, need to determine which is */
-	if (data->prev_opcode != SD_APP_CMD && is_spi_mode) {
-		if (z_opcode == SD_SWITCH) {
-			z_opcode = CMD_SWITCH_FUNC;
-		}
+	if (data->prev_opcode != SD_APP_CMD && is_spi_mode && z_opcode == SD_SWITCH) {
+		z_opcode = CMD_SWITCH_FUNC;
 	}
 	data->prev_opcode = z_opcode;
 	return z_opcode;
 }
 
-static uint32_t _dw_cmd_prepare(struct sdhc_command *_cmd, struct sdhc_dw_data *dev_data)
+static uint32_t _dw_cmd_prepare(const struct sdhc_command *_cmd, struct sdhc_dw_data *dev_data)
 {
 	bool is_spi_cmd = _cmd->response_type & SDHC_SPI_RESPONSE_TYPE_MASK;
 	uint32_t cmd = _res_opcode_convert(is_spi_cmd, _cmd->opcode, dev_data);
@@ -76,17 +74,17 @@ static uint32_t _dw_cmd_prepare(struct sdhc_command *_cmd, struct sdhc_dw_data *
 		break;
 
 	/* Short response commands */
-	/* case CMD_GO_IRQ_STATE: (40) */
+	/* CMD_GO_IRQ_STATE TBD */
 	case MMC_SEND_OP_COND:
 	case SD_SEND_RELATIVE_ADDR:
-	/* case MMC_SEND_RELATIVE_ADDR: */
+	/* TBD: MMC_SEND_RELATIVE_ADDR: */
 	case SD_SET_BLOCK_SIZE:
 	case SD_SET_BLOCK_COUNT:
-	/* case CMD_SET_WRITE_PROT: (28) */
-	/* case CMD_CLR_WRITE_PROT: (29) */
+	/* CMD_SET_WRITE_PROT TBD */
+	/* CMD_CLR_WRITE_PROT TBD */
 	case SD_ERASE_BLOCK_START:
 	case SD_ERASE_BLOCK_END:
-	/* case CMD_GEN_CMD: (56) */
+	/* CMD_GEN_CMD TBD */
 	case SD_APP_SEND_OP_COND:
 	case SD_APP_SET_BUS_WIDTH:
 	case SD_SELECT_CARD:
@@ -143,7 +141,7 @@ static uint32_t _dw_cmd_prepare(struct sdhc_command *_cmd, struct sdhc_dw_data *
 			    SDMMC_CMD_RESP_EXP + cmd);
 		break;
 	case CMD_SWITCH_FUNC:
-		/* case MMC_SEND_EXT_CSD: (8 << 4) */
+		/* TBD: MMC_SEND_EXT_CSD: (8 << 4) */
 		cmd_data = (SDMMC_CMD_PRV_DAT_WAIT + SDMMC_CMD_DAT_EXP + SDMMC_CMD_RESP_CRC +
 			    SDMMC_CMD_RESP_EXP + (cmd >> 4));
 		break;
@@ -164,6 +162,7 @@ static bool _is_long_response(uint32_t z_resp_type)
 	switch (z_resp_type) {
 	default:
 		LOG_WRN("Unsupported response type: %X", z_resp_type);
+		/* fall through */
 	case SD_RSP_TYPE_NONE:
 	case SD_RSP_TYPE_R1:
 	case SD_RSP_TYPE_R1b:
@@ -209,7 +208,7 @@ static int sdhc_dw_set_power(const struct device *dev, enum sdhc_power power)
 static int sdhc_dw_set_clock(const struct device *dev, uint32_t clk)
 {
 	int div_ = 0;
-	struct sdhc_dw_data *data = dev->data;
+	const struct sdhc_dw_data *data = dev->data;
 	const uint32_t freq = data->host_freq;
 	uint32_t temp;
 
@@ -256,7 +255,7 @@ static int sdhc_dw_set_bus_width(const struct device *dev, enum sdhc_bus_width w
 	} else if (width == SDHC_BUS_WIDTH4BIT) {
 		val = SDMMC_CTYPE_4BIT;
 	} else {
-		/* val = SDMMC_CTYPE_8BIT; */
+		/* SDMMC_CTYPE_8BIT is not supported */
 		LOG_WRN("Unsupported bus width: %d", width);
 		return -EINVAL;
 	}
@@ -269,8 +268,10 @@ static int sdhc_dw_read_poll(const struct device *dev, uint32_t *addr, uint32_t 
 {
 	const struct sdhc_dw_config *config = dev->config;
 	const uint32_t data_offset = config->data_addr;
-	int timeout = 0x10000, iter;
-	uint32_t reg_status, fifo_cnt;
+	int timeout = 0x10000;
+	uint32_t reg_status;
+	uint32_t fifo_cnt;
+	uint32_t iter;
 
 	if ((unsigned int)addr & 3 || len & 3) {
 		LOG_WRN("Unaligned address or length");
@@ -307,8 +308,11 @@ static int sdhc_dw_write_poll(const struct device *dev, const uint32_t *addr, ui
 
 	const struct sdhc_dw_config *config = dev->config;
 	const uint32_t data_offset = config->data_addr;
-	int timeout = 0x10000, iter;
-	uint32_t reg_status, fifo_cnt, fifo_threshold;
+	int timeout = 0x10000;
+	uint32_t reg_status;
+	uint32_t fifo_cnt;
+	uint32_t fifo_threshold;
+	uint32_t iter;
 
 	if ((unsigned int)addr & 3 || len & 3) {
 		LOG_WRN("Unaligned address or length");
@@ -349,7 +353,8 @@ static int sdhc_dw_request(const struct device *dev, struct sdhc_command *cmd,
 			   struct sdhc_data *data)
 {
 	const uint32_t per_loop_delay_us = 1;
-	uint32_t rcmd, temp;
+	uint32_t rcmd;
+	uint32_t temp;
 	int timeout = (cmd->retries + 1) * cmd->timeout_ms * 1000 / per_loop_delay_us;
 	enum {
 		rd,
