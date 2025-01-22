@@ -381,8 +381,12 @@ static inline void fmsh_clkc_lock(void)
 
 static inline uint32_t fmsh_clkc_get_cpu_freq(uint32_t ps_clk, uint32_t out_clk)
 {
-	uint32_t pll_ctl, cpu_clk_ctl, clk_div;
-	uint32_t pll_m, pll_o, cpu_freq;
+	uint32_t pll_ctl;
+	uint32_t cpu_clk_ctl;
+	uint32_t clk_div;
+	uint32_t pll_m;
+	uint32_t pll_o;
+	uint32_t cpu_freq;
 
 	DBG_PRINTK("Get CPU out clk %d freq\n", out_clk);
 	__ASSERT(out_clk < 6, "Invalid IO out clk %d\n", out_clk);
@@ -392,17 +396,20 @@ static inline uint32_t fmsh_clkc_get_cpu_freq(uint32_t ps_clk, uint32_t out_clk)
 	case CPU_SRCSEL_CPU_PLL:
 		DBG_PRINTK("\tCPU source: CPU PLL\n");
 		syscon_read_reg(SLCR_DEV, REG_CPU_PLL_CTRL, &pll_ctl);
-		syscon_read_reg(SLCR_DEV, REG_CPU_PLL_CLKOUT0_DIVISOR + out_clk, &clk_div);
+		syscon_read_reg(SLCR_DEV, (uint16_t)(REG_CPU_PLL_CLKOUT0_DIVISOR + out_clk),
+				&clk_div);
 		break;
 	case CPU_SRCSEL_DDR_PLL:
 		DBG_PRINTK("\tCPU source: DDR PLL\n");
 		syscon_read_reg(SLCR_DEV, REG_DDR_PLL_CTRL, &pll_ctl);
-		syscon_read_reg(SLCR_DEV, REG_DDR_PLL_CLKOUT0_DIVISOR + out_clk, &clk_div);
+		syscon_read_reg(SLCR_DEV, (uint16_t)(REG_DDR_PLL_CLKOUT0_DIVISOR + out_clk),
+				&clk_div);
 		break;
 	case CPU_SRCSEL_IO_PLL:
 		DBG_PRINTK("\tCPU source: IO PLL\n");
 		syscon_read_reg(SLCR_DEV, REG_IO_PLL_CTRL, &pll_ctl);
-		syscon_read_reg(SLCR_DEV, REG_IO_PLL_CLKOUT0_DIVISOR + out_clk, &clk_div);
+		syscon_read_reg(SLCR_DEV, (uint16_t)(REG_IO_PLL_CLKOUT0_DIVISOR + out_clk),
+				&clk_div);
 		break;
 	default:
 		DBG_PRINTK("\tCPU source: Unknown:%ld\n", GET_REG_BITS(cpu_clk_ctl, CPU_SRCSEL));
@@ -472,7 +479,7 @@ static inline uint32_t fmsh_clkc_get_ddr_freq(uint32_t ps_clk, uint32_t out_clk)
 
 	out_clk *= 4;
 	syscon_read_reg(SLCR_DEV, REG_DDR_PLL_CTRL, &pll_ctl);
-	syscon_read_reg(SLCR_DEV, REG_DDR_PLL_CLKOUT0_DIVISOR + out_clk, &clk_div);
+	syscon_read_reg(SLCR_DEV, (uint16_t)(REG_DDR_PLL_CLKOUT0_DIVISOR + out_clk), &clk_div);
 
 	ASSERT_NO_PYBASS(pll_ctl);
 	pll_m = GET_REG_BITS(pll_ctl, xxx_PLL_CTRL_FDIV);
@@ -501,15 +508,18 @@ static inline uint32_t fmsh_clkc_get_fclk_freq(uint32_t ps_clk, uint32_t idx)
 
 static inline uint32_t fmsh_clkc_get_io_freq(uint32_t pc_clk, uint32_t out_clk)
 {
-	uint32_t pll_ctl, clk_div;
-	uint32_t pll_m, pll_o, io_freq;
+	uint32_t pll_ctl;
+	uint32_t clk_div;
+	uint32_t pll_m;
+	uint32_t pll_o;
+	uint32_t io_freq;
 
 	DBG_PRINTK("Get IO out clk %d freq\n", out_clk);
 	__ASSERT(out_clk < 6, "Invalid IO out clk %d\n", out_clk);
 
 	out_clk *= 4;
 	syscon_read_reg(SLCR_DEV, REG_IO_PLL_CTRL, &pll_ctl);
-	syscon_read_reg(SLCR_DEV, REG_IO_PLL_CLKOUT0_DIVISOR + out_clk, &clk_div);
+	syscon_read_reg(SLCR_DEV, (uint16_t)(REG_IO_PLL_CLKOUT0_DIVISOR + out_clk), &clk_div);
 
 	ASSERT_NO_PYBASS(pll_ctl);
 	pll_m = GET_REG_BITS(pll_ctl, xxx_PLL_CTRL_FDIV);
@@ -535,7 +545,8 @@ static inline uint32_t fmsh_clkc_get_nfc_freq(uint32_t ps_clk)
 
 static inline uint32_t fmsh_clkc_get_qspi_freq(uint32_t ps_clk)
 {
-	uint32_t clk_ctl, clk_freq;
+	uint32_t clk_ctl;
+	uint32_t clk_freq;
 
 	syscon_read_reg(SLCR_DEV, REG_QSPI_CLK_CTRL, &clk_ctl);
 	if (GET_REG_BITS(clk_ctl, QSPI_SRCSEL) == QSPI_SRCSEL_CPU_PLL) {
@@ -552,7 +563,8 @@ static inline uint32_t fmsh_clkc_get_qspi_freq(uint32_t ps_clk)
 
 static inline uint32_t fmsh_clkc_get_sdmmc_freq(uint32_t ps_clk)
 {
-	uint32_t clk_ctl, ref_freq;
+	uint32_t clk_ctl;
+	uint32_t ref_freq;
 
 	syscon_read_reg(SLCR_DEV, REG_SDIO_CLK_CTRL, &clk_ctl);
 	if (GET_REG_BITS(clk_ctl, SDIO_SRCSEL) == SDIO_SRCSEL_CPU_PLL) {
@@ -569,7 +581,8 @@ static inline uint32_t fmsh_clkc_get_sdmmc_freq(uint32_t ps_clk)
 
 static inline uint32_t fmsh_clkc_get_uart_freq(uint32_t ps_clk)
 {
-	uint32_t clk_ctl, clk_freq;
+	uint32_t clk_ctl;
+	uint32_t clk_freq;
 
 	syscon_read_reg(SLCR_DEV, REG_UART_CLK_CTRL, &clk_ctl);
 	if (GET_REG_BITS(clk_ctl, UART_SRCSEL) == UART_SRCSEL_CPU_PLL) {
@@ -585,7 +598,8 @@ static inline uint32_t fmsh_clkc_get_uart_freq(uint32_t ps_clk)
 
 static inline uint32_t fmsh_clkc_get_spi_freq(uint32_t ps_clk)
 {
-	uint32_t clk_ctl, clk_freq;
+	uint32_t clk_ctl;
+	uint32_t clk_freq;
 
 	syscon_read_reg(SLCR_DEV, REG_SPI_CLK_CTRL, &clk_ctl);
 	if (GET_REG_BITS(clk_ctl, SPI_SRCSEL) == SPI_SRCSEL_CPU_PLL) {
@@ -601,7 +615,9 @@ static inline uint32_t fmsh_clkc_get_spi_freq(uint32_t ps_clk)
 
 static inline uint32_t fmsh_clkc_get_ttcref_freq(uint32_t pc_clk, uint32_t instance, uint32_t idx)
 {
-	uint32_t clk_ctrl, ref_freq = -1, sel;
+	uint32_t clk_ctrl;
+	uint32_t ref_freq = -1;
+	uint32_t sel;
 
 	DBG_PRINTK("Get TTC%d-%d ref freq\n", instance, idx);
 	__ASSERT(instance < 2, "Invalid instance %d\n", instance);
@@ -630,7 +646,8 @@ static inline uint32_t fmsh_clkc_get_ttcref_freq(uint32_t pc_clk, uint32_t insta
 
 static inline uint32_t fmsh_clkc_get_wdt_freq(uint32_t ps_clk)
 {
-	uint32_t clk_ctl, clk_freq = -1;
+	uint32_t clk_ctl;
+	uint32_t clk_freq = -1;
 
 	syscon_read_reg(SLCR_DEV, REG_WDT_RST_CTRL, &clk_ctl);
 	switch (GET_REG_BITS(clk_ctl, WDT_SRCSEL)) {
@@ -657,7 +674,8 @@ static inline uint32_t fmsh_clkc_get_wdt_freq(uint32_t ps_clk)
 
 static inline uint32_t fmsh_clkc_get_gem_freq(uint32_t ps_clk, uint32_t instance)
 {
-	uint32_t clk_ctl, clk_freq = -1;
+	uint32_t clk_ctl;
+	uint32_t clk_freq = -1;
 	uint32_t reg_base;
 
 	__ASSERT(instance < 2, "Invalid instance %d\n", instance);
@@ -683,7 +701,9 @@ static inline uint32_t fmsh_clkc_get_gem_freq(uint32_t ps_clk, uint32_t instance
 
 static int fmsh_clkc_switch(uint32_t clkid, bool enable)
 {
-	uint32_t clk_ctl_reg, reg, gate;
+	uint32_t clk_ctl_reg;
+	uint32_t reg;
+	uint32_t gate;
 
 	__ASSERT(clkid < ARRAY_SIZE(fmsh_clkid_ctrl_reg), "Invalid clkid %d\n", clkid);
 	__ASSERT(clkid < ARRAY_SIZE(fmsh_clkid_ctrl_gate), "Invalid clkid %d\n", clkid);
