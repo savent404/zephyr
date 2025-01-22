@@ -111,6 +111,7 @@ template <typename T_mempool, typename T_cache> struct ldp_master: public ldp_ba
 			ci->flg_wait_for_rx = false;
 			ci->flg_strong_order = cfg->strong_order;
 			ci->flg_one_shot = cfg->one_shot;
+			ci->flg_hold_on = cfg->one_shot ? true : false;
 			ci->stat_rx_packet = 0;
 			ci->last_err = 0;
 			ci->xid = LDP_INITIAL_XID;
@@ -154,6 +155,7 @@ template <typename T_mempool, typename T_cache> struct ldp_master: public ldp_ba
 			ci->last_err = 0;
 			ci->preempt = cfg->preempt;
 			ci->flg_one_shot = cfg->one_shot;
+			ci->flg_hold_on = cfg->one_shot ? true : false;
 			ci->stat_rx_packet = 0;
 			sync_conns_.push_back(std::move(ci));
 		}
@@ -222,6 +224,8 @@ template <typename T_mempool, typename T_cache> struct ldp_master: public ldp_ba
 			abuf.len = len;
 			memcpy(abuf.buf, buf, len);
 			(*async_it)->tx_bufs.push_back(std::move(abuf));
+
+			(*async_it)->flg_hold_on = false;
 		} else {
 			uint8_t *tx_buf = reinterpret_cast<uint8_t *>(mempool_if::alloc(len));
 			uint8_t *tx_buf_prev = (*sync_it)->tx_buf;
@@ -231,6 +235,7 @@ template <typename T_mempool, typename T_cache> struct ldp_master: public ldp_ba
 			memcpy(tx_buf, buf, len);
 			(*sync_it)->tx_buf = tx_buf;
 			(*sync_it)->tx_len = len;
+			(*sync_it)->flg_hold_on = false;
 
 			if (tx_buf_prev) {
 				mempool_if::free(tx_buf_prev);
@@ -253,6 +258,8 @@ template <typename T_mempool, typename T_cache> struct ldp_master: public ldp_ba
 
 		if (async_it != async_conns_.end()) {
 			async_buf abuf;
+
+			(*async_it)->flg_hold_on = false;
 
 			int err = get_immediate_err((*async_it)->last_err);
 			if (err) {
@@ -282,6 +289,8 @@ template <typename T_mempool, typename T_cache> struct ldp_master: public ldp_ba
 			}
 
 		} else {
+			(*sync_it)->flg_hold_on = false;
+
 			int err = get_immediate_err((*sync_it)->last_err);
 			if (err) {
 				return err;
@@ -356,6 +365,7 @@ template <typename T_mempool, typename T_cache> struct ldp_master: public ldp_ba
 		bool flg_wait_for_rx;     /* This is the flag to activate timeout mechanism
 					 Rising edge means reset timeout, activate timer
 					 Falling edge means deactivate timer */
+		bool flg_hold_on;         /* Hold on for a seconds if no user action triggered */
 		bool flg_strong_order;    /* only accept response if rsp.xid == req.rxid+1 */
 		uint8_t xid;              /* transaction id */
 		int rxid;                 /* last received transaction id, -1 means no
@@ -375,6 +385,7 @@ template <typename T_mempool, typename T_cache> struct ldp_master: public ldp_ba
 		int last_err;            /* last error */
 		uint32_t stat_rx_packet; /* run loop counter */
 		bool flg_one_shot;       /* one shot flag */
+		bool flg_hold_on;        /* Hold on for a seconds if no user action triggered */
 
 		uint8_t *tx_buf; /* transmit buffer */
 		uint8_t *rx_buf; /* receive buffer */
@@ -437,7 +448,11 @@ template <typename T_mempool, typename T_cache> struct ldp_master: public ldp_ba
 			uint32_t status;
 			bool data_ready, data_timeout, port_rejected;
 
-			if (ci->flg_one_shot && ci->stat_rx_packet) {
+			if (ci->flg_one_shot && (ci->stat_rx_packet || ci->flg_hold_on)) {
+				/* FIXME: This is not a good way to handle one shot connection
+				 * because we must deal it till the connection is destroyed */
+				/* NOTE: This it is one shot mode, we should skip round if transfer
+				 * is done or no user action */
 				continue;
 			}
 
@@ -535,7 +550,7 @@ template <typename T_mempool, typename T_cache> struct ldp_master: public ldp_ba
 				false; /* new rsp but not ordered(including first rsp)*/
 			bool is_accept_rsp = false; /* accept rsp */
 
-			if (ci->flg_one_shot && ci->stat_rx_packet) {
+			if (ci->flg_one_shot && (ci->stat_rx_packet || ci->flg_hold_on)) {
 				/* FIXME: This is not a good way to handle one shot connection
 				 * because we must deal it till the connection is destroyed */
 				/* this is for syncing rxid to slave. To notice slave that
