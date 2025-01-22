@@ -45,7 +45,19 @@ static inline uint32_t mcb_port_map_(uint32_t raw)
 		return 1;
 	case 0x40:
 		return 2;
+	case 0x60:
+		return 3;
+	case 0x61:
+		return 4;
+	case 0x62:
+		return 5;
+	case 0x63:
+		return 6;
+	default:
+		break;
 	}
+
+	printk("Invalid port number: %d\n", raw);
 	return 0xFF;
 }
 
