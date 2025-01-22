@@ -23,6 +23,7 @@ LOG_MODULE_REGISTER(main, LOG_LEVEL_DBG);
 
 struct context {
 	int target_sid;
+	int target_port;
 
 #define CMD_NONE      0
 #define CMD_DISCOVERY 1
@@ -281,14 +282,14 @@ int main(void)
 			break;
 
 		case STATE_IO_START:
-			res = dev_general_init(sock, ctx_.target_sid, PORT_ID_IO, 0);
+			res = dev_general_init(sock, ctx_.target_sid, ctx_.target_port, 0);
 			cnt = 10;
 
 			if (res) {
 				struct sockaddr_cif remote = {
 					.cif_family = AF_CIF,
 					.slot = ctx_.target_sid,
-					.port = PORT_ID_IO,
+					.port = ctx_.target_port,
 				};
 				ctx_.curr.cif_family = remote.cif_family;
 				ctx_.curr.slot = remote.slot;
@@ -310,7 +311,7 @@ int main(void)
 		case STATE_IO:
 			if (--cnt == 0) {
 				ctx_.state = STATE_IDLE;
-				dev_general_deinit(sock, ctx_.target_sid, PORT_ID_IO);
+				dev_general_deinit(sock, ctx_.target_sid, ctx_.target_port);
 				continue;
 			}
 
@@ -337,9 +338,12 @@ static int cif_cmd(const struct shell *sh, size_t argc, char **argv)
 	ARG_UNUSED(argc);
 	ARG_UNUSED(argv);
 
-	if (argc != 3) {
-		shell_print(sh, "cif <cmd> <sid>");
-		shell_print(sh, "  cmd: discovery, config, io");
+	if (argc != 3 && argc != 4) {
+		shell_print(sh, "Invalid number of arguments");
+		shell_print(sh, "cmd: discovery, config, io");
+		shell_print(sh, "\tdiscovery <slot>");
+		shell_print(sh, "\tconfig <slot>");
+		shell_print(sh, "\tio <slot> [port]");
 		return 0;
 	}
 
@@ -349,6 +353,11 @@ static int cif_cmd(const struct shell *sh, size_t argc, char **argv)
 		ctx_.cmd = CMD_CONFIG;
 	} else if (!strcmp(argv[1], "io")) {
 		ctx_.cmd = CMD_IO;
+		if (argc == 4) {
+			ctx_.target_port = atoi(argv[3]);
+		} else {
+			ctx_.target_port = PORT_ID_IO;
+		}
 	} else {
 		shell_print(sh, "Invalid command");
 		return -EINVAL;

@@ -18,8 +18,12 @@ struct reg_buf {
 #if CONFIG_MCB_SYSTECH_HW_WORKAROUND
 #define PORT_ID_DISC 0x00
 #endif
-#define PORT_ID_CFG 0x10
-#define PORT_ID_IO  0x40
+#define PORT_ID_CFG  0x10
+#define PORT_ID_IO   0x40
+#define PORT_ID_ETH0 0x60
+#define PORT_ID_ETH1 0x61
+#define PORT_ID_ETH2 0x62
+#define PORT_ID_ETH3 0x63
 
 /* Make sure that compile is satisfied */
 #define REG_BUF_REG_DEF(name, length)                                                              \
@@ -43,6 +47,14 @@ REG_BUF_REG_DEF(config, 32) = {'c', 'f', 'g', ':', '0', '0', '0', '0'};
 REG_BUF_DEF(config, 32);
 REG_BUF_REG_DEF(io, 32) = {'i', 'o', ':', '0', '0', '0', '0', '0'};
 REG_BUF_DEF(io, 32);
+REG_BUF_REG_DEF(eth0, 32) = {'e', 't', 'h', '0', ':', '0', '0', '0'};
+REG_BUF_DEF(eth0, 32);
+REG_BUF_REG_DEF(eth1, 32) = {'e', 't', 'h', '1', ':', '0', '0', '0'};
+REG_BUF_DEF(eth1, 32);
+REG_BUF_REG_DEF(eth2, 32) = {'e', 't', 'h', '2', ':', '0', '0', '0'};
+REG_BUF_DEF(eth2, 32);
+REG_BUF_REG_DEF(eth3, 32) = {'e', 't', 'h', '3', ':', '0', '0', '0'};
+REG_BUF_DEF(eth3, 32);
 
 static bool dev_port_open(int cif_sock, uint8_t port, uint8_t *initial_tx, uint16_t initial_tx_len,
 			  uint16_t max_rx_len)
@@ -72,6 +84,34 @@ static bool dev_port_open(int cif_sock, uint8_t port, uint8_t *initial_tx, uint1
 		return false;
 	}
 	return true;
+}
+
+static void deal_ethernet_data(int sock, uint8_t sid, uint8_t port, uint8_t *addr, uint16_t len)
+{
+	static uint8_t rx_buf[64];
+	int ret;
+	struct sockaddr_cif port_addr = {
+		.cif_family = AF_CIF,
+		.slot = sid,
+		.port = port,
+	};
+	socklen_t sl = sizeof(port_addr);
+
+	/* Update the tx buffer */
+	addr[len - 1]++;
+
+	ret = sendto(sock, addr, len, 0, (struct sockaddr *)&port_addr, sizeof(port_addr));
+	if (ret < 0 && errno != EAGAIN) {
+		LOG_ERR("Failed to send data back, errno %d", errno);
+	}
+
+	ret = recvfrom(sock, rx_buf, sizeof(rx_buf), 0, (struct sockaddr *)&port_addr, &sl);
+	if (ret < 0 && errno != EAGAIN) {
+		LOG_ERR("Failed to receive data, errno %d", errno);
+	} else if (ret > 0) {
+		LOG_INF("Received data from port %d", port);
+		LOG_HEXDUMP_INF(rx_buf, ret, "Data:");
+	}
 }
 
 int main(void)
@@ -116,14 +156,38 @@ int main(void)
 	}
 #endif
 	if (!dev_port_open(sock, PORT_ID_CFG, REG_BUF_REG(config), REG_BUF_LEN(config),
-			   REG_BUF_LEN(io))) {
+			   REG_BUF_LEN(config))) {
 		LOG_ERR("Failed to open config port");
 		close(sock);
 		return -1;
 	}
 	if (!dev_port_open(sock, PORT_ID_IO, REG_BUF_REG(io), REG_BUF_LEN(io),
-			   REG_BUF_LEN(config))) {
+			   REG_BUF_LEN(io))) {
 		LOG_ERR("Failed to open io port");
+		close(sock);
+		return -1;
+	}
+	if (!dev_port_open(sock, PORT_ID_ETH0, REG_BUF_REG(eth0), REG_BUF_LEN(eth0),
+			   REG_BUF_LEN(eth0))) {
+		LOG_ERR("Failed to open eth0 port");
+		close(sock);
+		return -1;
+	}
+	if (!dev_port_open(sock, PORT_ID_ETH1, REG_BUF_REG(eth1), REG_BUF_LEN(eth1),
+			   REG_BUF_LEN(eth1))) {
+		LOG_ERR("Failed to open eth1 port");
+		close(sock);
+		return -1;
+	}
+	if (!dev_port_open(sock, PORT_ID_ETH2, REG_BUF_REG(eth2), REG_BUF_LEN(eth2),
+			   REG_BUF_LEN(eth2))) {
+		LOG_ERR("Failed to open eth2 port");
+		close(sock);
+		return -1;
+	}
+	if (!dev_port_open(sock, PORT_ID_ETH3, REG_BUF_REG(eth3), REG_BUF_LEN(eth3),
+			   REG_BUF_LEN(eth3))) {
+		LOG_ERR("Failed to open eth3 port");
 		close(sock);
 		return -1;
 	}
@@ -141,6 +205,7 @@ int main(void)
 		socklen_t sl = sizeof(port_cfg);
 		bool new_config = false;
 
+		/* Prepare config data */
 		ret = recvfrom(sock, REG_BUF_MODIFY(config), REG_BUF_LEN(config), 0,
 			       (struct sockaddr *)&port_cfg, &sl);
 
@@ -192,6 +257,11 @@ int main(void)
 		if (ret < 0) {
 			LOG_INF("Failed to send io data, errno %d", errno);
 		}
+
+		deal_ethernet_data(sock, sl, PORT_ID_ETH0, REG_BUF_MODIFY(eth0), REG_BUF_LEN(eth0));
+		deal_ethernet_data(sock, sl, PORT_ID_ETH1, REG_BUF_MODIFY(eth1), REG_BUF_LEN(eth1));
+		deal_ethernet_data(sock, sl, PORT_ID_ETH2, REG_BUF_MODIFY(eth2), REG_BUF_LEN(eth2));
+		deal_ethernet_data(sock, sl, PORT_ID_ETH3, REG_BUF_MODIFY(eth3), REG_BUF_LEN(eth3));
 
 		k_msleep(10);
 	}
