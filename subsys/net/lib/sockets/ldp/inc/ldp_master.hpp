@@ -447,6 +447,9 @@ template <typename T_mempool, typename T_cache> struct ldp_master: public ldp_ba
 			uint16_t rx_len;
 			uint32_t status;
 			bool data_ready, data_timeout, port_rejected;
+#if CONFIG_MCB_SYSTECH_HW_WORKAROUND
+			uint32_t timeout = LDP_POLL_TIMEOUT;
+#endif
 
 			if (ci->flg_one_shot && (ci->stat_rx_packet || ci->flg_hold_on)) {
 				/* FIXME: This is not a good way to handle one shot connection
@@ -480,6 +483,18 @@ template <typename T_mempool, typename T_cache> struct ldp_master: public ldp_ba
 				data_ready = mcb_->has_rx(ci->port);
 				data_timeout = status & mcb_if::MCB_ERR_T_ERR;
 				port_rejected = status & mcb_if::MCB_ERR_P_ERR;
+#if CONFIG_MCB_SYSTECH_HW_WORKAROUND
+				if (--timeout == 0) {
+					status = mcb_->get_status() | mcb_if::MCB_ERR_T_ERR;
+					data_ready = false;
+					data_timeout = true;
+					port_rejected = false;
+					printk("LDP_MASTER: poll timeout, sid=%d, port=%d\n",
+					       ci->sid, ci->port);
+				} else {
+					k_busy_wait(1);
+				}
+#endif
 			} while (!data_ready && !data_timeout && !port_rejected);
 
 #if CONFIG_MCB_SYSTECH_HW_WORKAROUND
@@ -549,6 +564,9 @@ template <typename T_mempool, typename T_cache> struct ldp_master: public ldp_ba
 			bool is_unordered_rsp =
 				false; /* new rsp but not ordered(including first rsp)*/
 			bool is_accept_rsp = false; /* accept rsp */
+#if CONFIG_MCB_SYSTECH_HW_WORKAROUND
+			uint32_t timeout = LDP_POLL_TIMEOUT;
+#endif
 
 			if (ci->flg_one_shot && (ci->stat_rx_packet || ci->flg_hold_on)) {
 				/* FIXME: This is not a good way to handle one shot connection
@@ -592,6 +610,17 @@ template <typename T_mempool, typename T_cache> struct ldp_master: public ldp_ba
 				status = mcb_->get_status();
 				data_ready = mcb_->has_rx(ci->port);
 				data_timeout = status & mcb_if::MCB_ERR_T_ERR;
+#if CONFIG_MCB_SYSTECH_HW_WORKAROUND
+				if (--timeout == 0) {
+					status = mcb_->get_status() | mcb_if::MCB_ERR_T_ERR;
+					data_ready = false;
+					data_timeout = true;
+					printk("LDP_MASTER: poll timeout, sid=%d, port=%d\n",
+					       ci->sid, ci->port);
+				} else {
+					k_busy_wait(1);
+				}
+#endif
 			} while (!data_ready && !data_timeout);
 
 #if CONFIG_MCB_SYSTECH_HW_WORKAROUND
@@ -726,6 +755,10 @@ template <typename T_mempool, typename T_cache> struct ldp_master: public ldp_ba
 
 	mcb_if *mcb_;
 	work_queue_if *work_queue_;
+
+#if CONFIG_MCB_SYSTECH_HW_WORKAROUND
+	static inline uint32_t LDP_POLL_TIMEOUT = 1000; /* 1ms */
+#endif
 
 	using cache_if = ldp_cache<T_cache>;
 	using mempool_if = ldp_mempool<T_mempool>;
