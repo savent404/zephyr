@@ -310,6 +310,7 @@ static int cif_sock_bind(struct net_context *ctx, const struct sockaddr_cif *add
 	}
 
 	cif_data.occupied[addr->bus] = true;
+	usr_data->mcb = mcb;
 
 	return 0;
 }
@@ -513,6 +514,7 @@ static int cif_ctrl_port(struct net_context *ctx, const struct cif_raw_port_conf
 		ret = -EBUSY;
 	} else if (!prev_enable && !next_enable) {
 		/* Connection already disabled */
+		ret = 0;
 	} else if (prev_enable && !next_enable) {
 		/* Disable connection */
 		if (conn.conn_id >= 0) {
@@ -594,7 +596,7 @@ static int cif_ctrl_port(struct net_context *ctx, const struct cif_raw_port_conf
 		usr_data->conns.insert(cif_sock_data::conn_list_t::value_type(id, conn));
 	}
 	usr_data->conns[id] = conn;
-	return 0;
+	return ret;
 }
 
 static inline int cif_ldp_error_to_errno(int ldp_err)
