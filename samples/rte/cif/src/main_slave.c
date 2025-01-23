@@ -86,27 +86,36 @@ static bool dev_port_open(int cif_sock, uint8_t port, uint8_t *initial_tx, uint1
 	return true;
 }
 
-static void deal_ethernet_data(int sock, uint8_t sid, uint8_t port, uint8_t *addr, uint16_t len)
+static void deal_ethernet_data(int sock, uint8_t port, uint8_t *addr, uint16_t len)
 {
 	static uint8_t rx_buf[64];
 	int ret;
 	struct sockaddr_cif port_addr = {
 		.cif_family = AF_CIF,
-		.slot = sid,
 		.port = port,
 	};
 	socklen_t sl = sizeof(port_addr);
 
+	if (len < 8) {
+		LOG_ERR("Invalid data length %d", len);
+		return;
+	}
+
 	/* Update the tx buffer */
+	addr[0] = 'e';
+	addr[1] = 't';
+	addr[2] = 'h';
+	addr[3] = '0' + port - 0x60;
+	addr[4] = ':';
 	addr[len - 1]++;
 
-	ret = sendto(sock, addr, len, 0, (struct sockaddr *)&port_addr, sizeof(port_addr));
-	if (ret < 0 && errno != EAGAIN) {
+	ret = sendto(sock, addr, len, 0, (struct sockaddr *)&port_addr, sl);
+	if (ret < 0 && errno != EAGAIN && errno != ENXIO) {
 		LOG_ERR("Failed to send data back, errno %d", errno);
 	}
 
 	ret = recvfrom(sock, rx_buf, sizeof(rx_buf), 0, (struct sockaddr *)&port_addr, &sl);
-	if (ret < 0 && errno != EAGAIN) {
+	if (ret < 0 && errno != EAGAIN && errno != ENXIO) {
 		LOG_ERR("Failed to receive data, errno %d", errno);
 	} else if (ret > 0) {
 		LOG_INF("Received data from port %d", port);
@@ -161,8 +170,7 @@ int main(void)
 		close(sock);
 		return -1;
 	}
-	if (!dev_port_open(sock, PORT_ID_IO, REG_BUF_REG(io), REG_BUF_LEN(io),
-			   REG_BUF_LEN(io))) {
+	if (!dev_port_open(sock, PORT_ID_IO, REG_BUF_REG(io), REG_BUF_LEN(io), REG_BUF_LEN(io))) {
 		LOG_ERR("Failed to open io port");
 		close(sock);
 		return -1;
@@ -258,10 +266,10 @@ int main(void)
 			LOG_INF("Failed to send io data, errno %d", errno);
 		}
 
-		deal_ethernet_data(sock, sl, PORT_ID_ETH0, REG_BUF_MODIFY(eth0), REG_BUF_LEN(eth0));
-		deal_ethernet_data(sock, sl, PORT_ID_ETH1, REG_BUF_MODIFY(eth1), REG_BUF_LEN(eth1));
-		deal_ethernet_data(sock, sl, PORT_ID_ETH2, REG_BUF_MODIFY(eth2), REG_BUF_LEN(eth2));
-		deal_ethernet_data(sock, sl, PORT_ID_ETH3, REG_BUF_MODIFY(eth3), REG_BUF_LEN(eth3));
+		deal_ethernet_data(sock, PORT_ID_ETH0, REG_BUF_MODIFY(eth0), REG_BUF_LEN(eth0));
+		deal_ethernet_data(sock, PORT_ID_ETH1, REG_BUF_MODIFY(eth1), REG_BUF_LEN(eth1));
+		deal_ethernet_data(sock, PORT_ID_ETH2, REG_BUF_MODIFY(eth2), REG_BUF_LEN(eth2));
+		deal_ethernet_data(sock, PORT_ID_ETH3, REG_BUF_MODIFY(eth3), REG_BUF_LEN(eth3));
 
 		k_msleep(10);
 	}

@@ -80,9 +80,6 @@ static bool dev_discovery(int cif_sock, uint8_t slot)
 		return false;
 	}
 
-	/* Wait for LDP query discovery response automatically */
-	k_msleep(500);
-
 	static uint8_t buf[CIF_MTU];
 	struct sockaddr_cif addr = {
 		.cif_family = AF_CIF,
@@ -91,6 +88,12 @@ static bool dev_discovery(int cif_sock, uint8_t slot)
 	};
 	socklen_t addr_len = sizeof(addr);
 	ssize_t len;
+
+	/* NOTE: User Call rx() to trigger LDP start to transmit */
+	recvfrom(cif_sock, buf, sizeof(buf), 0, (struct sockaddr *)&addr, &addr_len);
+
+	/* Wait for LDP query discovery response automatically */
+	k_msleep(SYNC_CYCLE_TIME * 2);
 
 	len = recvfrom(cif_sock, buf, sizeof(buf), 0, (struct sockaddr *)&addr, &addr_len);
 
@@ -249,7 +252,7 @@ int main(void)
 
 	bool res;
 	uint32_t cnt = 1;
-	static uint8_t in_buf[64];
+	static uint8_t in_buf[512];
 
 	while (1) {
 		k_msleep(100);
