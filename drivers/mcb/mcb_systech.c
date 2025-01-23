@@ -357,6 +357,22 @@ void mcb_systech_set_tx_len(const struct device *dev, uint8_t port, uint16_t len
 		return;
 	}
 	mcb_write(len, reg_base + MCB_REG_PORT_TX_LEN(port));
+
+#if CONFIG_MCB_SYSTECH_HW_WORKAROUND
+	uint32_t retry = 10;
+
+	while (mcb_systech_get_tx_len(dev, port) != len && --retry) {
+		LOG_WRN("MCB: TX len not set correctly, retry %d...", retry);
+		if (--retry) {
+			mcb_write(len, reg_base + MCB_REG_PORT_TX_LEN(port));
+			k_busy_wait(1);
+		} else {
+			LOG_ERR("set_tx_len error can't be recovery, panic!");
+			k_panic();
+			break;
+		}
+	}
+#endif
 }
 
 void mcb_systech_rx_clr(const struct device *dev, uint8_t port)
