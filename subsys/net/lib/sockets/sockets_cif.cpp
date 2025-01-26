@@ -365,7 +365,7 @@ static ssize_t cif_sock_recvfrom(struct net_context *ctx, void *buf, size_t max_
 }
 
 static int cif_sock_getsockopt(struct net_context *ctx, int level, int optname, void *optval,
-			       socklen_t *optlen)
+							       socklen_t *optlen)
 {
 	auto usr_data = reinterpret_cast<cif_sock_data *>(ctx->user_data);
 
@@ -417,7 +417,7 @@ static int cif_sock_getsockopt(struct net_context *ctx, int level, int optname, 
 				matched_cnt++;
 			}
 		}
-		filter->error_mask = errors;
+		filter->error_mask = errors & CIF_ERR_MASK;
 		return matched_cnt ? 0 : -ENOENT;
 	}
 	default: {
@@ -428,7 +428,7 @@ static int cif_sock_getsockopt(struct net_context *ctx, int level, int optname, 
 }
 
 static int cif_sock_setsockopt(struct net_context *ctx, int level, int optname, const void *optval,
-			       socklen_t optlen)
+							       socklen_t optlen)
 {
 	auto usr_data = reinterpret_cast<cif_sock_data *>(ctx->user_data);
 	int ret = 0;

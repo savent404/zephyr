@@ -52,6 +52,10 @@ struct context {
 		role_master,
 		role_slave,
 	} target_role;
+	enum {
+		normal,
+		preempt,
+	} target_opt;
 
 #define CMD_NONE      0
 #define CMD_DISCOVERY 1

@@ -31,461 +31,666 @@ bool simu_mcb::write_allowed_[max_sid][max_port];
 uint32_t simu_mcb::status_[max_sid];
 simu_mcb::role simu_mcb::role_[max_sid];
 simu_mcb::io_mode simu_mcb::io_mode_[max_sid];
+std::list<void *> mock_mempool::ptrs;
 
-TEST_F(test_ldp_sm, basic_sync)
+using err = ldp_basic::ldp_error;
+
+TEST_F(test_ldp_sm, basic_concept)
 {
-
 	simu_work_queue wq;
-
-	simu_mcb bus_m(0), bus_s(1);
-
+	simu_mcb bus_m(0), bus_s1(1), bus_s2(2);
 	ldp_master_impl m(&bus_m, &wq);
-	ldp_slave_impl s(&bus_s);
+	ldp_slave_impl s1(&bus_s1), s2(&bus_s2);
 
-	/* sync dead slave */
-	ldp_slave_sync_config s_cfg;
-	ldp_master_sync_config m_cfg;
-	m_cfg.port = 0x40;
-	m_cfg.dst = 0x5;
-	m_cfg.cycle_time = 100;
-	m_cfg.preempt = false;
-	m_cfg.one_shot = false;
+	ldp_master_async_config m_cfg_cfg[2] = {
+		{0x10, 1, 1000, 2000, false, true, true},
+		{0x10, 2, 1000, 2000, false, true, true},
+	};
+	ldp_master_sync_config m_cfg_io[2] = {
+		{0x40, 1, 1000, false, false},
+		{0x40, 2, 1000, false, false},
+	};
+	ldp_master_async_config m_cfg_async_io[2] = {
+		{0x60, 1, 1000, 2000, false, false, false},
+		{0x60, 2, 1000, 2000, false, false, false},
+	};
 
-	auto dead_conn = m.create(false, &m_cfg);
+	ldp_slave_async_config s_cfg_cfg[2] = {
+		{0x10, 32},
+		{0x10, 8},
+	};
+	ldp_slave_sync_config s_cfg_io[2] = {
+		{0x40, 32, true},
+		{0x40, 8, true},
+	};
+	ldp_slave_async_config s_cfg_async_io[2] = {
+		{0x60, 32},
+		{0x60, 8},
+	};
 
-	m_cfg.port = 0x40;
-	m_cfg.dst = 0x1;
-	m_cfg.cycle_time = 100;
-	auto conn = m.create(false, &m_cfg);
+	int m_conn_cfg[2], m_conn_io[2], m_conn_async_io[2];
+	int s_conn_cfg[2], s_conn_io[2], s_conn_async_io[2];
 
-	uint8_t tx_buf[8] = "Hello, ", rx_buf[8] = "World!";
-	EXPECT_EQ(m.send(dead_conn, tx_buf, sizeof(tx_buf)), sizeof(tx_buf));
-	EXPECT_EQ(m.send(conn, tx_buf, sizeof(tx_buf)), sizeof(tx_buf));
+	/* Create master and slave connection */
+	s_conn_cfg[0] = s1.create(true, &s_cfg_cfg[0]);
+	s_conn_cfg[1] = s2.create(true, &s_cfg_cfg[1]);
+	s_conn_io[0] = s1.create(false, &s_cfg_io[0]);
+	s_conn_io[1] = s2.create(false, &s_cfg_io[1]);
+	s_conn_async_io[0] = s1.create(true, &s_cfg_async_io[0]);
+	s_conn_async_io[1] = s2.create(true, &s_cfg_async_io[1]);
 
-	/* First request, dead_conn shall be timeout, and conn shall be rejected */
-	EXPECT_EQ(m.recv(dead_conn, nullptr, 0), -err::LDP_ERR_AGAIN);
-	EXPECT_EQ(m.recv(conn, nullptr, 0), -err::LDP_ERR_AGAIN);
-	wq.sync();
-	EXPECT_EQ(m.recv(dead_conn, nullptr, 0), -err::LDP_ERR_T_ERROR);
-	EXPECT_EQ(m.recv(conn, rx_buf, sizeof(rx_buf)), -err::LDP_ERR_P_ERROR);
+	m_conn_cfg[0] = m.create(true, &m_cfg_cfg[0]);
+	m_conn_cfg[1] = m.create(true, &m_cfg_cfg[1]);
 
-	/* Second request, slave configured its port, dead conn shall be timeout, and
-	 * conn shall be accepted with empty response */
-	s_cfg.port = 0x40;
-	s_cfg.allow_write = true;
-	s_cfg.max_recv_len = 8;
-	auto s_conn = s.create(false, &s_cfg);
+	ASSERT_EQ(s_conn_cfg[0], 0);
+	ASSERT_EQ(s_conn_io[0], 1);
+	ASSERT_EQ(s_conn_cfg[1], 0);
+	ASSERT_EQ(s_conn_io[1], 1);
+	ASSERT_EQ(s_conn_async_io[0], 2);
+	ASSERT_EQ(s_conn_async_io[1], 2);
+	ASSERT_EQ(m_conn_cfg[0], 0);
+	ASSERT_EQ(m_conn_cfg[1], 1);
 
-	wq.sync();
-	EXPECT_EQ(m.recv(dead_conn, rx_buf, sizeof(rx_buf)), -err::LDP_ERR_T_ERROR);
-	EXPECT_EQ(m.recv(conn, rx_buf, sizeof(rx_buf)), -err::LDP_ERR_AGAIN);
-	EXPECT_EQ(s.recv(s_conn, rx_buf, sizeof(rx_buf)), sizeof(rx_buf));
-	EXPECT_STREQ((const char *)rx_buf, "Hello, ");
+	/* Configure slave port */
+	uint8_t rx_buf[32];
+	int ret;
 
-	/* Third request, slave setup its tx buffer, conn shall be accepted with real
-	 * response */
-	EXPECT_EQ(s.send(s_conn, tx_buf, sizeof(tx_buf)), sizeof(tx_buf));
-	wq.sync();
-	EXPECT_EQ(m.recv(dead_conn, rx_buf, sizeof(rx_buf)), -err::LDP_ERR_T_ERROR);
-	memset(rx_buf, 0, sizeof(rx_buf));
-	EXPECT_EQ(m.recv(conn, rx_buf, sizeof(rx_buf)), sizeof(rx_buf));
-	EXPECT_STREQ((const char *)rx_buf, "Hello, ");
-	memset(rx_buf, 0, sizeof(rx_buf));
-	EXPECT_EQ(s.recv(s_conn, rx_buf, sizeof(rx_buf)), sizeof(rx_buf));
-	EXPECT_STREQ((const char *)rx_buf, "Hello, ");
+	{
+		/* First round, slave get the request and response with empty frame */
+		ret = m.send(m_conn_cfg[0], (const uint8_t *)"cfg:000", 8);
+		ASSERT_EQ(ret, 8);
+		ret = m.send(m_conn_cfg[1], (const uint8_t *)"cfg:001", 8);
+		ASSERT_EQ(ret, 8);
+
+		wq.sync();
+
+		ret = s1.recv(s_conn_cfg[0], rx_buf, 32);
+		ASSERT_EQ(ret, 8);
+		EXPECT_STREQ((const char *)rx_buf, "cfg:000");
+
+		ret = s2.recv(s_conn_cfg[1], rx_buf, 32);
+		ASSERT_EQ(ret, 8);
+		EXPECT_STREQ((const char *)rx_buf, "cfg:001");
+
+		ret = s1.send(s_conn_cfg[0], (const uint8_t *)"cfg>000", 8);
+		ASSERT_EQ(ret, 8);
+
+		ret = s2.send(s_conn_cfg[1], (const uint8_t *)"cfg>001", 8);
+		ASSERT_EQ(ret, 8);
+
+		ret = m.recv(m_conn_cfg[0], rx_buf, 32);
+		ASSERT_EQ(ret, -err::LDP_ERR_AGAIN);
+
+		ret = m.recv(m_conn_cfg[1], rx_buf, 32);
+		ASSERT_EQ(ret, -err::LDP_ERR_AGAIN);
+	}
+
+	{
+		/* second round, master using empty request to get the configure response */
+		wq.sync();
+
+		ret = m.recv(m_conn_cfg[0], rx_buf, 32);
+		ASSERT_EQ(ret, 8);
+		EXPECT_STREQ((const char *)rx_buf, "cfg>000");
+
+		ret = m.recv(m_conn_cfg[1], rx_buf, 32);
+		ASSERT_EQ(ret, 8);
+		EXPECT_STREQ((const char *)rx_buf, "cfg>001");
+
+		ret = s1.recv(s_conn_cfg[0], rx_buf, 32);
+		ASSERT_EQ(ret, -err::LDP_ERR_AGAIN);
+
+		ret = s2.recv(s_conn_cfg[1], rx_buf, 32);
+		ASSERT_EQ(ret, -err::LDP_ERR_AGAIN);
+	}
+
+	{
+		/* third round, no more new data needs to be processed */
+		wq.sync();
+
+		ret = m.recv(m_conn_cfg[0], rx_buf, 32);
+		ASSERT_EQ(ret, -err::LDP_ERR_AGAIN);
+
+		ret = m.recv(m_conn_cfg[1], rx_buf, 32);
+		ASSERT_EQ(ret, -err::LDP_ERR_AGAIN);
+
+		ret = s1.recv(s_conn_cfg[0], rx_buf, 32);
+		ASSERT_EQ(ret, -err::LDP_ERR_AGAIN);
+
+		ret = s2.recv(s_conn_cfg[1], rx_buf, 32);
+		ASSERT_EQ(ret, -err::LDP_ERR_AGAIN);
+	}
+
+	/* Now we can start io test */
+	m_conn_io[0] = m.create(false, &m_cfg_io[0]);
+	m_conn_io[1] = m.create(false, &m_cfg_io[1]);
+	m_conn_async_io[0] = m.create(true, &m_cfg_async_io[0]);
+	m_conn_async_io[1] = m.create(true, &m_cfg_async_io[1]);
+	ASSERT_EQ(m_conn_io[0], 2);
+	ASSERT_EQ(m_conn_io[1], 3);
+	ASSERT_EQ(m_conn_async_io[0], 4);
+	ASSERT_EQ(m_conn_async_io[1], 5);
+
+	{
+		/* IO SYNC setup
+		 * s1--0x40->  m: io>000
+		 * s2--0x40->  m: io>001
+		 * s1--0x60->  m: aio>000
+		 *  m--0x60-> s2: aio:001
+		 *  m--0x40-> s1: io:000
+		 */
+		ret = s1.send(s_conn_io[0], (const uint8_t *)"io>000", 8);
+		ASSERT_EQ(ret, 8);
+
+		ret = s2.send(s_conn_io[1], (const uint8_t *)"io>001", 8);
+		ASSERT_EQ(ret, 8);
+
+		ret = s1.send(s_conn_async_io[0], (const uint8_t *)"aio>000", 8);
+		ASSERT_EQ(ret, 8);
+
+		ret = m.send(m_conn_async_io[1], (const uint8_t *)"aio:001", 8);
+		ASSERT_EQ(ret, 8);
+
+		ret = m.send(m_conn_io[0], (const uint8_t *)"io:000", 8);
+		ASSERT_EQ(ret, 8);
+
+		wq.sync();
+
+		ret = m.recv(m_conn_io[0], rx_buf, 32);
+		ASSERT_EQ(ret, 8);
+		EXPECT_STREQ((const char *)rx_buf, "io>000");
+
+		ret = m.recv(m_conn_io[1], rx_buf, 32);
+		ASSERT_EQ(ret, 8);
+		EXPECT_STREQ((const char *)rx_buf, "io>001");
+
+		ret = m.recv(m_conn_async_io[0], rx_buf, 32);
+		ASSERT_EQ(ret, 8);
+		EXPECT_STREQ((const char *)rx_buf, "aio>000");
+
+		ret = s1.recv(s_conn_io[0], rx_buf, 32);
+		ASSERT_EQ(ret, 8);
+		EXPECT_STREQ((const char *)rx_buf, "io:000");
+
+		ret = s2.recv(s_conn_io[1], rx_buf, 32);
+		ASSERT_EQ(ret, -err::LDP_ERR_AGAIN);
+
+		ret = s1.recv(s_conn_async_io[0], rx_buf, 32);
+		ASSERT_EQ(ret, -err::LDP_ERR_AGAIN);
+
+		ret = s2.recv(s_conn_async_io[1], rx_buf, 32);
+		ASSERT_EQ(ret, 8);
+		EXPECT_STREQ((const char *)rx_buf, "aio:001");
+
+		ret = m.recv(m_conn_async_io[1], rx_buf, 32);
+		ASSERT_EQ(ret, -err::LDP_ERR_AGAIN);
+	}
 }
 
-TEST_F(test_ldp_sm, basic_async)
+TEST_F(test_ldp_sm, DISABLED_harq)
 {
-
 	simu_work_queue wq;
-	simu_mcb bus_m(0), bus_s(1);
+	simu_mcb bus_m(0), bus_s1(1), bus_s2(2);
 	ldp_master_impl m(&bus_m, &wq);
-	ldp_slave_impl s(&bus_s);
+	ldp_slave_impl s1(&bus_s1), s2(&bus_s2);
 
-	/* async dead slave */
-	ldp_slave_async_config s_cfg;
-	ldp_master_async_config m_cfg;
+	ldp_master_async_config m_cfg_cfg[] = {
+		{0x60, 1, 1000, 10000, false, false, false},
+	};
+	ldp_slave_async_config s_cfg_cfg[] = {
+		{0x60, 32},
+	};
+	int m_conn = m.create(true, &m_cfg_cfg[0]);
+	int s_conn = s1.create(true, &s_cfg_cfg[0]);
+	const int max_round = ldp_master_impl::LDP_MAX_HARQ;
 
-	m_cfg.port = 0x10;
-	m_cfg.dst = 0x5;
-	m_cfg.cycle_time = 1;
-	m_cfg.timeout = 3;
-	m_cfg.one_shot = false;
-	m_cfg.preempt = false;
-	auto dead_conn = m.create(true, &m_cfg);
-	EXPECT_EQ(dead_conn, 0);
+	ASSERT_EQ(m_conn, 0);
+	ASSERT_EQ(s_conn, 0);
 
-	m_cfg.dst = 0x1;
-	auto conn = m.create(true, &m_cfg);
-	EXPECT_EQ(conn, 1);
+	/* FIXME: Since can't split async_handler into single round, we can't test
+	 * the harq feature */
 
-	uint8_t tx_buf[8] = "Hello, ", rx_buf[8] = "";
+	/* Make sure every req-res has new data to process */
+	uint8_t tx_m_buf[32], tx_s_buf[32], rx_buf[32];
 
-	/* First request, dead_conn shall timeout, and conn shall be rejected */
-	EXPECT_EQ(m.send(dead_conn, tx_buf, sizeof(tx_buf)), sizeof(tx_buf));
-	EXPECT_EQ(m.send(conn, tx_buf, sizeof(tx_buf)), sizeof(tx_buf));
-	wq.sync();
-	EXPECT_EQ(m.recv(dead_conn, rx_buf, sizeof(rx_buf)), -err::LDP_ERR_T_ERROR);
-	EXPECT_EQ(m.recv(conn, rx_buf, sizeof(rx_buf)), -err::LDP_ERR_P_ERROR);
-
-	/* Second request, slave port is open but response empty frame */
-	s_cfg.port = 0x10;
-	s_cfg.max_recv_len = 8;
-	auto s_conn = s.create(true, &s_cfg);
+	memcpy(tx_m_buf, "cfg:000", 8);
+	memcpy(tx_s_buf, "cfg>000", 8);
 
 	wq.sync();
-	EXPECT_EQ(m.recv(dead_conn, rx_buf, sizeof(rx_buf)), -err::LDP_ERR_T_ERROR);
-	EXPECT_EQ(m.recv(conn, rx_buf, sizeof(rx_buf)), -err::LDP_ERR_AGAIN);
-	EXPECT_EQ(s.recv(s_conn, rx_buf, sizeof(rx_buf)), sizeof(rx_buf));
-	EXPECT_STREQ((const char *)rx_buf, "Hello, ");
+	for (int i = 0; i < max_round; i++) {
+		tx_m_buf[4] = '0' + i;
+		tx_s_buf[4] = '0' + i;
+		ASSERT_EQ(m.send(m_conn, tx_m_buf, 8), 8);
+		// ASSERT_EQ(s1.send(s_conn, tx_s_buf, 8), 8);
+	}
 
-	/* Third request, slave port is ready, and async write is really timeout */
-	EXPECT_EQ(s.send(s_conn, tx_buf, sizeof(tx_buf)), sizeof(tx_buf));
-	wq.sync();
-	EXPECT_EQ(m.recv(dead_conn, rx_buf, sizeof(rx_buf)), -err::LDP_ERR_T_ERROR);
-	EXPECT_EQ(m.recv(conn, rx_buf, sizeof(rx_buf)), sizeof(rx_buf));
-	EXPECT_EQ(s.recv(s_conn, rx_buf, sizeof(rx_buf)), 0);
-}
-
-TEST_F(test_ldp_sm, sync_timeout_and_recovery)
-{
-	/* Make sure that get_extra_error() can notice there was a timeout error */
-	simu_work_queue wq;
-
-	simu_mcb bus_m(0);
-	ldp_master_impl m(&bus_m, &wq);
-
-	ldp_master_sync_config m_cfg;
-	m_cfg.port = 0x40;
-	m_cfg.dst = 0x1;
-	m_cfg.cycle_time = 100;
-	m_cfg.one_shot = false;
-	m_cfg.preempt = false;
-	auto conn = m.create(false, &m_cfg);
-	EXPECT_EQ(conn, 0);
-
-	uint8_t tx_buf[8] = "Hello, ", rx_buf[8] = "World!";
-	EXPECT_EQ(m.send(conn, tx_buf, sizeof(tx_buf)), sizeof(tx_buf));
-	EXPECT_EQ(m.recv(conn, rx_buf, sizeof(rx_buf)), -err::LDP_ERR_AGAIN);
-	wq.sync();
-	EXPECT_EQ(m.recv(conn, rx_buf, sizeof(rx_buf)), -err::LDP_ERR_T_ERROR);
-
-	simu_mcb bus_s(1);
-	ldp_slave_impl s(&bus_s);
-	ldp_slave_sync_config s_cfg;
-	s_cfg.port = 0x40;
-	s_cfg.allow_write = true;
-	s_cfg.max_recv_len = 32;
-	auto s_conn = s.create(false, &s_cfg);
-	EXPECT_EQ(s_conn, 0);
-	EXPECT_EQ(s.send(s_conn, tx_buf, sizeof(tx_buf)), sizeof(tx_buf));
-	wq.sync();
-	EXPECT_EQ(m.recv(conn, rx_buf, sizeof(rx_buf)), sizeof(rx_buf));
-	EXPECT_STREQ((const char *)rx_buf, "Hello, ");
-	EXPECT_TRUE(m.get_extra_error(conn) & (1 << err::LDP_ERR_PREV_T_ERROR));
+	for (int i = 0; i < max_round; i++) {
+		tx_m_buf[4] = '0' + i;
+		tx_s_buf[4] = '0' + i;
+		wq.sync();
+		printf("Round %d\n", i);
+		// ASSERT_EQ(m.recv(m_conn, rx_buf, 32), 8);
+		// EXPECT_STREQ((const char *)rx_buf, (const char *)tx_s_buf);
+		ASSERT_EQ(s1.recv(s_conn, rx_buf, 32), 8);
+		EXPECT_STREQ((const char *)rx_buf, (const char *)tx_m_buf);
+	}
 }
 
 TEST_F(test_ldp_sm, async_timeout)
 {
-	/* Make sure that async timeout is working */
 	simu_work_queue wq;
-
-	simu_mcb bus_m(0), bus_s(1);
+	simu_mcb bus_m(0), bus_s1(1);
 	ldp_master_impl m(&bus_m, &wq);
-	ldp_slave_impl s(&bus_s);
+	ldp_slave_impl s1(&bus_s1);
 
-	ldp_master_async_config m_cfg;
-	m_cfg.port = 0x10;
-	m_cfg.dst = 0x1;
-	m_cfg.cycle_time = 1;
-	m_cfg.timeout = 3;
-	m_cfg.one_shot = false;
-	m_cfg.preempt = false;
-	auto conn = m.create(true, &m_cfg);
-	EXPECT_EQ(conn, 0);
+	ldp_master_async_config m_cfg_cfg[] = {
+		{0x10, 1, 1000, 3000, false, true, true},
+		{0x60, 1, 1000, 3000, false, false, false},
+	};
+	ldp_slave_async_config s_cfg_cfg[] = {
+		{0x10, 32},
+		{0x60, 32},
+	};
+	uint8_t rx_buf[32];
 
-	ldp_slave_async_config s_cfg;
-	s_cfg.port = 0x10;
-	s_cfg.max_recv_len = 8;
-	auto s_conn = s.create(true, &s_cfg);
-	EXPECT_EQ(s_conn, 0);
+	int m_conn[] = {m.create(true, &m_cfg_cfg[0]), m.create(true, &m_cfg_cfg[1])};
+	int s_conn[] = {s1.create(true, &s_cfg_cfg[0]), s1.create(true, &s_cfg_cfg[1])};
 
-	uint8_t tx_buf[8] = "Hello, ", rx_buf[8] = "";
-	s.send(s_conn, tx_buf, sizeof(tx_buf));
+	ASSERT_EQ(m_conn[0], 0);
+	ASSERT_EQ(m_conn[1], 1);
+	ASSERT_EQ(s_conn[0], 0);
+	ASSERT_EQ(s_conn[1], 1);
+
+	/* Case 1: slave no response, master async timeout */
+	m.send(m_conn[0], (const uint8_t *)"cfg:000", 8);
+	m.send(m_conn[1], (const uint8_t *)"aio:000", 8);
+
+	for (int i = 0; i < 3; i++) {
+		wq.sync();
+		ASSERT_EQ(m.recv(m_conn[0], rx_buf, 32), -err::LDP_ERR_AGAIN);
+		ASSERT_EQ(m.recv(m_conn[1], rx_buf, 32), -err::LDP_ERR_AGAIN);
+	}
 	wq.sync();
-	EXPECT_EQ(m.recv(conn, rx_buf, sizeof(rx_buf)), sizeof(rx_buf));
+	ASSERT_EQ(m.recv(m_conn[0], rx_buf, 32), -err::LDP_ERR_ATIMEOUT);
+	ASSERT_EQ(m.recv(m_conn[1], rx_buf, 32), -err::LDP_ERR_ATIMEOUT);
 
 	wq.sync();
-	EXPECT_EQ(m.recv(conn, rx_buf, sizeof(rx_buf)), -err::LDP_ERR_AGAIN);
+	ASSERT_EQ(m.send(m_conn[0], (const uint8_t *)"cfg:001", 8), -err::LDP_ERR_ATIMEOUT);
+	ASSERT_EQ(m.send(m_conn[1], (const uint8_t *)"cfg:001", 8), -err::LDP_ERR_ATIMEOUT);
+	ASSERT_EQ(m.recv(m_conn[0], rx_buf, 32), -err::LDP_ERR_ATIMEOUT);
+	ASSERT_EQ(m.recv(m_conn[1], rx_buf, 32), -err::LDP_ERR_ATIMEOUT);
 
+	/* Case 2: slave start to response, master async timeout cleared automatically */
+	ASSERT_EQ(s1.recv(s_conn[0], rx_buf, 32), 8);
+	ASSERT_EQ(s1.recv(s_conn[1], rx_buf, 32), 8);
 	wq.sync();
-	EXPECT_EQ(m.recv(conn, rx_buf, sizeof(rx_buf)), -err::LDP_ERR_AGAIN);
-
-	wq.sync();
-	EXPECT_EQ(m.recv(conn, rx_buf, sizeof(rx_buf)), -err::LDP_ERR_AGAIN);
-
-	wq.sync();
-	EXPECT_EQ(m.recv(conn, rx_buf, sizeof(rx_buf)), -err::LDP_ERR_ATIMEOUT);
+	m.send(m_conn[0], (const uint8_t *)"cfg:000", 8);
+	m.send(m_conn[1], (const uint8_t *)"aio:000", 8);
+	ASSERT_EQ(m.recv(m_conn[0], rx_buf, 32), -err::LDP_ERR_AGAIN);
+	ASSERT_EQ(m.recv(m_conn[1], rx_buf, 32), -err::LDP_ERR_AGAIN);
 }
 
-TEST_F(test_ldp_sm, one_shot)
+TEST_F(test_ldp_sm, worst_case_slave_no_response)
 {
 	simu_work_queue wq;
-
-	simu_mcb bus_m(0), bus_s(1, simu_mcb::ps_io);
+	simu_mcb bus_m(0), bus_s1(1), bus_s2(2);
 	ldp_master_impl m(&bus_m, &wq);
-	ldp_slave_impl s(&bus_s);
+	ldp_slave_impl s1(&bus_s1), s2(&bus_s2);
 
-	ldp_master_async_config ma_cfg;
-	ldp_slave_async_config sa_cfg;
-	ldp_master_sync_config ms_cfg;
-	ldp_slave_sync_config ss_cfg;
+	ldp_master_async_config m_cfg_cfg[2] = {
+		{0x10, 1, 1000, 10000, false, true, true},
+		{0x10, 2, 1000, 10000, false, true, true},
+	};
+	ldp_master_sync_config m_cfg_io[2] = {
+		{0x40, 1, 1000, false, false},
+		{0x40, 2, 1000, false, false},
+	};
+	ldp_master_async_config m_cfg_async_io[2] = {
+		{0x60, 1, 1000, 2000, false, false, false},
+		{0x60, 2, 1000, 2000, false, false, false},
+	};
 
-	ma_cfg.port = 0x10;
-	ma_cfg.dst = 0x1;
-	ma_cfg.cycle_time = 1;
-	ma_cfg.timeout = 1;
-	ma_cfg.one_shot = true;
-	ma_cfg.preempt = false;
-	auto a_conn = m.create(true, &ma_cfg);
-	EXPECT_EQ(a_conn, 0);
+	ldp_slave_async_config s_cfg_cfg[2] = {
+		{0x10, 32},
+		{0x10, 8},
+	};
+	ldp_slave_sync_config s_cfg_io[2] = {
+		{0x40, 32, true},
+		{0x40, 8, true},
+	};
+	ldp_slave_async_config s_cfg_async_io[2] = {
+		{0x60, 32},
+		{0x60, 8},
+	};
 
-	ms_cfg.port = 0x40;
-	ms_cfg.dst = 0x1;
-	ms_cfg.cycle_time = 100;
-	ms_cfg.preempt = false;
-	ms_cfg.one_shot = true;
-	auto s_conn = m.create(false, &ms_cfg);
+	int m_conn_cfg[2], m_conn_io[2], m_conn_async_io[2];
+	int s_conn_cfg[2], s_conn_io[2], s_conn_async_io[2];
 
-	sa_cfg.port = 0x10;
-	sa_cfg.max_recv_len = 8;
-	auto sa_conn = s.create(true, &sa_cfg);
+	s_conn_cfg[0] = s1.create(true, &s_cfg_cfg[0]);
+	/* s_conn_cfg[1] = s2.create(true, &s_cfg_cfg[1]); */
+	s_conn_io[0] = s1.create(false, &s_cfg_io[0]);
+	/* s_conn_io[1] = s2.create(false, &s_cfg_io[1]); */
+	s_conn_async_io[0] = s1.create(true, &s_cfg_async_io[0]);
+	s_conn_async_io[1] = s2.create(true, &s_cfg_async_io[1]);
 
-	ss_cfg.port = 0x40;
-	ss_cfg.allow_write = true;
-	ss_cfg.max_recv_len = 8;
-	auto ss_conn = s.create(false, &ss_cfg);
+	m_conn_cfg[0] = m.create(true, &m_cfg_cfg[0]);
+	m_conn_cfg[1] = m.create(true, &m_cfg_cfg[1]);
+	m_conn_io[0] = m.create(false, &m_cfg_io[0]);
+	m_conn_io[1] = m.create(false, &m_cfg_io[1]);
+	m_conn_async_io[0] = m.create(true, &m_cfg_async_io[0]);
+	m_conn_async_io[1] = m.create(true, &m_cfg_async_io[1]);
 
-	uint8_t tx_buf[8] = "Foo bar", rx_buf[8] = "", new_tx_buf[8] = "Hello, ";
+	ASSERT_EQ(s_conn_cfg[0], 0);
+	ASSERT_EQ(s_conn_io[0], 1);
+	ASSERT_EQ(s_conn_async_io[0], 2);
+	ASSERT_EQ(s_conn_async_io[1], 0);
+	ASSERT_EQ(m_conn_cfg[0], 0);
+	ASSERT_EQ(m_conn_cfg[1], 1);
+	ASSERT_EQ(m_conn_io[0], 2);
+	ASSERT_EQ(m_conn_io[1], 3);
+	ASSERT_EQ(m_conn_async_io[0], 4);
+	ASSERT_EQ(m_conn_async_io[1], 5);
 
-	/* For one-shot sync, it will be always return buffered data and not up to
-	 * date */
-	/* For one-shot async, it will be always return -EGAIN once it is done */
-	EXPECT_EQ(m.send(a_conn, tx_buf, sizeof(tx_buf)), sizeof(tx_buf));
-	EXPECT_EQ(m.send(s_conn, tx_buf, sizeof(tx_buf)), sizeof(tx_buf));
-	EXPECT_EQ(s.send(sa_conn, tx_buf, sizeof(tx_buf)), sizeof(tx_buf));
-	EXPECT_EQ(s.send(ss_conn, tx_buf, sizeof(tx_buf)), sizeof(tx_buf));
-	wq.sync();
-	EXPECT_EQ(m.recv(a_conn, rx_buf, sizeof(rx_buf)), sizeof(rx_buf));
-	EXPECT_STREQ((const char *)rx_buf, "Foo bar");
-	EXPECT_EQ(m.recv(s_conn, rx_buf, sizeof(rx_buf)), sizeof(rx_buf));
-	EXPECT_STREQ((const char *)rx_buf, "Foo bar");
-	EXPECT_EQ(s.recv(sa_conn, rx_buf, sizeof(rx_buf)), sizeof(rx_buf));
-	EXPECT_STREQ((const char *)rx_buf, "Foo bar");
-	EXPECT_EQ(s.recv(ss_conn, rx_buf, sizeof(rx_buf)), sizeof(rx_buf));
-	EXPECT_STREQ((const char *)rx_buf, "Foo bar");
+	uint8_t rx_buf[32];
+	int ret;
+	{
+		/* Not opened port shall reject the request */
+		m.send(m_conn_cfg[0], (const uint8_t *)"cfg:000", 8);
+		m.send(m_conn_cfg[1], (const uint8_t *)"cfg:001", 8);
+		m.send(m_conn_io[0], (const uint8_t *)"io:000", 8);
+		m.send(m_conn_io[1], (const uint8_t *)"io:001", 8);
+		m.send(m_conn_async_io[0], (const uint8_t *)"aio:000", 8);
+		m.send(m_conn_async_io[1], (const uint8_t *)"aio:001", 8);
+		s1.send(s_conn_cfg[0], (const uint8_t *)"cfg>000", 8);
+		s1.send(s_conn_io[0], (const uint8_t *)"io>000", 8);
+		s2.send(s_conn_async_io[1], (const uint8_t *)"aio>001", 8);
+		wq.sync();
+		/* NOTE: master will drop this response since strong order is enabled */
+		ASSERT_EQ(m.recv(m_conn_cfg[0], rx_buf, 32), -err::LDP_ERR_AGAIN);
+		ASSERT_EQ(m.recv(m_conn_cfg[1], rx_buf, 32), -err::LDP_ERR_P_ERROR);
+		ASSERT_EQ(m.recv(m_conn_io[0], rx_buf, 32), 8);
+		ASSERT_EQ(m.recv(m_conn_io[1], rx_buf, 32), -err::LDP_ERR_P_ERROR);
+		ASSERT_EQ(m.recv(m_conn_async_io[0], rx_buf, 32), -err::LDP_ERR_AGAIN);
+		ASSERT_EQ(m.recv(m_conn_async_io[1], rx_buf, 32), 8);
+	}
 
-	EXPECT_EQ(m.send(a_conn, new_tx_buf, sizeof(new_tx_buf)), sizeof(new_tx_buf));
-	EXPECT_EQ(m.send(s_conn, new_tx_buf, sizeof(new_tx_buf)), sizeof(new_tx_buf));
-	EXPECT_EQ(s.send(sa_conn, new_tx_buf, sizeof(new_tx_buf)), sizeof(new_tx_buf));
-	EXPECT_EQ(s.send(ss_conn, new_tx_buf, sizeof(new_tx_buf)), sizeof(new_tx_buf));
-	wq.sync();
-	EXPECT_EQ(m.recv(a_conn, rx_buf, sizeof(rx_buf)), -err::LDP_ERR_AGAIN);
-	EXPECT_EQ(m.recv(s_conn, rx_buf, sizeof(rx_buf)), sizeof(rx_buf));
-	EXPECT_STREQ((const char *)rx_buf, "Foo bar"); /* not updated */
-	EXPECT_EQ(s.recv(sa_conn, rx_buf, sizeof(rx_buf)), -err::LDP_ERR_AGAIN);
-	EXPECT_EQ(s.recv(ss_conn, rx_buf, sizeof(rx_buf)), 0); /* not updated */
+	{
+		/* Master will drop the response if the response is not updated by slave */
+		m.send(m_conn_cfg[0], (const uint8_t *)"cfg:000", 8);
+		wq.sync();
+		ASSERT_EQ(m.recv(m_conn_cfg[0], rx_buf, 32), -err::LDP_ERR_AGAIN);
+
+		wq.sync();
+		ASSERT_EQ(m.recv(m_conn_cfg[0], rx_buf, 32), -err::LDP_ERR_AGAIN);
+
+		s1.recv(s_conn_cfg[0], rx_buf, 32);
+		ASSERT_EQ(s1.send(s_conn_cfg[0], (const uint8_t *)"cfg>000", 8), 8);
+		wq.sync();
+		ASSERT_EQ(m.recv(m_conn_cfg[0], rx_buf, 32), 8);
+		wq.sync();
+	}
 }
 
-TEST_F(test_ldp_sm, sync_handle_extra_errors)
+TEST_F(test_ldp_sm, master_slave_switch)
 {
 	simu_work_queue wq;
+	simu_mcb bus_mpu(0), bus_mpu_bak(1), bus_io(2);
 
-	simu_mcb bus_m(0), bus_s(1);
-	ldp_master_impl m(&bus_m, &wq);
-	ldp_slave_impl s(&bus_s);
+	auto mpu = std::make_unique<ldp_master_impl>(&bus_mpu, &wq);
+	std::unique_ptr<ldp_slave_impl> mpu_s = nullptr;
+	std::unique_ptr<ldp_master_impl> s1_m = nullptr;
+	auto s1 = std::make_unique<ldp_slave_impl>(&bus_mpu_bak);
+	auto s2 = std::make_unique<ldp_slave_impl>(&bus_io);
 
-	ldp_master_sync_config ms_cfg;
-	ldp_slave_sync_config ss_cfg;
+	int mpu_conn[6], mpu_bak_conn[6], io_conn[3];
 
-	ms_cfg.port = 0x40;
-	ms_cfg.dst = 0x1;
-	ms_cfg.cycle_time = 100;
-	ms_cfg.preempt = false;
-	ms_cfg.one_shot = false;
-	auto s_conn = m.create(false, &ms_cfg);
+	/* case 1: MPU switch to master, mpu_bak switch to slave */
+	{
+		const ldp_master_async_config m_cfg_cfg[] = {
+			{0x10, 1, 1000, 10000, false, true, true},
+			{0x60, 1, 1000, 10000, false, false, false},
+			{0x10, 2, 1000, 10000, false, true, true},
+			{0x60, 2, 1000, 10000, false, false, false},
+		};
+		const ldp_master_sync_config m_cfg_io[] = {
+			{0x40, 1, 1000, false, false},
+			{0x40, 2, 1000, false, false},
+		};
+		mpu_conn[0] = mpu->create(true, &m_cfg_cfg[0]);
+		mpu_conn[1] = mpu->create(true, &m_cfg_cfg[1]);
+		mpu_conn[2] = mpu->create(true, &m_cfg_cfg[2]);
+		mpu_conn[3] = mpu->create(true, &m_cfg_cfg[3]);
+		mpu_conn[4] = mpu->create(false, &m_cfg_io[0]);
+		mpu_conn[5] = mpu->create(false, &m_cfg_io[1]);
 
-	ss_cfg.port = 0x40;
-	ss_cfg.allow_write = true;
-	ss_cfg.max_recv_len = 8;
-	auto ss_conn = s.create(false, &ss_cfg);
+		ldp_slave_async_config s_cfg_cfg[] = {
+			{0x10, 32},
+			{0x60, 32},
+		};
+		ldp_slave_sync_config s_cfg_io[] = {
+			{0x40, 32, true},
+		};
+		mpu_bak_conn[0] = s1->create(true, &s_cfg_cfg[0]);
+		mpu_bak_conn[1] = s1->create(true, &s_cfg_cfg[1]);
+		mpu_bak_conn[2] = s1->create(false, &s_cfg_io[0]);
 
-	uint8_t tx_buf[8] = "Hello, ", rx_buf[8] = "";
+		io_conn[0] = s2->create(true, &s_cfg_cfg[0]);
+		io_conn[1] = s2->create(true, &s_cfg_cfg[1]);
+		io_conn[2] = s2->create(false, &s_cfg_io[0]);
 
-	/* For async, it will might receive R_ERROR */
-	EXPECT_EQ(m.send(s_conn, tx_buf, sizeof(tx_buf)), sizeof(tx_buf));
-	EXPECT_EQ(s.send(ss_conn, tx_buf, sizeof(tx_buf)), sizeof(tx_buf));
-	bus_m.fault_inject(mcb_if::MCB_ERR_R_ERR);
-	bus_m.fault_inject(mcb_if::MCB_ERR_I_ERR);
-	wq.sync();
-	EXPECT_EQ(m.recv(s_conn, rx_buf, sizeof(rx_buf)), sizeof(rx_buf));
-	EXPECT_STREQ((const char *)rx_buf, "Hello, ");
-	EXPECT_EQ(s.recv(ss_conn, rx_buf, sizeof(rx_buf)), sizeof(rx_buf));
-	EXPECT_STREQ((const char *)rx_buf, "Hello, ");
-	auto err = m.get_extra_error(s_conn);
-	EXPECT_TRUE(err & (1 << err::LDP_ERR_R_ERROR));
-	EXPECT_TRUE(err & (1 << err::LDP_ERR_I_ERROR));
+		wq.sync();
+	}
+
+	/* case 2: backup MPU want to switch master */
+	{
+		s1->destroy(mpu_bak_conn[0]);
+		s1->destroy(mpu_bak_conn[1]);
+		s1->destroy(mpu_bak_conn[2]);
+		s1 = nullptr;
+
+		s1_m = std::make_unique<ldp_master_impl>(&bus_mpu_bak, &wq);
+		ldp_master_sync_config cfg_io[] = {
+			{0x40, 0, 1000, true, false},
+		};
+		mpu_bak_conn[0] = s1_m->create(false, &cfg_io[0]);
+		s1_m->send(mpu_bak_conn[0], (const uint8_t *)"io>000", 8);
+		wq.sync();
+		/* NOTE: Due to the execute order, mpu will recv the preempt flag at the second
+		 * round in the worst case */
+		wq.sync();
+	}
+
+	/* case 3: mpu recv R flag, switch to slave */
+	{
+		uint8_t rx_buf[32];
+		ASSERT_EQ(mpu->recv(mpu_conn[4], rx_buf, 32), 8);
+		auto extra_err = mpu->get_extra_error(mpu_conn[4]);
+		mpu->clr_extra_error(mpu_conn[4], extra_err);
+		ASSERT_EQ(mpu->get_extra_error(mpu_conn[4]), 0);
+		ASSERT_TRUE(extra_err &
+			    (1 << err::LDP_ERR_PREEMPT | 1 << err::LDP_ERR_PREV_PREEMPT));
+		mpu->destroy(mpu_conn[0]);
+		mpu->destroy(mpu_conn[1]);
+		mpu->destroy(mpu_conn[2]);
+		mpu->destroy(mpu_conn[3]);
+		mpu->destroy(mpu_conn[4]);
+		mpu->destroy(mpu_conn[5]);
+		mpu = nullptr;
+	}
+
+	/* case 4: mpu switch to slave mode, establish connection with mpu_bak */
+	{
+		mpu_s = std::make_unique<ldp_slave_impl>(&bus_mpu);
+
+		ldp_slave_async_config s_cfg_cfg[] = {
+			{0x10, 32},
+			{0x60, 32},
+		};
+		ldp_slave_sync_config s_cfg_io[] = {
+			{0x40, 32, true},
+		};
+
+		mpu_conn[0] = mpu_s->create(true, &s_cfg_cfg[0]);
+		mpu_conn[1] = mpu_s->create(true, &s_cfg_cfg[1]);
+		mpu_conn[2] = mpu_s->create(false, &s_cfg_io[0]);
+
+		ASSERT_EQ(mpu_conn[0], 0);
+		ASSERT_EQ(mpu_conn[1], 1);
+		ASSERT_EQ(mpu_conn[2], 2);
+
+		mpu_s->send(mpu_conn[0], (const uint8_t *)"cfg>000", 8);
+		mpu_s->send(mpu_conn[1], (const uint8_t *)"aio>000", 8);
+		mpu_s->send(mpu_conn[2], (const uint8_t *)"io>000", 8);
+
+		wq.sync();
+
+		uint8_t rx_buf[32];
+		ASSERT_EQ(s1_m->recv(mpu_bak_conn[0], rx_buf, 32), 8);
+		ASSERT_STREQ((const char *)rx_buf, "io>000");
+	}
+	/* NOTE: Now mpu_bak shall disable its preempt flag, connection back to normal */
+	{
+		s1_m->destroy(mpu_bak_conn[0]);
+		ldp_master_sync_config cfg_io[] = {
+			{0x40, 0, 1000, true, false},
+		};
+		mpu_bak_conn[0] = s1_m->create(false, &cfg_io[0]);
+	}
 }
 
-TEST_F(test_ldp_sm, async_handle_extra_errors)
+TEST_F(test_ldp_sm, async_recv_memleak)
 {
 	simu_work_queue wq;
+	simu_mcb bus_mpu(0), bus_mpu_bak(1), bus_io(2);
 
-	simu_mcb bus_m(0), bus_s(1);
-	ldp_master_impl m(&bus_m, &wq);
-	ldp_slave_impl s(&bus_s);
+	auto mpu = std::make_unique<ldp_master_impl>(&bus_mpu, &wq);
+	auto s1 = std::make_unique<ldp_slave_impl>(&bus_mpu_bak);
+	auto s2 = std::make_unique<ldp_slave_impl>(&bus_io);
 
-	ldp_master_async_config ma_cfg;
-	ldp_slave_async_config sa_cfg;
+	int mpu_conn[2];
+	int s_conn[2];
 
-	ma_cfg.port = 0x10;
-	ma_cfg.dst = 0x1;
-	ma_cfg.cycle_time = 1;
-	ma_cfg.timeout = 3;
-	ma_cfg.one_shot = false;
-	ma_cfg.preempt = false;
-	auto a_conn = m.create(true, &ma_cfg);
+	ldp_master_async_config m_cfg_cfg[] = {
+		{0x60, 1, 1000, 10000, false, false, false},
+		{0x60, 2, 1000, 10000, false, false, false},
+	};
+	ldp_slave_async_config s_cfg_cfg[] = {
+		{0x60, 32},
+		{0x60, 32},
+	};
 
-	sa_cfg.port = 0x10;
-	sa_cfg.max_recv_len = 8;
-	auto sa_conn = s.create(true, &sa_cfg);
+	mpu_conn[0] = mpu->create(true, &m_cfg_cfg[0]);
+	mpu_conn[1] = mpu->create(true, &m_cfg_cfg[1]);
+	s_conn[0] = s1->create(true, &s_cfg_cfg[0]);
+	s_conn[1] = s2->create(true, &s_cfg_cfg[1]);
 
-	uint8_t tx_buf[8] = "Hello, ", rx_buf[8] = "";
+	ASSERT_EQ(mpu_conn[0], 0);
+	ASSERT_EQ(mpu_conn[1], 1);
+	ASSERT_EQ(s_conn[0], 0);
+	ASSERT_EQ(s_conn[1], 0);
 
-	/* For async, it will might receive R_ERROR */
-	EXPECT_EQ(m.send(a_conn, tx_buf, sizeof(tx_buf)), sizeof(tx_buf));
-	EXPECT_EQ(s.send(sa_conn, tx_buf, sizeof(tx_buf)), sizeof(tx_buf));
-	bus_m.fault_inject(mcb_if::MCB_ERR_R_ERR);
-	bus_m.fault_inject(mcb_if::MCB_ERR_I_ERR);
+	/* Update slave's send buffer size, check memleak issue */
+	uint8_t rx_buf[32];
+	mpu->send(mpu_conn[0], (const uint8_t *)"aio:000", 8);
+	mpu->send(mpu_conn[1], (const uint8_t *)"aio:001", 8);
+	s1->send(s_conn[0], (const uint8_t *)"res>008\0", 8);
+	s2->send(s_conn[1], (const uint8_t *)"res>00C\0", 12);
 	wq.sync();
-	EXPECT_EQ(m.recv(a_conn, rx_buf, sizeof(rx_buf)), sizeof(rx_buf));
-	EXPECT_STREQ((const char *)rx_buf, "Hello, ");
-	EXPECT_EQ(s.recv(sa_conn, rx_buf, sizeof(rx_buf)), sizeof(rx_buf));
-	EXPECT_STREQ((const char *)rx_buf, "Hello, ");
-	auto err = m.get_extra_error(a_conn);
+	ASSERT_EQ(mpu->recv(mpu_conn[0], rx_buf, 32), 8);
+	ASSERT_STREQ((const char *)rx_buf, "res>008");
+	ASSERT_EQ(mpu->recv(mpu_conn[1], rx_buf, 32), 12);
+	ASSERT_STREQ((const char *)rx_buf, "res>00C");
+	ASSERT_EQ(s1->recv(s_conn[0], rx_buf, 32), 8);
+	ASSERT_STREQ((const char *)rx_buf, "aio:000");
+	ASSERT_EQ(s2->recv(s_conn[1], rx_buf, 32), 8);
+	ASSERT_STREQ((const char *)rx_buf, "aio:001");
 
-	/* Since async will spin a few times till there is no more data,
-	 * the error will be cleaned up and only left with PREV_xxx */
-	EXPECT_TRUE(err & (1 << err::LDP_ERR_PREV_R_ERROR));
-	EXPECT_TRUE(err & (1 << err::LDP_ERR_PREV_I_ERROR));
+	mpu->send(mpu_conn[0], (const uint8_t *)"aio:002", 8);
+	mpu->send(mpu_conn[1], (const uint8_t *)"aio:003", 8);
+	s1->send(s_conn[0], (const uint8_t *)"res>00C\0", 12);
+	s2->send(s_conn[1], (const uint8_t *)"res>010\0", 16);
+	wq.sync();
+	ASSERT_EQ(mpu->recv(mpu_conn[0], rx_buf, 32), 12);
+	ASSERT_STREQ((const char *)rx_buf, "res>00C");
+	ASSERT_EQ(mpu->recv(mpu_conn[1], rx_buf, 32), 16);
+	ASSERT_STREQ((const char *)rx_buf, "res>010");
+	ASSERT_EQ(s1->recv(s_conn[0], rx_buf, 32), 8);
+	ASSERT_STREQ((const char *)rx_buf, "aio:002");
+	ASSERT_EQ(s2->recv(s_conn[1], rx_buf, 32), 8);
+	ASSERT_STREQ((const char *)rx_buf, "aio:003");
 }
 
-TEST_F(test_ldp_sm, master_strong_order)
-{
-	/* Master will drop the first response after port is opened
-	 * Which is used for register mode */
-	simu_work_queue wq;
-	simu_mcb bus_m(0), bus_s(1);
-	ldp_master_impl m(&bus_m, &wq);
-	ldp_slave_impl s(&bus_s);
-
-	ldp_master_async_config ma_cfg;
-	ldp_slave_async_config sa_cfg;
-
-	sa_cfg.port = 0x10;
-	sa_cfg.max_recv_len = 8;
-	auto sa_conn = s.create(true, &sa_cfg);
-	ASSERT_EQ(sa_conn, 0);
-	ASSERT_EQ(s.send(sa_conn, (uint8_t *)"Hello, ", 8), 8); /* Tx Buffer is ready */
-
-	ma_cfg.port = 0x10;
-	ma_cfg.dst = 0x1;
-	ma_cfg.cycle_time = 1;
-	ma_cfg.timeout = 3;
-	ma_cfg.one_shot = false;
-	ma_cfg.preempt = false;
-	ma_cfg.strong_order = true;
-	auto ma_conn = m.create(true, &ma_cfg);
-	ASSERT_EQ(ma_conn, 0);
-
-	/* Master will recv this rsp and drop it */
-	wq.sync();
-
-	uint8_t rx_buf[16];
-	auto ret = m.recv(ma_conn, &rx_buf[0], sizeof(rx_buf));
-	ASSERT_EQ(ret, -err::LDP_ERR_AGAIN);
-
-	ASSERT_EQ(s.send(sa_conn, (uint8_t *)"Hello, ", 8), 8);
-	wq.sync();
-	ret = m.recv(ma_conn, &rx_buf[0], sizeof(rx_buf));
-	ASSERT_EQ(ret, 8);
-	ASSERT_STREQ((const char *)&rx_buf[0], "Hello, ");
-}
-
-TEST_F(test_ldp_sm, combined_handle_extra_errors)
+TEST_F(test_ldp_sm, sync_send_memleak)
 {
 	simu_work_queue wq;
+	simu_mcb bus_mpu(0), bus_mpu_bak(1), bus_io(2);
 
-	simu_mcb bus_m(0), bus_s(1);
-	ldp_master_impl m(&bus_m, &wq);
-	ldp_slave_impl s(&bus_s);
+	auto mpu = std::make_unique<ldp_master_impl>(&bus_mpu, &wq);
+	auto s1 = std::make_unique<ldp_slave_impl>(&bus_mpu_bak);
+	auto s2 = std::make_unique<ldp_slave_impl>(&bus_io);
 
-	ldp_master_async_config ma_cfg;
-	ldp_slave_async_config sa_cfg;
-	ldp_master_sync_config ms_cfg;
-	ldp_slave_sync_config ss_cfg;
+	int mpu_conn[2];
+	int s_conn[2];
 
-	ma_cfg.port = 0x10;
-	ma_cfg.dst = 0x1;
-	ma_cfg.cycle_time = 1;
-	ma_cfg.timeout = 3;
-	ma_cfg.one_shot = false;
-	ma_cfg.preempt = false;
-	auto a_conn = m.create(true, &ma_cfg);
+	ldp_master_sync_config m_cfg_io[] = {
+		{0x40, 1, 1000, true, false},
+		{0x40, 2, 1000, true, false},
+	};
 
-	ms_cfg.port = 0x40;
-	ms_cfg.dst = 0x1;
-	ms_cfg.cycle_time = 100;
-	ms_cfg.preempt = false;
-	ms_cfg.one_shot = false;
-	auto s_conn = m.create(false, &ms_cfg);
+	ldp_slave_sync_config s_cfg_io[] = {
+		{0x40, 32, true},
+		{0x40, 32, true},
+	};
 
-	sa_cfg.port = 0x10;
-	sa_cfg.max_recv_len = 8;
-	auto sa_conn = s.create(true, &sa_cfg);
+	mpu_conn[0] = mpu->create(false, &m_cfg_io[0]);
+	mpu_conn[1] = mpu->create(false, &m_cfg_io[1]);
+	s_conn[0] = s1->create(false, &s_cfg_io[0]);
+	s_conn[1] = s2->create(false, &s_cfg_io[1]);
 
-	ss_cfg.port = 0x40;
-	ss_cfg.allow_write = true;
-	ss_cfg.max_recv_len = 8;
-	auto ss_conn = s.create(false, &ss_cfg);
+	ASSERT_EQ(mpu_conn[0], 0);
+	ASSERT_EQ(mpu_conn[1], 1);
+	ASSERT_EQ(s_conn[0], 0);
+	ASSERT_EQ(s_conn[1], 0);
 
-	uint8_t tx_buf[8] = "Hello, ", rx_buf[8] = "";
-
-	/* For async, it will might receive R_ERROR */
-	EXPECT_EQ(m.send(a_conn, tx_buf, sizeof(tx_buf)), sizeof(tx_buf));
-	EXPECT_EQ(m.send(s_conn, tx_buf, sizeof(tx_buf)), sizeof(tx_buf));
-	EXPECT_EQ(s.send(sa_conn, tx_buf, sizeof(tx_buf)), sizeof(tx_buf));
-	EXPECT_EQ(s.send(ss_conn, tx_buf, sizeof(tx_buf)), sizeof(tx_buf));
-	bus_m.fault_inject(mcb_if::MCB_ERR_R_ERR);
-	bus_m.fault_inject(mcb_if::MCB_ERR_I_ERR);
+	/* Update send buffer size, check memleak issue */
+	uint8_t rx_buf[32];
+	mpu->send(mpu_conn[0], (const uint8_t *)"io:000", 8);
+	mpu->send(mpu_conn[1], (const uint8_t *)"io:001", 8);
+	s1->send(s_conn[0], (const uint8_t *)"io>008\0", 8);
+	s2->send(s_conn[1], (const uint8_t *)"io>00C\0", 12);
 	wq.sync();
-	EXPECT_EQ(m.recv(a_conn, rx_buf, sizeof(rx_buf)), sizeof(rx_buf));
-	EXPECT_STREQ((const char *)rx_buf, "Hello, ");
-	EXPECT_EQ(m.recv(s_conn, rx_buf, sizeof(rx_buf)), sizeof(rx_buf));
-	EXPECT_STREQ((const char *)rx_buf, "Hello, ");
-	EXPECT_EQ(s.recv(sa_conn, rx_buf, sizeof(rx_buf)), sizeof(rx_buf));
-	EXPECT_STREQ((const char *)rx_buf, "Hello, ");
+	ASSERT_EQ(mpu->recv(mpu_conn[0], rx_buf, 32), 8);
+	ASSERT_STREQ((const char *)rx_buf, "io>008");
+	ASSERT_EQ(mpu->recv(mpu_conn[1], rx_buf, 32), 12);
+	ASSERT_STREQ((const char *)rx_buf, "io>00C");
+	ASSERT_EQ(s1->recv(s_conn[0], rx_buf, 32), 8);
+	ASSERT_STREQ((const char *)rx_buf, "io:000");
+	ASSERT_EQ(s2->recv(s_conn[1], rx_buf, 32), 8);
+	ASSERT_STREQ((const char *)rx_buf, "io:001");
 
-	auto err_s = m.get_extra_error(s_conn);
-	auto err_a = m.get_extra_error(a_conn);
-	auto combined = err_s | err_a;
+	mpu->send(mpu_conn[0], (const uint8_t *)"io:002", 8);
+	mpu->send(mpu_conn[1], (const uint8_t *)"io:003", 8);
+	s1->send(s_conn[0], (const uint8_t *)"io>00C\0", 12);
+	s2->send(s_conn[1], (const uint8_t *)"io>010\0", 16);
+	wq.sync();
+	ASSERT_EQ(mpu->recv(mpu_conn[0], rx_buf, 32), 12);
+	ASSERT_STREQ((const char *)rx_buf, "io>00C");
+	ASSERT_EQ(mpu->recv(mpu_conn[1], rx_buf, 32), 16);
+	ASSERT_STREQ((const char *)rx_buf, "io>010");
+	ASSERT_EQ(s1->recv(s_conn[0], rx_buf, 32), 8);
+	ASSERT_STREQ((const char *)rx_buf, "io:002");
+	ASSERT_EQ(s2->recv(s_conn[1], rx_buf, 32), 8);
+	ASSERT_STREQ((const char *)rx_buf, "io:003");
 
-	/* since the R and I error is for bus-leveled, it only shows up in single
-	 * connection. we can't treat it as a single connection function but rather a
-	 * bus function */
-	uint32_t R_ERROR_MASK = (1 << err::LDP_ERR_R_ERROR) | (1 << err::LDP_ERR_PREV_R_ERROR);
-	uint32_t I_ERROR_MASK = (1 << err::LDP_ERR_I_ERROR) | (1 << err::LDP_ERR_PREV_I_ERROR);
-	EXPECT_TRUE(combined & R_ERROR_MASK);
-	EXPECT_TRUE(combined & I_ERROR_MASK);
+	mpu->send(mpu_conn[0], (const uint8_t *)"io0", 4);
+	mpu->send(mpu_conn[1], (const uint8_t *)"io1", 4);
+	s1->send(s_conn[0], (const uint8_t *)"io0", 4);
+	s2->send(s_conn[1], (const uint8_t *)"io1", 4);
+	wq.sync();
+	ASSERT_EQ(mpu->recv(mpu_conn[0], rx_buf, 32), 4);
+	ASSERT_STREQ((const char *)rx_buf, "io0");
+	ASSERT_EQ(mpu->recv(mpu_conn[1], rx_buf, 32), 4);
+	ASSERT_STREQ((const char *)rx_buf, "io1");
+	ASSERT_EQ(s1->recv(s_conn[0], rx_buf, 32), 4);
+	ASSERT_STREQ((const char *)rx_buf, "io0");
 }

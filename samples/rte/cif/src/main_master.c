@@ -162,6 +162,62 @@ static bool dev_general_cfg(int cif_sock, uint8_t slot, uint8_t port, const void
 	return false;
 }
 
+static int handle_extra_errors(int sock)
+{
+	int ret;
+	struct cif_error_filter err_mask = {
+		.flags = 0,
+	};
+	socklen_t err_len = sizeof(err_mask);
+
+	ret = getsockopt(sock, SOL_CIF_RAW, CIF_OPT_ERROR, &err_mask, &err_len);
+	if (ret < 0 && errno != ENOENT) {
+		LOG_WRN("Failed to get error mask, errno %d", errno);
+	} else if (ret < 0 && errno == ENOENT) {
+		/* No activated connection found */
+		return 0;
+	}
+
+	ret = setsockopt(sock, SOL_CIF_RAW, CIF_OPT_ERROR, &err_mask, sizeof(err_mask));
+	if (ret < 0) {
+		LOG_WRN("Failed to clear error mask, errno %d", errno);
+	}
+
+	if (err_mask.error_mask) {
+		if (err_mask.error_mask & (CIF_ERR_PREV_PREEMPT | CIF_ERR_PREEMPT)) {
+			LOG_WRN("Preempt error detected, switch to slave mode");
+			/* Close socket will release all resources */
+			ctx_.target_role = role_slave;
+			ctx_.target_opt = normal;
+			ctx_.state = STATE_IDLE;
+			zsock_close(sock);
+			slave_start();
+			return 1;
+		} else if (err_mask.error_mask & CIF_ERR_R_ERROR) {
+			LOG_WRN("R_ERROR detected");
+		} else if (err_mask.error_mask & CIF_ERR_I_ERROR) {
+			LOG_WRN("I_ERROR detected");
+		} else if (err_mask.error_mask & CIF_ERR_MAY_LOST) {
+			LOG_WRN("MAY_LOST error detected");
+		} else if (err_mask.error_mask & CIF_ERR_PREV_T_ERROR) {
+			LOG_WRN("PREV_T_ERROR detected");
+		} else if (err_mask.error_mask & CIF_ERR_PREV_R_ERROR) {
+			LOG_WRN("PREV_R_ERROR detected");
+		} else if (err_mask.error_mask & CIF_ERR_PREV_I_ERROR) {
+			LOG_WRN("PREV_I_ERROR detected");
+		} else if (err_mask.error_mask & CIF_ERR_PREV_P_ERROR) {
+			LOG_WRN("PREV_P_ERROR detected");
+		} else if (err_mask.error_mask & CIF_ERR_PREV_MAY_LOST) {
+			LOG_WRN("PREV_MAY_LOST detected");
+		} else if (err_mask.error_mask & CIF_ERR_PREV_INVALID_ASYNC_PACK) {
+			LOG_WRN("PREV_INVALID_ASYNC_PACK detected");
+		} else {
+			LOG_ERR("Unknown error mask 0x%08x detected", err_mask.error_mask);
+		}
+	}
+	return 0;
+}
+
 static int main_master(void)
 {
 
@@ -211,6 +267,7 @@ static int main_master(void)
 
 	bool res;
 	uint32_t cnt = 1;
+	uint32_t flags = 0;
 	static uint8_t in_buf[512];
 
 	while (1) {
@@ -234,10 +291,12 @@ static int main_master(void)
 			ctx_.state = STATE_IDLE;
 			break;
 		case STATE_CONFIG:
+			flags = CIF_PORT_FLG_STRONG_ORDER | CIF_PORT_FLG_ONE_SHOT;
 
-			bool res =
-				dev_general_init(sock, ctx_.target_sid, PORT_ID_CFG,
-						 CIF_PORT_FLG_STRONG_ORDER | CIF_PORT_FLG_ONE_SHOT);
+			bool res = dev_general_init(
+				sock, ctx_.target_sid, PORT_ID_CFG,
+				ctx_.target_opt == normal ? flags : flags | CIF_PORT_FLG_PREEMPT);
+
 			if (res) {
 				static const char config_data[] = "cfg:123";
 
@@ -252,7 +311,9 @@ static int main_master(void)
 			break;
 
 		case STATE_IO_START:
-			res = dev_general_init(sock, ctx_.target_sid, ctx_.target_port, 0);
+			res = dev_general_init(sock, ctx_.target_sid, ctx_.target_port,
+					       ctx_.target_opt == preempt ? CIF_PORT_FLG_PREEMPT
+									  : 0);
 			cnt = ctx_.target_cnt + 1;
 			if (res) {
 				struct sockaddr_cif remote = {
@@ -303,6 +364,10 @@ static int main_master(void)
 				LOG_INF("Duration: %lldms",
 					(ctx_.systick_end - ctx_.systick_begin));
 			}
+			break;
+		}
+
+		if (handle_extra_errors(sock)) {
 			break;
 		}
 	}

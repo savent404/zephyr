@@ -292,7 +292,7 @@ struct simu_mcb: public systech::cif::mcb_if {
 			data_ready_[dst_sid][port] = true;
 
 			if (r) {
-				status_[dst_sid] |= MCB_ERR_P_ERR;
+				status_[dst_sid] |= MCB_ERR_PREEMPT;
 			}
 			break;
 		}
@@ -325,14 +325,9 @@ struct simu_mcb: public systech::cif::mcb_if {
 			break;
 		}
 
-#if 0
-    printf("tx: port %d, %d->%d\n", port, sid_, dst_sid);
-    printf("tx; (%d) status=%x, data_ready=%d, rx_len=%d\n", sid_,
-           status_[sid_], data_ready_[sid_][port], rx_len_[sid_][port]);
-    printf("tx; (%d) status=%x, data_ready=%d, rx_len=%d\n", dst_sid,
-           status_[dst_sid], data_ready_[dst_sid][port],
-           rx_len_[dst_sid][port]);
-#endif
+		printf("[%02x:%02x](%04d) -->%c<-- [%02x:%02x](%04d) s[%d]=%08x s[%d]=%08x\n", sid_,
+		       port, tx_len_[sid_][port], r ? '!' : ' ', dst_sid, port,
+		       tx_len_[dst_sid][port], sid_, status_[sid_], dst_sid, status_[dst_sid]);
 	}
 
 	static void setup()

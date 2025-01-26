@@ -12,7 +12,9 @@
 #pragma once
 
 #include "ldp_basic.hpp"
+#if CONFIG_MCB_SYSTECH_HW_WORKAROUND
 #include <zephyr/kernel.h>
+#endif
 
 namespace systech
 {
@@ -79,87 +81,21 @@ template <typename T_mempool, typename T_cache> struct ldp_master: public ldp_ba
 		return 0;
 	}
 
-	virtual conn create(bool is_async, ldp_config *config)
+	virtual conn create(bool is_async, const ldp_config *config)
 	{
+		conn id;
 
 		if (!config) {
 			return -LDP_ERR_INVALID;
 		}
 
 		if (is_async) {
-			auto cfg = static_cast<ldp_master_async_config *>(config);
-			auto ci = std::make_unique<async_conn_info>();
-
-			if (!ci) {
-				return -LDP_ERR_NOMEM;
-			}
-			if (!cfg->cycle_time || !cfg->timeout || cfg->cycle_time > cfg->timeout) {
-				return -LDP_ERR_INVALID;
-			}
-
-			if (conn_exists(cfg->dst, cfg->port)) {
-				return -LDP_ERR_CONN_EXIST;
-			}
-
-			ci->id = next_id_;
-			ci->sid = cfg->dst;
-			ci->port = cfg->port;
-			ci->cycle = cfg->cycle_time;
-			ci->preempt = cfg->preempt;
-			ci->timeout_allowed = cfg->timeout / cfg->cycle_time;
-			ci->timeout_cnt = ci->timeout_allowed;
-			ci->flg_wait_for_rx = false;
-			ci->flg_strong_order = cfg->strong_order;
-			ci->flg_one_shot = cfg->one_shot;
-			ci->flg_hold_on = cfg->one_shot ? true : false;
-			ci->stat_rx_packet = 0;
-			ci->last_err = 0;
-			ci->xid = LDP_INITIAL_XID;
-			ci->rxid = -1;
-			ci->wq_id = work_queue_->enqueue(
-				[](void *arg1, void *arg2) {
-					auto self = static_cast<ldp_master *>(arg1);
-					auto conn_info = static_cast<async_conn_info *>(arg2);
-					self->async_handler(conn_info);
-				},
-				this, ci.get(), cfg->cycle_time);
-			wqs_.push_back(ci->wq_id);
-			async_conns_.push_back(std::move(ci));
+			id = create_async(
+				reinterpret_cast<const ldp_master_async_config *>(config));
 		} else {
-			auto cfg = static_cast<ldp_master_sync_config *>(config);
-			auto ci = std::make_unique<sync_conn_info>();
-
-			if (!ci) {
-				return -LDP_ERR_NOMEM;
-			}
-			if (!cfg->cycle_time) {
-				return -LDP_ERR_INVALID;
-			}
-
-			if (conn_exists(cfg->dst, cfg->port)) {
-				return -LDP_ERR_CONN_EXIST;
-			}
-
-			/* make sure all the connection's cycle time is the same. cause we use
-			 * only one work queue for all sync connections */
-			if (!sync_conns_.empty()) {
-				if (cfg->cycle_time != sync_conns_.front()->cycle) {
-					return -LDP_ERR_INVALID;
-				}
-			}
-
-			ci->id = next_id_;
-			ci->sid = cfg->dst;
-			ci->port = cfg->port;
-			ci->cycle = cfg->cycle_time;
-			ci->last_err = 0;
-			ci->preempt = cfg->preempt;
-			ci->flg_one_shot = cfg->one_shot;
-			ci->flg_hold_on = cfg->one_shot ? true : false;
-			ci->stat_rx_packet = 0;
-			sync_conns_.push_back(std::move(ci));
+			id = create_sync(reinterpret_cast<const ldp_master_sync_config *>(config));
 		}
-		return next_id_++;
+		return id;
 	}
 
 	virtual int destroy(conn c)
@@ -209,39 +145,18 @@ template <typename T_mempool, typename T_cache> struct ldp_master: public ldp_ba
 					     [c](const async_conn_ptr &ci) { return ci->id == c; });
 		auto sync_it = std::find_if(sync_conns_.begin(), sync_conns_.end(),
 					    [c](const sync_conn_ptr &ci) { return ci->id == c; });
+		int ret;
 
 		if (async_it == async_conns_.end() && sync_it == sync_conns_.end()) {
 			return -LDP_ERR_CONN_NOT_FOUND;
 		}
 
 		if (async_it != async_conns_.end()) {
-			async_buf abuf;
-
-			abuf.buf = reinterpret_cast<uint8_t *>(mempool_if::alloc(len));
-			if (!abuf.buf) {
-				return -LDP_ERR_NOMEM;
-			}
-			abuf.len = len;
-			memcpy(abuf.buf, buf, len);
-			(*async_it)->tx_bufs.push_back(std::move(abuf));
-
-			(*async_it)->flg_hold_on = false;
+			ret = send_async(async_it->get(), buf, len);
 		} else {
-			uint8_t *tx_buf = reinterpret_cast<uint8_t *>(mempool_if::alloc(len));
-			uint8_t *tx_buf_prev = (*sync_it)->tx_buf;
-			if (!tx_buf) {
-				return -LDP_ERR_NOMEM;
-			}
-			memcpy(tx_buf, buf, len);
-			(*sync_it)->tx_buf = tx_buf;
-			(*sync_it)->tx_len = len;
-			(*sync_it)->flg_hold_on = false;
-
-			if (tx_buf_prev) {
-				mempool_if::free(tx_buf_prev);
-			}
+			ret = send_sync(sync_it->get(), buf, len);
 		}
-		return len;
+		return ret;
 	}
 
 	virtual int recv(conn c, uint8_t *buf, uint16_t len)
@@ -257,55 +172,9 @@ template <typename T_mempool, typename T_cache> struct ldp_master: public ldp_ba
 		}
 
 		if (async_it != async_conns_.end()) {
-			async_buf abuf;
-
-			(*async_it)->flg_hold_on = false;
-
-			int err = get_immediate_err((*async_it)->last_err);
-			if (err) {
-				return err;
-			}
-
-			if ((*async_it)->rx_bufs.empty()) {
-				/* no data received */
-				if (!(*async_it)->flg_wait_for_rx) {
-					/* If timeout is not activated, and no data received, start
-					 * to count
-					 */
-					(*async_it)->timeout_cnt = (*async_it)->timeout_allowed;
-					(*async_it)->flg_wait_for_rx = true;
-				}
-				return -LDP_ERR_AGAIN;
-			}
-
-			abuf = (*async_it)->rx_bufs.front();
-			if (abuf.len <= len) {
-				memcpy(buf, abuf.buf, abuf.len);
-				(*async_it)->rx_bufs.pop_front();
-				mempool_if::free(abuf.buf);
-				read_len = abuf.len;
-			} else {
-				return -LDP_ERR_RX_BUF_TOO_SMALL;
-			}
-
+			read_len = recv_async((*async_it).get(), buf, len);
 		} else {
-			(*sync_it)->flg_hold_on = false;
-
-			int err = get_immediate_err((*sync_it)->last_err);
-			if (err) {
-				return err;
-			}
-
-			if ((*sync_it)->rx_len == 0) {
-				return -LDP_ERR_AGAIN;
-			}
-
-			if ((*sync_it)->rx_len > len) {
-				return -LDP_ERR_RX_BUF_TOO_SMALL;
-			}
-
-			memcpy(buf, (*sync_it)->rx_buf, (*sync_it)->rx_len);
-			read_len = (*sync_it)->rx_len;
+			read_len = recv_sync((*sync_it).get(), buf, len);
 		}
 
 		return read_len;
@@ -440,6 +309,186 @@ template <typename T_mempool, typename T_cache> struct ldp_master: public ldp_ba
 		return false;
 	}
 
+	conn create_async(const ldp_master_async_config *config)
+	{
+		auto cfg = static_cast<const ldp_master_async_config *>(config);
+		auto ci = std::make_unique<async_conn_info>();
+
+		if (!ci) {
+			return -LDP_ERR_NOMEM;
+		}
+		if (!cfg->cycle_time || !cfg->timeout || cfg->cycle_time > cfg->timeout) {
+			return -LDP_ERR_INVALID;
+		}
+
+		if (conn_exists(cfg->dst, cfg->port)) {
+			return -LDP_ERR_CONN_EXIST;
+		}
+
+		ci->id = next_id_;
+		ci->sid = cfg->dst;
+		ci->port = cfg->port;
+		ci->cycle = cfg->cycle_time;
+		ci->preempt = cfg->preempt;
+		ci->timeout_allowed = cfg->timeout / cfg->cycle_time;
+		ci->timeout_cnt = ci->timeout_allowed;
+		ci->flg_wait_for_rx = false;
+		ci->flg_strong_order = cfg->strong_order;
+		ci->flg_one_shot = cfg->one_shot;
+		ci->flg_hold_on = cfg->one_shot ? true : false;
+		ci->stat_rx_packet = 0;
+		ci->last_err = 0;
+		ci->xid = LDP_INITIAL_XID;
+		ci->rxid = -1;
+		ci->wq_id = work_queue_->enqueue(
+			[](void *arg1, void *arg2) {
+				auto self = static_cast<ldp_master *>(arg1);
+				auto conn_info = static_cast<async_conn_info *>(arg2);
+				self->async_handler(conn_info);
+			},
+			this, ci.get(), cfg->cycle_time);
+		wqs_.push_back(ci->wq_id);
+		async_conns_.push_back(std::move(ci));
+		return next_id_++;
+	}
+
+	conn create_sync(const ldp_master_sync_config *config)
+	{
+		auto cfg = static_cast<const ldp_master_sync_config *>(config);
+		auto ci = std::make_unique<sync_conn_info>();
+
+		if (!ci) {
+			return -LDP_ERR_NOMEM;
+		}
+		if (!cfg->cycle_time) {
+			return -LDP_ERR_INVALID;
+		}
+
+		if (conn_exists(cfg->dst, cfg->port)) {
+			return -LDP_ERR_CONN_EXIST;
+		}
+
+		/* make sure all the connection's cycle time is the same. cause we use
+		 * only one work queue for all sync connections */
+		if (!sync_conns_.empty()) {
+			if (cfg->cycle_time != sync_conns_.front()->cycle) {
+				return -LDP_ERR_INVALID;
+			}
+		}
+
+		ci->id = next_id_;
+		ci->sid = cfg->dst;
+		ci->port = cfg->port;
+		ci->cycle = cfg->cycle_time;
+		ci->last_err = 0;
+		ci->preempt = cfg->preempt;
+		ci->flg_one_shot = cfg->one_shot;
+		ci->flg_hold_on = cfg->one_shot ? true : false;
+		ci->stat_rx_packet = 0;
+		sync_conns_.push_back(std::move(ci));
+		return next_id_++;
+	}
+
+	int send_async(async_conn_info *ci, const uint8_t *buf, uint16_t len)
+	{
+		async_buf abuf;
+
+		if (ci->tx_bufs.size() >= LDP_MAX_TX_BUF) {
+			return -LDP_ERR_AGAIN;
+		}
+
+		if (get_immediate_err(ci->last_err)) {
+			return get_immediate_err(ci->last_err);
+		}
+
+		abuf.buf = reinterpret_cast<uint8_t *>(mempool_if::alloc(len));
+		if (!abuf.buf) {
+			return -LDP_ERR_NOMEM;
+		}
+		abuf.len = len;
+		memcpy(abuf.buf, buf, len);
+		ci->tx_bufs.push_back(std::move(abuf));
+
+		ci->flg_hold_on = false;
+		return len;
+	}
+
+	int send_sync(sync_conn_info *ci, const uint8_t *buf, uint16_t len)
+	{
+		uint8_t *tx_buf = reinterpret_cast<uint8_t *>(mempool_if::alloc(len));
+		uint8_t *tx_buf_prev = ci->tx_buf;
+		if (!tx_buf) {
+			return -LDP_ERR_NOMEM;
+		}
+		memcpy(tx_buf, buf, len);
+		ci->tx_buf = tx_buf;
+		ci->tx_len = len;
+		ci->flg_hold_on = false;
+
+		if (tx_buf_prev) {
+			mempool_if::free(tx_buf_prev);
+		}
+		return len;
+	}
+
+	int recv_async(async_conn_info *ci, uint8_t *buf, uint16_t len)
+	{
+		async_buf abuf;
+
+		/* user action triggered, reset hold on if oneshot mode is on */
+		ci->flg_hold_on = false;
+
+		int err = get_immediate_err(ci->last_err);
+		if (err) {
+			return err;
+		}
+
+		if (ci->rx_bufs.empty()) {
+			/* no data received */
+			if (!ci->flg_wait_for_rx) {
+				/* If timeout is not activated, and no data received, start to count
+				 */
+				ci->timeout_cnt = ci->timeout_allowed;
+				ci->flg_wait_for_rx = true;
+			}
+			return -LDP_ERR_AGAIN;
+		}
+
+		/* data ready, reset timeout */
+		ci->flg_wait_for_rx = false;
+
+		abuf = ci->rx_bufs.front();
+		if (abuf.len <= len) {
+			memcpy(buf, abuf.buf, abuf.len);
+			ci->rx_bufs.pop_front();
+			mempool_if::free(abuf.buf);
+			return abuf.len;
+		} else {
+			return -LDP_ERR_RX_BUF_TOO_SMALL;
+		}
+	}
+
+	int recv_sync(sync_conn_info *ci, uint8_t *buf, uint16_t len)
+	{
+		int err = get_immediate_err(ci->last_err);
+		if (err) {
+			return err;
+		}
+
+		ci->flg_hold_on = false;
+
+		if (ci->rx_len == 0) {
+			return -LDP_ERR_AGAIN;
+		}
+
+		if (ci->rx_len > len) {
+			return -LDP_ERR_RX_BUF_TOO_SMALL;
+		}
+
+		memcpy(buf, ci->rx_buf, ci->rx_len);
+		return ci->rx_len;
+	}
+
 	void sync_handler()
 	{
 		for (auto &ci : sync_conns_) {
@@ -472,7 +521,7 @@ template <typename T_mempool, typename T_cache> struct ldp_master: public ldp_ba
 			mcb_->set_tx_len(ci->port, ci->tx_len);
 			tx_buf = mcb_->get_tx_buf(ci->port);
 			if (ci->tx_len) {
-				memcpy(tx_buf, ci->tx_buf, ci->tx_len);
+				ldp_memcpy::memcpy(tx_buf, ci->tx_buf, ci->tx_len);
 			}
 			cache_if::wmb(); /* make sure buffer is updated */
 			mcb_->tx(ci->port, ci->sid, ci->preempt);
@@ -501,7 +550,9 @@ template <typename T_mempool, typename T_cache> struct ldp_master: public ldp_ba
 			/* FIXME: HW bug, single transmit will trigger timeout and ready at the same
 			 * time
 			 */
-			if (data_ready) {
+			if (data_ready && data_timeout) {
+				printk("LDP_MASTER: data_ready and data_timeout at the same "
+				       "time\n");
 				data_timeout = 0;
 			}
 #endif
@@ -521,7 +572,7 @@ template <typename T_mempool, typename T_cache> struct ldp_master: public ldp_ba
 						mempool_if::alloc(rx_len));
 				}
 				cache_if::rmb(); /* make sure buffer is updated */
-				memcpy(ci->rx_buf, rx_buf, rx_len);
+				ldp_memcpy::memcpy(ci->rx_buf, rx_buf, rx_len);
 				ci->rx_len = rx_len;
 				ci->stat_rx_packet++;
 				mcb_->clr_rx(ci->port);
@@ -556,14 +607,15 @@ template <typename T_mempool, typename T_cache> struct ldp_master: public ldp_ba
 			async_buf abuf = {nullptr, 0};
 			volatile ldp_a_header *tx_hdr;
 			bool data_ready, data_timeout, p_error;
-			bool is_invalid_rsp = false; /* header is craped */
+			bool is_invalid_hdr = false; /* header is craped */
 			bool is_new_rsp = false;     /* rsp.xid != req.rxid */
 			bool is_ordered_rsp = false; /* rsp.xid = req.rxid+1*/
 			bool is_ack_rsp = false;     /* rsp.rxid = req.xid */
 			bool is_first_rsp = false;   /* first rsp */
 			bool is_unordered_rsp =
 				false; /* new rsp but not ordered(including first rsp)*/
-			bool is_accept_rsp = false; /* accept rsp */
+			bool is_acceptable_rsp = false; /* accept rsp */
+			bool is_rx_full = false;        /* rx buffer is full */
 #if CONFIG_MCB_SYSTECH_HW_WORKAROUND
 			uint32_t timeout = LDP_POLL_TIMEOUT;
 #endif
@@ -584,16 +636,7 @@ template <typename T_mempool, typename T_cache> struct ldp_master: public ldp_ba
 			/* prepare to tx, assume port is reused by other connection. so we need to
 			 * reconfig at every tx */
 			mcb_->config_port(ci->port, true, true, mcb_if::MCB_MAX_FRAME_LEN);
-#if CONFIG_MCB_SYSTECH_HW_WORKAROUND
-			/* FIXME: This is a hardware bug, if update tx_len from 13 to 8, the
-			 * function will not work. So we can only update tx_len for once.
-			 */
-			if (mcb_->get_tx_len(ci->port) == 0) {
-				mcb_->set_tx_len(ci->port, abuf.len + sizeof(ldp_a_header));
-			}
-#else
 			mcb_->set_tx_len(ci->port, abuf.len + sizeof(ldp_a_header));
-#endif
 			tx_buf = mcb_->get_tx_buf(ci->port);
 			tx_data = tx_buf + sizeof(ldp_a_header);
 			tx_hdr = reinterpret_cast<volatile ldp_a_header *>(tx_buf);
@@ -601,7 +644,7 @@ template <typename T_mempool, typename T_cache> struct ldp_master: public ldp_ba
 			tx_hdr->rxid = ci->rxid;
 			tx_hdr->magic = LDP_MAGIC;
 			if (abuf.len) {
-				memcpy(tx_data, abuf.buf, abuf.len);
+				ldp_memcpy::memcpy(tx_data, abuf.buf, abuf.len);
 			}
 			cache_if::wmb(); /* make sure buffer is updated */
 			mcb_->tx(ci->port, ci->sid, ci->preempt);
@@ -610,6 +653,7 @@ template <typename T_mempool, typename T_cache> struct ldp_master: public ldp_ba
 				status = mcb_->get_status();
 				data_ready = mcb_->has_rx(ci->port);
 				data_timeout = status & mcb_if::MCB_ERR_T_ERR;
+				p_error = status & mcb_if::MCB_ERR_P_ERR;
 #if CONFIG_MCB_SYSTECH_HW_WORKAROUND
 				if (--timeout == 0) {
 					status = mcb_->get_status() | mcb_if::MCB_ERR_T_ERR;
@@ -621,18 +665,18 @@ template <typename T_mempool, typename T_cache> struct ldp_master: public ldp_ba
 					k_busy_wait(1);
 				}
 #endif
-			} while (!data_ready && !data_timeout);
+			} while (!data_ready && !data_timeout && !p_error);
 
 #if CONFIG_MCB_SYSTECH_HW_WORKAROUND
 			/* FIXME: HW bug, single transmit will trigger timeout and ready at the same
 			 * time
 			 */
-			if (data_ready) {
+			if (data_ready && data_timeout) {
+				printk("LDP_MASTER: data_ready and data_timeout at the same "
+				       "time\n");
 				data_timeout = 0;
 			}
 #endif
-
-			p_error = status & mcb_if::MCB_ERR_P_ERR;
 
 			/* handle received frame */
 			if (data_ready && !p_error) {
@@ -644,17 +688,18 @@ template <typename T_mempool, typename T_cache> struct ldp_master: public ldp_ba
 				uint8_t *rx_data = rx_buf + hdr_size;
 
 				cache_if::rmb(); /* make sure buffer is updated */
-				is_invalid_rsp = rx_len < hdr_size || rx_hdr->magic != LDP_MAGIC;
-				is_first_rsp = !is_invalid_rsp && ci->rxid == -1;
-				is_ordered_rsp = !is_invalid_rsp && !is_first_rsp &&
+				is_invalid_hdr = rx_len < hdr_size || rx_hdr->magic != LDP_MAGIC;
+				is_first_rsp = !is_invalid_hdr && ci->rxid == -1;
+				is_ordered_rsp = !is_invalid_hdr && !is_first_rsp &&
 						 (rx_hdr->xid == ((ci->rxid + 1) & 0xFF));
-				is_new_rsp = (!is_invalid_rsp && (rx_hdr->xid != ci->rxid));
+				is_new_rsp = !is_invalid_hdr && (rx_hdr->xid != ci->rxid);
 				is_unordered_rsp = is_new_rsp && !is_ordered_rsp;
-				is_ack_rsp = !is_invalid_rsp && (rx_hdr->rxid == tx_hdr->xid);
-				is_accept_rsp = is_new_rsp &&
-						(ci->flg_strong_order ? is_ordered_rsp : true);
+				is_ack_rsp = !is_invalid_hdr && (rx_hdr->rxid == tx_hdr->xid);
+				is_acceptable_rsp = is_new_rsp &&
+						    (ci->flg_strong_order ? is_ordered_rsp : true);
+				is_rx_full = ci->rx_bufs.size() >= LDP_MAX_RX_BUF;
 
-				if (is_accept_rsp) {
+				if (is_acceptable_rsp && !is_rx_full) {
 					/* If strong order is set, only accept ordered response */
 					async_buf rx_abuf;
 
@@ -662,13 +707,14 @@ template <typename T_mempool, typename T_cache> struct ldp_master: public ldp_ba
 					if (rx_abuf.len) {
 						rx_abuf.buf = reinterpret_cast<uint8_t *>(
 							mempool_if::alloc(rx_abuf.len));
-						memcpy(rx_abuf.buf, rx_data, rx_abuf.len);
+						ldp_memcpy::memcpy(rx_abuf.buf, rx_data,
+								   rx_abuf.len);
 						ci->rx_bufs.push_back(std::move(rx_abuf));
 					}
 				}
 
-				if (is_new_rsp) {
-					/* new data received (even if is wrong data) */
+				if (is_new_rsp && !is_rx_full) {
+					/* new data received (even if its xid is not ordered) */
 					reset_timeout_flag = true;
 					should_continue = max_continue;
 
@@ -687,7 +733,14 @@ template <typename T_mempool, typename T_cache> struct ldp_master: public ldp_ba
 						mempool_if::free(abuf.buf);
 					}
 					ci->xid++;
+					reset_timeout_flag = true;
 				}
+
+				if (is_new_rsp || is_ack_rsp) {
+					/* If new data received or acked, reset timeout */
+					ci->timeout_cnt = ci->timeout_allowed;
+				}
+
 				mcb_->clr_rx(ci->port);
 			}
 
@@ -702,12 +755,12 @@ template <typename T_mempool, typename T_cache> struct ldp_master: public ldp_ba
 						    LDP_ERR_PREV_P_ERROR);
 			ci->last_err = handle_error(status & mcb_if::MCB_ERR_PREEMPT, ci->last_err,
 						    LDP_ERR_PREEMPT, LDP_ERR_PREV_PREEMPT);
-			ci->last_err = handle_error(is_invalid_rsp, ci->last_err,
+			ci->last_err = handle_error(is_invalid_hdr, ci->last_err,
 						    LDP_ERR_INVALID_ASYNC_PACK,
 						    LDP_ERR_PREV_INVALID_ASYNC_PACK);
 			ci->last_err = handle_error(is_unordered_rsp, ci->last_err,
 						    LDP_ERR_MAY_LOST, LDP_ERR_PREV_MAY_LOST);
-			if (is_accept_rsp) {
+			if (is_acceptable_rsp) {
 				ci->stat_rx_packet++;
 			}
 			mcb_->clr_status(status);
@@ -716,6 +769,7 @@ template <typename T_mempool, typename T_cache> struct ldp_master: public ldp_ba
 		/* Count if user wants some data from slave */
 		if (reset_timeout_flag) {
 			ci->flg_wait_for_rx = false;
+			ci->last_err &= ~(1 << LDP_ERR_ATIMEOUT);
 		} else if (ci->flg_wait_for_rx) {
 			if (--ci->timeout_cnt == 0) {
 				ci->last_err |= (1 << LDP_ERR_ATIMEOUT);
@@ -739,7 +793,7 @@ template <typename T_mempool, typename T_cache> struct ldp_master: public ldp_ba
 	{
 		if (set) {
 			last_err |= (1 << curr);
-		} else if (last_err & (1 << curr)) {
+		} else if (!set && last_err & (1 << curr)) {
 			last_err &= ~(1 << curr);
 			last_err |= (1 << prev);
 		}
@@ -759,6 +813,10 @@ template <typename T_mempool, typename T_cache> struct ldp_master: public ldp_ba
 #if CONFIG_MCB_SYSTECH_HW_WORKAROUND
 	static inline uint32_t LDP_POLL_TIMEOUT = 1000; /* 1ms */
 #endif
+      public:
+	static inline constexpr unsigned LDP_MAX_HARQ = 10;
+	static inline constexpr unsigned LDP_MAX_TX_BUF = LDP_MAX_HARQ;
+	static inline constexpr unsigned LDP_MAX_RX_BUF = LDP_MAX_HARQ;
 
 	using cache_if = ldp_cache<T_cache>;
 	using mempool_if = ldp_mempool<T_mempool>;

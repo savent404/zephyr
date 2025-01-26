@@ -128,11 +128,12 @@ typedef void (*mcb_rx_clr_t)(const struct device *dev, uint8_t port);
  * @param dev MCB device instance
  * @param sid destination sid
  * @param port port number
+ * @param preempt preempt flag
  *
  * @return see the return values for mcb_tx()
  * @see mcb_tx()
  */
-typedef void (*mcb_tx_t)(const struct device *dev, uint8_t sid, uint8_t port);
+typedef void (*mcb_tx_t)(const struct device *dev, uint8_t sid, uint8_t port, bool preempt);
 
 /**
  * @brief Get the receive buffer of the port
@@ -382,10 +383,11 @@ static inline void z_impl_mcb_rx_clr(const struct device *dev, uint8_t port)
  * @param dev MCB device instance
  * @param sid destination sid
  * @param port port number
+ * @param preempt preempt flag
  */
-__syscall void mcb_tx(const struct device *dev, uint8_t sid, uint8_t port);
+__syscall void mcb_tx(const struct device *dev, uint8_t sid, uint8_t port, bool preempt);
 
-static inline void z_impl_mcb_tx(const struct device *dev, uint8_t sid, uint8_t port)
+static inline void z_impl_mcb_tx(const struct device *dev, uint8_t sid, uint8_t port, bool preempt)
 {
 	const struct mcb_driver_api *api = (const struct mcb_driver_api *)dev->api;
 
@@ -393,7 +395,7 @@ static inline void z_impl_mcb_tx(const struct device *dev, uint8_t sid, uint8_t 
 		return;
 	}
 
-	api->tx(dev, sid, port);
+	api->tx(dev, sid, port, preempt);
 }
 
 /**

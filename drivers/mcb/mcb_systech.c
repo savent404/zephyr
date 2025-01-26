@@ -93,13 +93,19 @@ void mcb_systech_reset(const struct device *dev, uint8_t role)
 	switch (role) {
 	case _MCB_ROLE_MASTER:
 		val = VALUE2REG(CTRL2, DR, DR_MPU_P) | VALUE2REG(CTRL2, DT, DT_MPU_P) |
+		      /* FIXME: need to configure it via upper layer */
 		      (3000 << 16);
 		LOG_DBG("Set MCB to master mode, reg: %08x", val);
 		break;
 	case _MCB_ROLE_SLAVE:
 	default:
 		val = VALUE2REG(CTRL2, DR, DR_MPU_B) | VALUE2REG(CTRL2, DT, DT_MPU_B) |
+#if CONFIG_MCB_SYSTECH_HW_WORKAROUND
+		      /* FIXME: Set poll time in slave is not necessary */
 		      (3000 << 16);
+#else
+		      0;
+#endif
 		LOG_DBG("Set MCB to slave mode, reg: %08x", val);
 		break;
 	}
@@ -184,7 +190,7 @@ void mcb_systech_config_port(const struct device *dev, uint8_t port, bool enable
 	}
 }
 
-void mcb_systech_tx(const struct device *dev, uint8_t sid, uint8_t port)
+void mcb_systech_tx(const struct device *dev, uint8_t sid, uint8_t port, bool preempt)
 {
 	uint32_t reg_base = DEVICE_MMIO_NAMED_GET(dev, reg);
 	uint32_t val, wanted;
@@ -208,7 +214,8 @@ void mcb_systech_tx(const struct device *dev, uint8_t sid, uint8_t port)
 #endif
 
 	/* FIXME: assume src sid is 0 */
-	val = VALUE2REG(CTRL1, D_SID, sid) | VALUE2REG(CTRL1, PORT, port) | b_MCB_CTRL1_TxEN |
+	val = VALUE2REG(CTRL1, D_SID, sid) | VALUE2REG(CTRL1, PORT, port) |
+	      VALUE2REG(CTRL1, R_Ack, preempt ? R_Ack_set : R_Ack_echo) | b_MCB_CTRL1_TxEN |
 	      b_MCB_CTRL1_RxEN;
 	mcb_write(val, reg_base + MCB_REG_CTRL1);
 
@@ -265,6 +272,7 @@ void mcb_systech_clr_status(const struct device *dev, uint32_t bits)
 		return;
 	}
 
+#if CONFIG_MCB_SYSTECH_HW_WORKAROUND
 	if (bits & _MCB_ERR_R_ERR) {
 		val |= b_MCB_STATUS1_RE;
 	}
@@ -280,6 +288,9 @@ void mcb_systech_clr_status(const struct device *dev, uint32_t bits)
 	if (bits & _MCB_ERR_P_ERR) {
 		val |= b_MCB_STATUS1_PE;
 	}
+#else
+	val = 0;
+#endif
 
 	mcb_write(val, reg_base + MCB_REG_STATUS1);
 #if CONFIG_MCB_SYSTECH_HW_WORKAROUND

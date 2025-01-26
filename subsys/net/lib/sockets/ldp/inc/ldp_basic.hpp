@@ -77,7 +77,7 @@ struct ldp_basic {
 	 * @retval >= 0 connection id
 	 * @return < 0 error code, see @c ldp_error
 	 */
-	virtual conn create(bool is_async, ldp_config *config) = 0;
+	virtual conn create(bool is_async, const ldp_config *config) = 0;
 
 	/**
 	 * @brief destroy connection

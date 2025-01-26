@@ -77,7 +77,7 @@ struct mcb_zephyr: public mcb_if {
 	}
 	virtual void tx(uint8_t port, uint8_t dst_sid, bool r)
 	{
-		mcb_tx(dev_, dst_sid, port);
+		mcb_tx(dev_, dst_sid, port, r);
 	}
 	virtual bool has_rx(uint8_t port)
 	{

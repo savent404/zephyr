@@ -57,8 +57,8 @@ static int cif_cmd(const struct shell *sh, size_t argc, char **argv)
 
 	if (!strcmp(argv[1], "switch")) {
 		if (argc == 2) {
-			printk("Current role: %s\n",
-			       ctx_.target_role == role_master ? "master" : "slave");
+			shell_print(sh, "Current role: %s\n",
+				    ctx_.target_role == role_master ? "master" : "slave");
 			handled = true;
 		} else if (!strcmp(argv[2], "slave")) {
 			if (ctx_.target_role != role_slave) {
@@ -69,6 +69,16 @@ static int cif_cmd(const struct shell *sh, size_t argc, char **argv)
 			handled = true;
 		} else if (!strcmp(argv[2], "master")) {
 			if (ctx_.target_role != role_master) {
+				if (argc == 3) {
+					ctx_.target_opt = normal;
+				} else if (argc == 4 && !strcmp(argv[3], "preempt")) {
+					ctx_.target_opt = preempt;
+				} else {
+					shell_print(sh, "Invalid option, try preempt");
+					return -EINVAL;
+				}
+				shell_print(sh, "Switch to master role, opt: %s\n",
+					    ctx_.target_opt == normal ? "normal" : "preempt");
 				ctx_.target_role = role_master;
 				slave_cancel();
 				master_start();
@@ -86,7 +96,7 @@ static int cif_cmd(const struct shell *sh, size_t argc, char **argv)
 		shell_print(sh, "\tdiscovery <slot>");
 		shell_print(sh, "\tconfig <slot>");
 		shell_print(sh, "\tio <slot> [port] [cnt]");
-		shell_print(sh, "\tswitch [slave|master]");
+		shell_print(sh, "\tswitch <slave|master> [preempt]");
 		return 0;
 	}
 

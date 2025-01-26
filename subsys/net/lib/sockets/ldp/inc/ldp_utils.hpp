@@ -92,5 +92,35 @@ template <typename T> struct ldp_mempool {
 	}
 };
 
+struct ldp_memcpy {
+	static inline void memcpy(void *dst, const void *src, size_t len)
+	{
+		/* Make sure the copy is 4-byte aligned, if len is not 4-byte aligned,
+		 * load the last 4-byte data and override its 1~3 bytes then write back */
+		auto d = static_cast<volatile uint32_t *>(dst);
+		auto s = static_cast<const volatile uint32_t *>(src);
+		auto l = len / 4;
+		auto r = len % 4;
+
+		for (size_t i = 0; i < l; i++) {
+			d[i] = s[i];
+		}
+
+		if (r) {
+			volatile uint32_t w = d[l];
+			volatile uint32_t v = s[l];
+
+			/* override partial data */
+			for (size_t i = 0; i < r; i++) {
+				w &= ~(0xFF << (i * 8));
+				w |= (v & (0xFF << (i * 8)));
+			}
+
+			/* write back (4-byte aligned) */
+			d[l] = w;
+		}
+	}
+};
+
 } // namespace cif
 } // namespace systech

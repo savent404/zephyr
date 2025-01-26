@@ -31,7 +31,7 @@ template <typename T_cache> struct ldp_slave: public ldp_basic {
 		}
 	}
 
-	virtual int create(bool is_async, ldp_config *config)
+	virtual int create(bool is_async, const ldp_config *config)
 	{
 		auto ci = std::make_unique<conn_info>();
 
@@ -59,7 +59,7 @@ template <typename T_cache> struct ldp_slave: public ldp_basic {
 			 * @brief open port for sync connection
 			 * set max receive length and allow write, set tx buffer to 0
 			 */
-			auto cfg = static_cast<ldp_slave_sync_config *>(config);
+			auto cfg = static_cast<const ldp_slave_sync_config *>(config);
 
 			if (cfg->max_recv_len > mcb_if::MCB_MAX_FRAME_LEN) {
 				return -LDP_ERR_INVALID;
@@ -73,7 +73,7 @@ template <typename T_cache> struct ldp_slave: public ldp_basic {
 			 * set max receive length, initialize the tx buffer with default
 			 * ldp_a_header set rx buffer to 0
 			 */
-			auto cfg = static_cast<ldp_slave_async_config *>(config);
+			auto cfg = static_cast<const ldp_slave_async_config *>(config);
 			uint8_t *tx_buf, *rx_buf;
 
 			if (cfg->max_recv_len > mcb_if::MCB_MAX_FRAME_LEN) {
@@ -175,6 +175,10 @@ template <typename T_cache> struct ldp_slave: public ldp_basic {
 	{
 		int rx_len;
 
+		if (!buf || !len) {
+			return -LDP_ERR_INVALID;
+		}
+
 		auto it = std::find_if(conns_.begin(), conns_.end(),
 				       [c](const conn_info_ptr &ci) { return ci->id == c; });
 
@@ -186,12 +190,12 @@ template <typename T_cache> struct ldp_slave: public ldp_basic {
 			uint8_t port = (*it)->port;
 			uint8_t *rx_buf;
 
-			if (!mcb_->has_rx(port)) {
+			rx_buf = mcb_->get_rx_buf(port);
+			rx_len = mcb_->get_rx_len(port);
+			if (!mcb_->has_rx(port) || !rx_len) {
 				return -LDP_ERR_AGAIN;
 			}
 			mcb_->clr_rx(port);
-			rx_buf = mcb_->get_rx_buf(port);
-			rx_len = mcb_->get_rx_len(port);
 			if (rx_len <= len) {
 				memcpy(buf, rx_buf, rx_len);
 			} else {
@@ -203,12 +207,12 @@ template <typename T_cache> struct ldp_slave: public ldp_basic {
 			uint8_t port = (*it)->port;
 			bool new_data;
 
-			if (!mcb_->has_rx(port)) {
+			rx_len = mcb_->get_rx_len(port);
+			rx_buf = mcb_->get_rx_buf(port);
+			if (!mcb_->has_rx(port) || rx_len <= 4) {
 				return -LDP_ERR_AGAIN;
 			}
 			mcb_->clr_rx(port);
-			rx_len = mcb_->get_rx_len(port);
-			rx_buf = mcb_->get_rx_buf(port);
 			ldp_a_header rx_hdr(*reinterpret_cast<volatile uint32_t *>(rx_buf));
 			ldp_a_header tx_hdr(
 				*reinterpret_cast<volatile uint32_t *>(mcb_->get_tx_buf(port)));
@@ -232,15 +236,7 @@ template <typename T_cache> struct ldp_slave: public ldp_basic {
 					mcb_->get_tx_buf(port));
 
 				/* NOTE: 32-bit aligned */
-				for (int i = 0; i < rx_len; i += 4) {
-					uint32_t val =
-						*reinterpret_cast<volatile uint32_t *>(rx_buf + i);
-
-					/* Put it by byte order */
-					for (int j = 0; j < 4 && (j + i) < rx_len; j++) {
-						buf[i + j] = (val >> (j * 8)) & 0xFF;
-					}
-				}
+				ldp_memcpy::memcpy(buf, rx_buf, rx_len);
 				tmp.xid = tx_hdr.xid;
 				tmp.rxid = rx_hdr.xid;
 				*ptr = tmp();

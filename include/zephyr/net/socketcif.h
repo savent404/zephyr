@@ -79,19 +79,19 @@ struct cif_error_filter {
 	unsigned int flags;
 
 	/* directory: IN/OUT */
-#define CIF_ERR_R_ERROR       BIT(11) /* R_ERROR, redundancy error. One of the A/B frames lost */
-#define CIF_ERR_I_ERROR       BIT(12) /* CRC error */
-#define CIF_ERR_MAY_LOST      BIT(13) /* XID mismatch, means previous packet may be lost */
-#define CIF_ERR_PREEMPT       BIT(14) /* Preempted by R=1 frame */
-#define CIF_ERR_PREV_T_ERROR  BIT(15) /* T_ERROR happened in previous operation */
-#define CIF_ERR_PREV_R_ERROR  BIT(16) /* R_ERROR happened in previous operation */
-#define CIF_ERR_PREV_I_ERROR  BIT(17) /* I_ERROR happened in previous operation */
-#define CIF_ERR_PREV_P_ERROR  BIT(18) /* P_ERROR happened in previous operation */
-#define CIF_ERR_PREV_MAY_LOST BIT(19) /* Previous packet may be lost */
-#define CIF_ERR_PREV_PREEMPT  BIT(20) /* R=1 frame receive in previous operation */
+#define CIF_ERR_R_ERROR       BIT(12) /* R_ERROR, redundancy error. One of the frames lost */
+#define CIF_ERR_I_ERROR       BIT(13) /* recv invalid frame */
+#define CIF_ERR_MAY_LOST      BIT(14) /* XID mismatch, means previous packet may be lost */
+#define CIF_ERR_PREEMPT       BIT(15) /* Preempted by R=1 frame */
+#define CIF_ERR_PREV_T_ERROR  BIT(16) /* T_ERROR happened in previous operation */
+#define CIF_ERR_PREV_R_ERROR  BIT(17) /* R_ERROR happened in previous operation */
+#define CIF_ERR_PREV_I_ERROR  BIT(18) /* I_ERROR happened in previous operation */
+#define CIF_ERR_PREV_P_ERROR  BIT(19) /* P_ERROR happened in previous operation */
+#define CIF_ERR_PREV_MAY_LOST BIT(20) /* Previous packet may be lost */
+#define CIF_ERR_PREV_PREEMPT  BIT(21) /* R=1 frame receive in previous operation */
 #define CIF_ERR_PREV_INVALID_ASYNC_PACK                                                            \
-	BIT(21) /* Invalid async packet happened in previous operation */
-#define CIF_ERR_MASK (BIT(22) - 1)
+	BIT(22) /* Invalid async packet happened in previous operation */
+#define CIF_ERR_MASK (0x3FF << 12)
 	uint32_t error_mask;
 };
 
