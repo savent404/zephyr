@@ -16,4 +16,8 @@ config CIF_SHELL
 	help
 	  Enable this option to run the CIF with shell.
 
+module = CIF
+module-str = cif
+source "subsys/logging/Kconfig.template.log_config"
+
 source "Kconfig.zephyr"

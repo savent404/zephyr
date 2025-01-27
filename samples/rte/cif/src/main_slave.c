@@ -7,37 +7,15 @@
 #include <zephyr/net/socketcif.h>
 #include <zephyr/logging/log.h>
 
-LOG_MODULE_REGISTER(main, LOG_LEVEL_DBG);
+#include "cif_main.h"
+
+LOG_MODULE_REGISTER(main_s, CONFIG_CIF_LOG_LEVEL);
 
 struct reg_buf {
 	uint8_t *reg;    /* Actual register buffer */
 	uint8_t *modify; /* User modified buffer */
 	uint16_t len;    /* Register length */
 };
-
-#if CONFIG_MCB_SYSTECH_HW_WORKAROUND
-#define PORT_ID_DISC 0x00
-#endif
-#define PORT_ID_CFG  0x10
-#define PORT_ID_IO   0x40
-#define PORT_ID_ETH0 0x60
-#define PORT_ID_ETH1 0x61
-#define PORT_ID_ETH2 0x62
-#define PORT_ID_ETH3 0x63
-
-/* Make sure that compile is satisfied */
-#define REG_BUF_REG_DEF(name, length)                                                              \
-	static uint8_t name##_modify[length];                                                      \
-	static uint8_t name##_reg[length]
-#define REG_BUF_LEN(name)    name.len
-#define REG_BUF_REG(name)    name.reg
-#define REG_BUF_MODIFY(name) name.modify
-#define REG_BUF_DEF(name, length)                                                                  \
-	static struct reg_buf name = {                                                             \
-		.reg = (uint8_t *)&name##_reg,                                                     \
-		.modify = (uint8_t *)&name##_modify,                                               \
-		.len = length,                                                                     \
-	}
 
 #if CONFIG_MCB_SYSTECH_HW_WORKAROUND
 REG_BUF_REG_DEF(disc, 32) = {'d', 'i', 's', 'c', ':', '0', '0', '0'};
@@ -55,6 +33,7 @@ REG_BUF_REG_DEF(eth2, 32) = {'e', 't', 'h', '2', ':', '0', '0', '0'};
 REG_BUF_DEF(eth2, 32);
 REG_BUF_REG_DEF(eth3, 32) = {'e', 't', 'h', '3', ':', '0', '0', '0'};
 REG_BUF_DEF(eth3, 32);
+static struct k_sem terminate_sem;
 
 static bool dev_port_open(int cif_sock, uint8_t port, uint8_t *initial_tx, uint16_t initial_tx_len,
 			  uint16_t max_rx_len)
@@ -122,9 +101,9 @@ static void deal_ethernet_data(int sock, uint8_t port, uint8_t *addr, uint16_t l
 		LOG_HEXDUMP_INF(rx_buf, ret, "Data:");
 	}
 }
-
-int main(void)
+static int slave_task(void)
 {
+	LOG_INF("Running in slave mode");
 	/**
 	 * Step 1: create a CIF socket
 	 */
@@ -271,6 +250,32 @@ int main(void)
 		deal_ethernet_data(sock, PORT_ID_ETH2, REG_BUF_MODIFY(eth2), REG_BUF_LEN(eth2));
 		deal_ethernet_data(sock, PORT_ID_ETH3, REG_BUF_MODIFY(eth3), REG_BUF_LEN(eth3));
 
-		k_msleep(10);
+		k_usleep(10);
+
+		/* NOTE: terminate condition */
+		if (k_sem_take(&terminate_sem, K_NO_WAIT) == 0) {
+			zsock_close(sock);
+			break;
+		}
 	}
+	return 0;
+}
+
+K_THREAD_STACK_DEFINE(slave_stack, 2048);
+static struct k_thread slave_thread;
+
+int slave_start(void)
+{
+	k_tid_t ret = k_thread_create(
+		&slave_thread, slave_stack, K_THREAD_STACK_SIZEOF(slave_stack),
+		(k_thread_entry_t)slave_task, NULL, NULL, NULL, K_PRIO_PREEMPT(2), 0, K_NO_WAIT);
+	k_thread_name_set(&slave_thread, "slave");
+	k_sem_init(&terminate_sem, 0, 1);
+	return (int)ret;
+}
+int slave_cancel(void)
+{
+	k_sem_give(&terminate_sem);
+	k_thread_join(&slave_thread, K_FOREVER);
+	return 0;
 }

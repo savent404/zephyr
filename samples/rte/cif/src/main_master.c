@@ -6,43 +6,12 @@
 #include <zephyr/net/socket.h>
 #include <zephyr/net/socketcif.h>
 #include <zephyr/logging/log.h>
-#include <zephyr/shell/shell.h>
 
-#define MAX_DEV 2
+#include "cif_main.h"
 
-#define MCB_POLL_TIME           (50 * 1000) /* 50us */
-#define SYNC_CYCLE_TIME         2000        /* 2ms */
-#define ASYNC_INTERVAL_TIME     10000       /* 10ms */
-#define ASYNC_TIMEOUT_TIME      100000      /* 100ms */
-#define ASYNC_DEFAULT_BANDWIDTH 0           /* no limitation */
+LOG_MODULE_REGISTER(main_m, CONFIG_CIF_LOG_LEVEL);
 
-#define PORT_ID_CFG 0x10
-#define PORT_ID_IO  0x40
-
-LOG_MODULE_REGISTER(main, LOG_LEVEL_DBG);
-
-struct context {
-	int target_sid;
-	int target_port;
-
-#define CMD_NONE      0
-#define CMD_DISCOVERY 1
-#define CMD_CONFIG    2
-#define CMD_IO        3
-	uint32_t cmd;
-
-#define STATE_IDLE     0
-#define STATE_DISCOVER 1
-#define STATE_CONFIG   2
-#define STATE_IO_START 3
-#define STATE_IO       4
-	uint32_t state;
-
-	struct sockaddr_cif curr;
-	socklen_t curr_len;
-};
-
-static struct context ctx_ = {0};
+extern struct context ctx_;
 
 static void parse_cmd(void)
 {
@@ -93,7 +62,7 @@ static bool dev_discovery(int cif_sock, uint8_t slot)
 	recvfrom(cif_sock, buf, sizeof(buf), 0, (struct sockaddr *)&addr, &addr_len);
 
 	/* Wait for LDP query discovery response automatically */
-	k_msleep(SYNC_CYCLE_TIME * 2);
+	k_usleep(SYNC_CYCLE_TIME * 2);
 
 	len = recvfrom(cif_sock, buf, sizeof(buf), 0, (struct sockaddr *)&addr, &addr_len);
 
@@ -188,19 +157,18 @@ static bool dev_general_cfg(int cif_sock, uint8_t slot, uint8_t port, const void
 		}
 		LOG_DBG("No response, retry %d", max_try);
 		/* Must make sure that give enough time for LDP to schedule other cycles */
-		k_msleep(1000);
+		k_usleep(ASYNC_INTERVAL_TIME);
 	}
 	return false;
 }
 
-int main(void)
+static int main_master(void)
 {
+
+	LOG_INF("Running in master mode");
 	/**
 	 * Step 1: create a CIF socket
 	 */
-	LOG_INF("--------------------------------------");
-	LOG_INF("Testcase: Create Socket");
-	LOG_INF("--------------------------------------");
 	int sock = socket(AF_CIF, SOCK_RAW, CIF_RAW_MASTER);
 	int ret;
 
@@ -208,13 +176,9 @@ int main(void)
 		LOG_ERR("Failed to create CIF socket, errno %d", errno);
 		return -1;
 	}
-	LOG_INF("\n");
 	/**
 	 * Step 2: bind the CIF socket
 	 */
-	LOG_INF("--------------------------------------");
-	LOG_INF("Testcase: Bind socket");
-	LOG_INF("--------------------------------------");
 	struct sockaddr_cif local = {
 		.cif_family = AF_CIF,
 		.bus = CIF_BUS_DEFAULT,
@@ -228,14 +192,10 @@ int main(void)
 		close(sock);
 		return -1;
 	}
-	LOG_INF("\n");
 
 	/**
 	 * Step 3: set the CIF socket options
 	 */
-	LOG_INF("--------------------------------------");
-	LOG_INF("Testcase: Set CIF options");
-	LOG_INF("--------------------------------------");
 	const struct cif_raw_master_config config = {
 		.poll_time = MCB_POLL_TIME,
 		.cycle_time = SYNC_CYCLE_TIME,
@@ -246,7 +206,6 @@ int main(void)
 		close(sock);
 		return -1;
 	}
-	LOG_INF("\n");
 
 	ctx_.state = STATE_IDLE;
 
@@ -255,10 +214,18 @@ int main(void)
 	static uint8_t in_buf[512];
 
 	while (1) {
-		k_msleep(100);
+
+		/* Terminate condition */
+		if (k_sem_take(&ctx_.terminate_sem, K_NO_WAIT) == 0) {
+			zsock_close(sock);
+			break;
+		}
+
 		switch (ctx_.state) {
 		case STATE_IDLE:
 			parse_cmd();
+			/* Give up CPU and hand over */
+			k_usleep(SYNC_CYCLE_TIME);
 			break;
 		case STATE_DISCOVER:
 			res = dev_discovery(sock, ctx_.target_sid);
@@ -286,8 +253,7 @@ int main(void)
 
 		case STATE_IO_START:
 			res = dev_general_init(sock, ctx_.target_sid, ctx_.target_port, 0);
-			cnt = 10;
-
+			cnt = ctx_.target_cnt + 1;
 			if (res) {
 				struct sockaddr_cif remote = {
 					.cif_family = AF_CIF,
@@ -298,6 +264,9 @@ int main(void)
 				ctx_.curr.slot = remote.slot;
 				ctx_.curr.port = remote.port;
 				ctx_.curr_len = sizeof(ctx_.curr);
+				ctx_.stat_ok = 0;
+				ctx_.stat_failed = 0;
+				ctx_.systick_begin = sys_clock_tick_get();
 				ret = sendto(sock, "io:0", 4, 0, (struct sockaddr *)&remote,
 					     sizeof(remote));
 				if (ret < 0) {
@@ -312,63 +281,58 @@ int main(void)
 			ctx_.state = STATE_IO;
 			break;
 		case STATE_IO:
-			if (--cnt == 0) {
+			if (--cnt > 0) {
+				k_usleep(SYNC_CYCLE_TIME);
+				ret = recvfrom(sock, in_buf, sizeof(in_buf), 0,
+					       (struct sockaddr *)&ctx_.curr, &ctx_.curr_len);
+				if (ret < 0) {
+					LOG_ERR("Failed to receive data, errno %d", errno);
+					ctx_.stat_failed++;
+				} else {
+					LOG_HEXDUMP_DBG(in_buf, ret, "Received data from slot");
+					ctx_.stat_ok++;
+				}
+			} else {
+				ctx_.systick_end = sys_clock_tick_get();
 				ctx_.state = STATE_IDLE;
 				dev_general_deinit(sock, ctx_.target_sid, ctx_.target_port);
-				continue;
-			}
 
-			ret = recvfrom(sock, in_buf, sizeof(in_buf), 0,
-				       (struct sockaddr *)&ctx_.curr, &ctx_.curr_len);
-			if (ret < 0) {
-				LOG_ERR("Failed to receive data, errno %d", errno);
-			} else {
-				LOG_HEXDUMP_DBG(in_buf, ret, "Received data from slot");
+				LOG_INF("IO tested, package passed: %d err: %d, percentage: %3d%%",
+					ctx_.stat_ok, ctx_.stat_failed,
+					ctx_.stat_ok * 100 / (ctx_.stat_ok + ctx_.stat_failed));
+				LOG_INF("Duration: %lldms",
+					(ctx_.systick_end - ctx_.systick_begin));
 			}
 			break;
 		}
 	}
 
-	while (1) {
-		k_msleep(1000);
-	}
-
 	return 0;
 }
 
-static int cif_cmd(const struct shell *sh, size_t argc, char **argv)
+static struct k_thread master_thread;
+static K_THREAD_STACK_DEFINE(master_stack, 4096);
+
+int master_start(void)
 {
-	ARG_UNUSED(argc);
-	ARG_UNUSED(argv);
+	k_sem_init(&ctx_.terminate_sem, 0, 1);
+	k_tid_t tid = k_thread_create(
+		&master_thread, master_stack, K_THREAD_STACK_SIZEOF(master_stack),
+		(k_thread_entry_t)main_master, NULL, NULL, NULL, K_PRIO_PREEMPT(10), 0, K_NO_WAIT);
 
-	if (argc != 3 && argc != 4) {
-		shell_print(sh, "Invalid number of arguments");
-		shell_print(sh, "cmd: discovery, config, io");
-		shell_print(sh, "\tdiscovery <slot>");
-		shell_print(sh, "\tconfig <slot>");
-		shell_print(sh, "\tio <slot> [port]");
-		return 0;
+	k_thread_name_set(&master_thread, "master");
+
+	if (tid == NULL) {
+		LOG_ERR("Failed to create master thread");
+		return -1;
 	}
-
-	if (!strcmp(argv[1], "discovery")) {
-		ctx_.cmd = CMD_DISCOVERY;
-	} else if (!strcmp(argv[1], "config")) {
-		ctx_.cmd = CMD_CONFIG;
-	} else if (!strcmp(argv[1], "io")) {
-		ctx_.cmd = CMD_IO;
-		if (argc == 4) {
-			ctx_.target_port = atoi(argv[3]);
-		} else {
-			ctx_.target_port = PORT_ID_IO;
-		}
-	} else {
-		shell_print(sh, "Invalid command");
-		return -EINVAL;
-	}
-
-	ctx_.target_sid = atoi(argv[2]);
 
 	return 0;
 }
 
-SHELL_CMD_REGISTER(cif, NULL, "Dump version information", cif_cmd);
+int master_cancel(void)
+{
+	k_sem_give(&ctx_.terminate_sem);
+	k_thread_join(&master_thread, K_FOREVER);
+	return 0;
+}
