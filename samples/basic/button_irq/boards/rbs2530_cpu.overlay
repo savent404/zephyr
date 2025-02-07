@@ -1,0 +1,19 @@
+#include <zephyr/dt-bindings/gpio/gpio.h>
+
+/ {
+	aliases {
+		sw0 = &button0;
+	};
+};
+
+&gpio1 {
+	status = "okay";
+	buttons {
+		compatible = "gpio-keys";
+		status = "okay";
+		button0: button {
+			label = "SW0";
+			gpios = <&gpio1 7 GPIO_ACTIVE_LOW>; // MIO39 SD Detect pin
+		};
+	};
+};
