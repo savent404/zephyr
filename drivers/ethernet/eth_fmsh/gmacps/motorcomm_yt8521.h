@@ -17,7 +17,7 @@
 #define YT8521_ID2_VAL 0xe91a
 
 /* status & function */
-#define YT8521_PHY_TIME_OUT      10000
+#define YT8521_PHY_TIME_OUT      4000
 #define YT8521_PHY_LINK_TIME_OUT 1000
 
 /* timing ctrl */

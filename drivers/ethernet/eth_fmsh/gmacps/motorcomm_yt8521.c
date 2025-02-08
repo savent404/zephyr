@@ -94,7 +94,7 @@ u8 yt8521_reset(FGmacPs_Instance_T *pGmac)
 		reg = yt8521_reg_read(pGmac, PAGE0, YT8521_CTRL);
 		phy_timeout++;
 		if (phy_timeout > YT8521_PHY_TIME_OUT) {
-			FMSH_DEBUG("PHY reset timeout \r\n");
+			FMSH_ERROR("PHY reset timeout \r\n");
 			return ETHERNET_PHY_TIMEOUT;
 		}
 		FMSH_DELAY_MS(1);
@@ -107,7 +107,7 @@ u8 yt8521_reset(FGmacPs_Instance_T *pGmac)
 		reg = yt8521_reg_read(pGmac, PAGE0, YT8521_STAT);
 		phy_timeout++;
 		if (phy_timeout > YT8521_PHY_LINK_TIME_OUT) {
-			FMSH_DEBUG("PHY YT8521 link timeout \r\n");
+			FMSH_ERROR("PHY YT8521 link timeout \r\n");
 			return ETHERNET_PHY_TIMEOUT;
 		}
 		FMSH_DELAY_MS(1);
