@@ -43,6 +43,7 @@ struct ldp_master_async_config: ldp_config {
 	bool preempt;        /* set R flag, means want to take over the bus */
 	bool one_shot;       /* one shot mode, keep sync till receive response */
 	bool strong_order;   /* Only accept ordered response (rsp.xid == req.rxid+1) */
+	unsigned pps;        /* max packets per second */
 };
 
 struct ldp_slave_sync_config: ldp_config {
@@ -176,8 +177,9 @@ struct ldp_basic {
 		uint32_t xid: 8;  /* transfer xid */
 		uint32_t rxid: 8; /* receiver xid */
 		uint32_t magic: 16;
-		explicit ldp_a_header(const ldp_a_header&) = default;
-		explicit ldp_a_header(uint32_t val) : xid(val & 0xFF), rxid((val >> 8) & 0xFF), magic((val >> 16) & 0xFFFF)
+		explicit ldp_a_header(const ldp_a_header &) = default;
+		explicit ldp_a_header(uint32_t val)
+			: xid(val & 0xFF), rxid((val >> 8) & 0xFF), magic((val >> 16) & 0xFFFF)
 		{
 		}
 		explicit ldp_a_header() : xid(LDP_INITIAL_XID), rxid(0), magic(LDP_MAGIC)

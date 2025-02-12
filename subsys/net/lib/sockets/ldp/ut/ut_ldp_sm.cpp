@@ -694,3 +694,84 @@ TEST_F(test_ldp_sm, sync_send_memleak)
 	ASSERT_EQ(s1->recv(s_conn[0], rx_buf, 32), 4);
 	ASSERT_STREQ((const char *)rx_buf, "io0");
 }
+
+TEST_F(test_ldp_sm, async_bandwidth_control)
+{
+	simu_work_queue wq;
+	simu_mcb bus_m(0), bus_s1(1), bus_s2(2);
+	ldp_master_impl m(&bus_m, &wq);
+	ldp_slave_impl s1(&bus_s1), s2(&bus_s2);
+
+	bus_m.bus_pps_ = 3;
+
+	int mpu_conn[5], s_conn[5];
+
+	ldp_master_sync_config m_cfg_io[] = {
+		{0x40, 1, 1'000'000, false, false},
+		{0x40, 2, 1'000'000, false, false},
+		{0x41, 1, 1'000'000, false, false},
+	};
+	ldp_master_async_config m_cfg_async_io[] = {
+		{0x60, 1, 1'000'000, 1'000'000, false, false, false, 1},
+		{0x60, 2, 1'000'000, 1'000'000, false, false, false, 1},
+	};
+
+	ldp_slave_sync_config s_cfg_io[] = {
+		{0x40, 32, true},
+		{0x40, 32, true},
+		{0x41, 32, true},
+	};
+	ldp_slave_async_config s_cfg_async_io[] = {
+		{0x60, 32},
+		{0x60, 32},
+	};
+
+	mpu_conn[0] = m.create(false, &m_cfg_io[0]);
+	mpu_conn[1] = m.create(false, &m_cfg_io[1]);
+	mpu_conn[2] = m.create(true, &m_cfg_async_io[0]);
+	// mpu_conn[3] = m.create(true, &m_cfg_async_io[1]);
+	mpu_conn[4] = m.create(false, &m_cfg_io[2]);
+	s_conn[0] = s1.create(false, &s_cfg_io[0]);
+	s_conn[1] = s2.create(false, &s_cfg_io[1]);
+	s_conn[2] = s1.create(true, &s_cfg_async_io[0]);
+	s_conn[3] = s2.create(true, &s_cfg_async_io[1]);
+	s_conn[4] = s1.create(false, &s_cfg_io[2]);
+
+	ASSERT_EQ(mpu_conn[0], 0);
+	ASSERT_EQ(mpu_conn[1], 1);
+	ASSERT_EQ(mpu_conn[2], 2);
+	// ASSERT_EQ(mpu_conn[3], -err::LDP_ERR_INVALID); /* bandwidth control denied */
+	ASSERT_EQ(mpu_conn[4], 3);
+	/* sync occupied mpu_conn[2]'s time, since sync has higher priority */
+
+	m.send(mpu_conn[0], (const uint8_t *)"io:000", 8);
+	m.send(mpu_conn[1], (const uint8_t *)"io:001", 8);
+	m.send(mpu_conn[2], (const uint8_t *)"aio:000", 8);
+	m.send(mpu_conn[4], (const uint8_t *)"io:002", 8);
+	s1.send(s_conn[0], (const uint8_t *)"io>008\0", 8);
+	s2.send(s_conn[1], (const uint8_t *)"io>00C\0", 8);
+	s1.send(s_conn[2], (const uint8_t *)"aio>008\0", 8);
+	s2.send(s_conn[3], (const uint8_t *)"aio>00C\0", 8);
+	s1.send(s_conn[4], (const uint8_t *)"io>010\0", 8);
+
+	{
+		uint8_t rx_buf[32];
+		wq.sync();
+		ASSERT_EQ(m.recv(mpu_conn[0], rx_buf, 32), 8);
+		ASSERT_EQ(m.recv(mpu_conn[1], rx_buf, 32), 8);
+		ASSERT_EQ(m.recv(mpu_conn[2], rx_buf, 32), -err::LDP_ERR_AGAIN);
+		ASSERT_EQ(m.recv(mpu_conn[4], rx_buf, 32), 8);
+		ASSERT_EQ(s1.recv(s_conn[0], rx_buf, 32), 8);
+		ASSERT_EQ(s2.recv(s_conn[1], rx_buf, 32), 8);
+	}
+	{
+		uint8_t rx_buf[32];
+		wq.sync();
+		ASSERT_EQ(m.recv(mpu_conn[0], rx_buf, 32), 8);
+		ASSERT_EQ(m.recv(mpu_conn[1], rx_buf, 32), 8);
+		ASSERT_EQ(m.recv(mpu_conn[2], rx_buf, 32), -err::LDP_ERR_ATIMEOUT);
+		ASSERT_EQ(m.recv(mpu_conn[4], rx_buf, 32), 8);
+		ASSERT_EQ(s1.recv(s_conn[0], rx_buf, 32), 8);
+		ASSERT_EQ(s2.recv(s_conn[1], rx_buf, 32), 8);
+	}
+}

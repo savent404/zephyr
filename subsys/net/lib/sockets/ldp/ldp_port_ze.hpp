@@ -24,46 +24,46 @@ struct mcb_zephyr: public mcb_if {
 	explicit mcb_zephyr(const struct device *dev) : dev_(dev)
 	{
 	}
-	virtual void reset(uint8_t r)
+	void reset(uint8_t r) override
 	{
 		mcb_reset(dev_, r);
 	}
 
-	virtual void set_poll_time(uint16_t timeout)
+	void set_poll_time(uint16_t timeout) override
 	{
 		mcb_poll_time(dev_, timeout);
 	}
 
-	virtual void config_port(uint8_t port, bool enable, bool w_allow, uint16_t max_rx)
+	void config_port(uint8_t port, bool enable, bool w_allow, uint16_t max_rx) override
 	{
 		mcb_config_port(dev_, port, enable, w_allow, max_rx);
 	}
 
-	virtual uint8_t *get_rx_buf(uint8_t port)
+	uint8_t *get_rx_buf(uint8_t port) override
 	{
 		auto ptr = mcb_get_rx_buf(dev_, port);
 
 		return reinterpret_cast<uint8_t *>(ptr);
 	}
-	virtual uint8_t *get_tx_buf(uint8_t port)
+	uint8_t *get_tx_buf(uint8_t port) override
 	{
 		auto ptr = mcb_get_tx_buf(dev_, port);
 
 		return reinterpret_cast<uint8_t *>(ptr);
 	}
-	virtual uint16_t get_rx_len(uint8_t port)
+	uint16_t get_rx_len(uint8_t port) override
 	{
 		return mcb_get_rx_len(dev_, port);
 	}
-	virtual uint16_t get_tx_len(uint8_t port)
+	uint16_t get_tx_len(uint8_t port) override
 	{
 		return mcb_get_tx_len(dev_, port);
 	}
-	virtual void set_tx_len(uint8_t port, uint16_t len)
+	void set_tx_len(uint8_t port, uint16_t len) override
 	{
 		mcb_set_tx_len(dev_, port, len);
 	}
-	virtual uint32_t get_status()
+	uint32_t get_status() override
 	{
 		uint32_t status = 0;
 
@@ -71,24 +71,24 @@ struct mcb_zephyr: public mcb_if {
 
 		return status;
 	}
-	virtual void clr_status(uint32_t bits)
+	void clr_status(uint32_t bits) override
 	{
 		mcb_clr_status(dev_, bits);
 	}
-	virtual void tx(uint8_t port, uint8_t dst_sid, bool r)
+	void tx(uint8_t port, uint8_t dst_sid, bool r) override
 	{
 		mcb_tx(dev_, dst_sid, port, r);
 	}
-	virtual bool has_rx(uint8_t port)
+	bool has_rx(uint8_t port) override
 	{
 		return mcb_rx_is_ready(dev_, port) == 1;
 	}
-	virtual void clr_rx(uint8_t port)
+	void clr_rx(uint8_t port) override
 	{
 		mcb_rx_clr(dev_, port);
 	}
 
-	virtual uint8_t get_sid()
+	uint8_t get_sid() override
 	{
 		/* FIXME: get SID from SoC */
 		return 0;

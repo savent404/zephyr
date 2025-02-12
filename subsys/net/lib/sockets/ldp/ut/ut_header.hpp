@@ -125,6 +125,10 @@ struct mock_mcb: public systech::cif::mcb_if {
 	{
 		return sid_;
 	}
+	virtual uint32_t get_bus_pps() override
+	{
+		return UINT32_MAX;
+	}
 
       public: /* for testing */
 	using buffer_t = uint8_t[mcb_if::MCB_MAX_FRAME_LEN];
@@ -194,7 +198,8 @@ struct simu_mcb: public systech::cif::mcb_if {
 	inline static constexpr uint8_t max_port = 0x80;
 
       public:
-	simu_mcb(uint8_t sid, io_mode m = ps_io) : sid_(sid)
+	simu_mcb(uint8_t sid, io_mode m = ps_io, uint32_t pps = 1'000'000)
+		: sid_(sid), bus_pps_(pps)
 	{
 		io_mode_[sid_] = m;
 	}
@@ -202,6 +207,11 @@ struct simu_mcb: public systech::cif::mcb_if {
 	virtual uint8_t get_sid() override
 	{
 		return sid_;
+	}
+
+	virtual uint32_t get_bus_pps() override
+	{
+		return bus_pps_;
 	}
 
 	virtual void reset(uint8_t r) override
@@ -361,6 +371,7 @@ struct simu_mcb: public systech::cif::mcb_if {
 	static uint32_t status_[max_sid];
 	static role role_[max_sid];
 	static io_mode io_mode_[max_sid];
+	uint32_t bus_pps_;
 };
 
 struct test_ldp_master: public ::testing::Test {

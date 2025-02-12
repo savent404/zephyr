@@ -3,4 +3,6 @@
 
 zephyr_library()
 zephyr_include_directories(..)
+zephyr_include_directories(inc)
 zephyr_library_sources(ldp_utils_ze.cpp)
+zephyr_library_sources(src/ldp_bc.cpp)

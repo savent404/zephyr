@@ -12,6 +12,7 @@
 #pragma once
 
 #include "ldp_basic.hpp"
+#include "ldp_bc.hpp"
 #if CONFIG_MCB_SYSTECH_HW_WORKAROUND
 #include <zephyr/kernel.h>
 #endif
@@ -28,8 +29,10 @@ namespace cif
  * @tparam T_cache   abstract cache interface
  */
 template <typename T_mempool, typename T_cache> struct ldp_master: public ldp_basic {
-	explicit ldp_master(mcb_if *mcb, work_queue_if *wq)
-		: next_id_(0), mcb_(mcb), work_queue_(wq)
+
+	using bc_mode = bc::bc_mode;
+
+	explicit ldp_master(mcb_if *mcb, work_queue_if *wq) : mcb_(mcb), work_queue_(wq)
 	{
 		mcb->reset(mcb_if::MCB_ROLE_MASTER);
 
@@ -39,8 +42,10 @@ template <typename T_mempool, typename T_cache> struct ldp_master: public ldp_ba
 				auto self = static_cast<ldp_master *>(arg);
 				self->sync_handler();
 			},
-			this, nullptr, 10000);
+			this, nullptr, cycle_time_);
 		wqs_.push_back(sync_wq_id_);
+
+		bc_ = std::make_unique<bc::ldp_bc>(mcb_->get_bus_pps(), 0.1, 0.2);
 	}
 
 	virtual ~ldp_master()
@@ -110,6 +115,7 @@ template <typename T_mempool, typename T_cache> struct ldp_master: public ldp_ba
 		}
 
 		if (sync_it != sync_conns_.end()) {
+			auto bc = (*sync_it)->bc;
 			if ((*sync_it)->tx_buf) {
 				mempool_if::free((*sync_it)->tx_buf);
 				(*sync_it)->tx_buf = nullptr;
@@ -118,10 +124,12 @@ template <typename T_mempool, typename T_cache> struct ldp_master: public ldp_ba
 				mempool_if::free((*sync_it)->rx_buf);
 				(*sync_it)->rx_buf = nullptr;
 			}
+			bc_->rm_conn(bc);
 			sync_conns_.erase(sync_it);
 		} else {
 			/* call cancel only if wq_id is in the wqs_ */
 			auto wq_it = std::find(wqs_.begin(), wqs_.end(), (*async_it)->wq_id);
+			auto bc = (*async_it)->bc;
 			if (wq_it != wqs_.end()) {
 				work_queue_->cancel((*async_it)->wq_id);
 				wqs_.remove((*async_it)->wq_id);
@@ -134,6 +142,7 @@ template <typename T_mempool, typename T_cache> struct ldp_master: public ldp_ba
 				mempool_if::free(abuf.buf);
 				abuf.buf = nullptr;
 			}
+			bc_->rm_conn(bc);
 			async_conns_.erase(async_it);
 		}
 		return 0;
@@ -241,6 +250,8 @@ template <typename T_mempool, typename T_cache> struct ldp_master: public ldp_ba
 					     response received */
 		int last_err;             /* last error */
 
+		bc::conn_ptr bc; /* bandwidth control handle */
+
 		std::list<async_buf> rx_bufs; /* received buffers */
 		std::list<async_buf> tx_bufs; /* transmit buffers */
 	};
@@ -260,6 +271,7 @@ template <typename T_mempool, typename T_cache> struct ldp_master: public ldp_ba
 		uint8_t *rx_buf; /* receive buffer */
 		uint16_t tx_len; /* transmit length */
 		uint16_t rx_len; /* receive length */
+		bc::conn_ptr bc; /* bandwidth control handle */
 	};
 
 	using sync_conn_ptr = std::unique_ptr<sync_conn_info>;
@@ -313,16 +325,24 @@ template <typename T_mempool, typename T_cache> struct ldp_master: public ldp_ba
 	{
 		auto cfg = static_cast<const ldp_master_async_config *>(config);
 		auto ci = std::make_unique<async_conn_info>();
+		auto bc = std::make_shared<bc::conn_item>(
+			cfg->pps > 0 ? bc_mode::BC_MODE_ASYNC : bc_mode::BC_MODE_ASYNC_NO_LIMIT,
+			cfg->pps, 0);
 
 		if (!ci) {
 			return -LDP_ERR_NOMEM;
 		}
+
 		if (!cfg->cycle_time || !cfg->timeout || cfg->cycle_time > cfg->timeout) {
 			return -LDP_ERR_INVALID;
 		}
 
 		if (conn_exists(cfg->dst, cfg->port)) {
 			return -LDP_ERR_CONN_EXIST;
+		}
+
+		if (!bc_->add_conn(bc)) {
+			return -LDP_ERR_INVALID;
 		}
 
 		ci->id = next_id_;
@@ -340,6 +360,7 @@ template <typename T_mempool, typename T_cache> struct ldp_master: public ldp_ba
 		ci->last_err = 0;
 		ci->xid = LDP_INITIAL_XID;
 		ci->rxid = -1;
+		ci->bc = bc;
 		ci->wq_id = work_queue_->enqueue(
 			[](void *arg1, void *arg2) {
 				auto self = static_cast<ldp_master *>(arg1);
@@ -356,10 +377,12 @@ template <typename T_mempool, typename T_cache> struct ldp_master: public ldp_ba
 	{
 		auto cfg = static_cast<const ldp_master_sync_config *>(config);
 		auto ci = std::make_unique<sync_conn_info>();
-
-		if (!ci) {
+		auto bc = std::make_shared<bc::conn_item>(bc_mode::BC_MODE_SYNC,
+							  1'000'000 / cfg->cycle_time, 1);
+		if (!ci || !bc) {
 			return -LDP_ERR_NOMEM;
 		}
+
 		if (!cfg->cycle_time) {
 			return -LDP_ERR_INVALID;
 		}
@@ -376,6 +399,10 @@ template <typename T_mempool, typename T_cache> struct ldp_master: public ldp_ba
 			}
 		}
 
+		if (!bc_->add_conn(bc)) {
+			return -LDP_ERR_INVALID;
+		}
+
 		ci->id = next_id_;
 		ci->sid = cfg->dst;
 		ci->port = cfg->port;
@@ -385,6 +412,7 @@ template <typename T_mempool, typename T_cache> struct ldp_master: public ldp_ba
 		ci->flg_one_shot = cfg->one_shot;
 		ci->flg_hold_on = cfg->one_shot ? true : false;
 		ci->stat_rx_packet = 0;
+		ci->bc = bc;
 		sync_conns_.push_back(std::move(ci));
 		return next_id_++;
 	}
@@ -508,6 +536,11 @@ template <typename T_mempool, typename T_cache> struct ldp_master: public ldp_ba
 				continue;
 			}
 
+			if (!bc_->try_grant(ci->bc, 1)) {
+				/* If no resource available, we should wait for a while */
+				continue;
+			}
+
 			/* prepare frame */
 			mcb_->config_port(ci->port, true, true, mcb_if::MCB_MAX_FRAME_LEN);
 
@@ -591,6 +624,9 @@ template <typename T_mempool, typename T_cache> struct ldp_master: public ldp_ba
 						    LDP_ERR_PREEMPT, LDP_ERR_PREV_PREEMPT);
 			mcb_->clr_status(status);
 		}
+
+		/* refresh all available packets */
+		bc_->schedule(cycle_time_);
 	}
 
 	void async_handler(async_conn_info *ci)
@@ -599,6 +635,11 @@ template <typename T_mempool, typename T_cache> struct ldp_master: public ldp_ba
 		const int max_continue = 2; /* If we have some progress(tx acked, new rx
 		data), we should give appropriate time to wait for slave response */
 		bool reset_timeout_flag = false;
+
+		if (!bc_->try_grant(ci->bc, should_continue)) {
+			/* If no token available, we should wait for a while */
+			should_continue = 0;
+		}
 
 		while (should_continue--) {
 			uint8_t *tx_buf;
@@ -616,6 +657,12 @@ template <typename T_mempool, typename T_cache> struct ldp_master: public ldp_ba
 				false; /* new rsp but not ordered(including first rsp)*/
 			bool is_acceptable_rsp = false; /* accept rsp */
 			bool is_rx_full = false;        /* rx buffer is full */
+			uint8_t *rx_buf = mcb_->get_rx_buf(ci->port);
+			uint16_t rx_len = 0;
+			constexpr unsigned hdr_size = sizeof(ldp_a_header);
+			volatile ldp_a_header *rx_hdr =
+				reinterpret_cast<volatile ldp_a_header *>(rx_buf);
+			uint8_t *rx_data = rx_buf + hdr_size;
 #if CONFIG_MCB_SYSTECH_HW_WORKAROUND
 			uint32_t timeout = LDP_POLL_TIMEOUT;
 #endif
@@ -680,13 +727,7 @@ template <typename T_mempool, typename T_cache> struct ldp_master: public ldp_ba
 
 			/* handle received frame */
 			if (data_ready && !p_error) {
-				uint8_t *rx_buf = mcb_->get_rx_buf(ci->port);
-				uint16_t rx_len = mcb_->get_rx_len(ci->port);
-				constexpr unsigned hdr_size = sizeof(ldp_a_header);
-				volatile ldp_a_header *rx_hdr =
-					reinterpret_cast<volatile ldp_a_header *>(rx_buf);
-				uint8_t *rx_data = rx_buf + hdr_size;
-
+				rx_len = mcb_->get_rx_len(ci->port);
 				cache_if::rmb(); /* make sure buffer is updated */
 				is_invalid_hdr = rx_len < hdr_size || rx_hdr->magic != LDP_MAGIC;
 				is_first_rsp = !is_invalid_hdr && ci->rxid == -1;
@@ -699,51 +740,53 @@ template <typename T_mempool, typename T_cache> struct ldp_master: public ldp_ba
 						    (ci->flg_strong_order ? is_ordered_rsp : true);
 				is_rx_full = ci->rx_bufs.size() >= LDP_MAX_RX_BUF;
 
-				if (is_acceptable_rsp && !is_rx_full) {
-					/* If strong order is set, only accept ordered response */
-					async_buf rx_abuf;
-
-					rx_abuf.len = rx_len - hdr_size;
-					if (rx_abuf.len) {
-						rx_abuf.buf = reinterpret_cast<uint8_t *>(
-							mempool_if::alloc(rx_abuf.len));
-						ldp_memcpy::memcpy(rx_abuf.buf, rx_data,
-								   rx_abuf.len);
-						ci->rx_bufs.push_back(std::move(rx_abuf));
-					}
-				}
-
-				if (is_new_rsp && !is_rx_full) {
-					/* new data received (even if its xid is not ordered) */
-					reset_timeout_flag = true;
-					should_continue = max_continue;
-
-					/* ready for ack */
-					ci->rxid = rx_hdr->xid;
-				}
-
-				if (is_ack_rsp) {
-					/* Slave accepted the previous transmit data.
-					 * Drop the tx buffer then.
-					 */
-					if (ci->tx_bufs.size()) {
-						ci->tx_bufs.pop_front();
-					}
-					if (abuf.buf) {
-						mempool_if::free(abuf.buf);
-					}
-					ci->xid++;
-					reset_timeout_flag = true;
-				}
-
-				if (is_new_rsp || is_ack_rsp) {
-					/* If new data received or acked, reset timeout */
-					ci->timeout_cnt = ci->timeout_allowed;
-				}
-
 				mcb_->clr_rx(ci->port);
 			}
 
+			if (is_acceptable_rsp && !is_rx_full) {
+				/* If strong order is set, only accept ordered response */
+				async_buf rx_abuf;
+
+				rx_abuf.len = rx_len - hdr_size;
+				if (rx_abuf.len) {
+					rx_abuf.buf = reinterpret_cast<uint8_t *>(
+						mempool_if::alloc(rx_abuf.len));
+					ldp_memcpy::memcpy(rx_abuf.buf, rx_data, rx_abuf.len);
+					ci->rx_bufs.push_back(std::move(rx_abuf));
+				}
+			}
+
+			if (is_new_rsp && !is_rx_full) {
+				/* new data received (even if its xid is not ordered) */
+				reset_timeout_flag = true;
+
+				/* Grant more resource if needed */
+				if (bc_->try_grant(ci->bc, max_continue - should_continue)) {
+					should_continue = max_continue;
+				}
+
+				/* ready for ack */
+				ci->rxid = rx_hdr->xid;
+			}
+
+			if (is_ack_rsp) {
+				/* Slave accepted the previous transmit data.
+				 * Drop the tx buffer then.
+				 */
+				if (ci->tx_bufs.size()) {
+					ci->tx_bufs.pop_front();
+				}
+				if (abuf.buf) {
+					mempool_if::free(abuf.buf);
+				}
+				ci->xid++;
+				reset_timeout_flag = true;
+			}
+
+			if (is_new_rsp || is_ack_rsp) {
+				/* If new data received or acked, reset timeout */
+				ci->timeout_cnt = ci->timeout_allowed;
+			}
 			/* General error handling */
 			ci->last_err = handle_error(data_timeout, ci->last_err, LDP_ERR_T_ERROR,
 						    LDP_ERR_PREV_T_ERROR);
@@ -803,12 +846,14 @@ template <typename T_mempool, typename T_cache> struct ldp_master: public ldp_ba
       protected:
 	sync_conn_list sync_conns_;
 	async_conn_list async_conns_;
-	int32_t next_id_;
+	int32_t next_id_ = 0;
 	wq_list wqs_;
 	work_queue_if::id sync_wq_id_;
 
 	mcb_if *mcb_;
 	work_queue_if *work_queue_;
+	unsigned cycle_time_ = 10000;
+	std::unique_ptr<bc::ldp_bc> bc_;
 
 #if CONFIG_MCB_SYSTECH_HW_WORKAROUND
 	static inline uint32_t LDP_POLL_TIMEOUT = 1000; /* 1ms */

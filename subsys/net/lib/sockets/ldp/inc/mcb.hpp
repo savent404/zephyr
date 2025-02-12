@@ -103,6 +103,13 @@ struct mcb_if {
 	virtual void clr_rx(uint8_t port) = 0;
 
 	virtual uint8_t get_sid() = 0;
+
+	/**
+	 * @brief Get the bus PPS(packet per second)
+	 *
+	 * @return uint32_t bus PPS
+	 */
+	virtual uint32_t get_bus_pps() = 0;
 };
 
 } // namespace cif
