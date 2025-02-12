@@ -98,6 +98,11 @@ static bool dev_general_init(int cif_sock, uint8_t slot, uint8_t port, uint32_t 
 		.async_bandwidth = ASYNC_DEFAULT_BANDWIDTH,
 	};
 
+	if (ext_flg & CIF_PORT_FLG_PREEMPT) {
+		LOG_INF("Preempt mode enabled, need to close the port to reset it. (via "
+			"setsockopt(flags=0) or close socket)");
+	}
+
 	int ret = setsockopt(cif_sock, SOL_CIF_RAW, CIF_OPT_PORT, &port_cfg, sizeof(port_cfg));
 
 	if (ret < 0) {

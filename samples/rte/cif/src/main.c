@@ -25,6 +25,24 @@ int main(void)
 	return 0;
 }
 
+static void unconditional_switch(int role)
+{
+	/* Cancel current role */
+	if (ctx_.target_role == role_master) {
+		master_cancel();
+	} else {
+		slave_cancel();
+	}
+
+	/* Start new role */
+	if (role == role_master) {
+		master_start();
+	} else if (role == role_slave) {
+		slave_start();
+	}
+	ctx_.target_role = role;
+}
+
 static int cif_cmd(const struct shell *sh, size_t argc, char **argv)
 {
 	bool handled = false;
@@ -61,28 +79,20 @@ static int cif_cmd(const struct shell *sh, size_t argc, char **argv)
 				    ctx_.target_role == role_master ? "master" : "slave");
 			handled = true;
 		} else if (!strcmp(argv[2], "slave")) {
-			if (ctx_.target_role != role_slave) {
-				ctx_.target_role = role_slave;
-				master_cancel();
-				slave_start();
-			}
+			unconditional_switch(role_slave);
 			handled = true;
 		} else if (!strcmp(argv[2], "master")) {
-			if (ctx_.target_role != role_master) {
-				if (argc == 3) {
-					ctx_.target_opt = normal;
-				} else if (argc == 4 && !strcmp(argv[3], "preempt")) {
-					ctx_.target_opt = preempt;
-				} else {
-					shell_print(sh, "Invalid option, try preempt");
-					return -EINVAL;
-				}
-				shell_print(sh, "Switch to master role, opt: %s\n",
-					    ctx_.target_opt == normal ? "normal" : "preempt");
-				ctx_.target_role = role_master;
-				slave_cancel();
-				master_start();
+			if (argc == 3) {
+				ctx_.target_opt = normal;
+			} else if (argc == 4 && !strcmp(argv[3], "preempt")) {
+				ctx_.target_opt = preempt;
+			} else {
+				shell_print(sh, "Invalid option, try preempt");
+				return -EINVAL;
 			}
+			shell_print(sh, "Switch to master role, opt: %s\n",
+				    ctx_.target_opt == normal ? "normal" : "preempt");
+			unconditional_switch(role_master);
 			handled = true;
 		} else {
 			shell_print(sh, "Invalid role, try slave or master");

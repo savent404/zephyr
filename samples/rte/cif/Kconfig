@@ -3,19 +3,6 @@
 
 mainmenu "cif"
 
-config CIF_SLAVE
-	bool "CIF Slave mode"
-	default n
-	help
-	  Enable this option to run the CIF in slave mode.
-
-config CIF_SHELL
-	bool "CIF Shell"
-	default y
-	select SHELL
-	help
-	  Enable this option to run the CIF with shell.
-
 module = CIF
 module-str = cif
 source "subsys/logging/Kconfig.template.log_config"
