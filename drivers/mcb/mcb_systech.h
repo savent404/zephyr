@@ -67,8 +67,8 @@ static inline uint32_t mcb_port_map_(uint32_t raw)
 #define r_MCB_CTRL1_R_Ack_pos  2
 #define r_MCB_CTRL1_R_Ack_mask (BIT(2) - 1)
 #define R_Ack_echo             0
-#define R_Ack_reset            1
-#define R_Ack_set              2
+#define R_Ack_reset            2
+#define R_Ack_set              3
 #define r_MCB_CTRL1_PORT_pos   8
 #define r_MCB_CTRL1_PORT_mask  (BIT(8) - 1)
 #define r_MCB_CTRL1_D_SID_pos  16

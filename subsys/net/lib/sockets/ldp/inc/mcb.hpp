@@ -96,7 +96,7 @@ struct mcb_if {
 	 *
 	 * @param port port number
 	 * @param dst_sid destination SID
-	 * @param R redundancy flag. If set, the pair needs to give the right of bus
+	 * @param R preempt flag. If set, the pair needs to give the right of bus
 	 */
 	virtual void tx(uint8_t port, uint8_t dst_sid, bool r) = 0;
 	virtual bool has_rx(uint8_t port) = 0;
