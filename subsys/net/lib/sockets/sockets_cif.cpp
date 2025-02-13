@@ -575,6 +575,7 @@ static int cif_ctrl_port(struct net_context *ctx, const struct cif_raw_port_conf
 			config.preempt = is_preempt;
 			config.one_shot = is_one_shot;
 			config.strong_order = is_strong_order;
+			config.pps = cfg->async_bandwidth;
 			conn.conn_id = (*usr_data->ldp).create(true, &config);
 		} else if (!is_master && !is_async) {
 			/* slave sync port */

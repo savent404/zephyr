@@ -48,6 +48,7 @@ struct context {
 	int target_sid;
 	int target_port;
 	uint32_t target_cnt;
+	uint32_t target_pps;
 	enum {
 		role_master,
 		role_slave,

@@ -85,7 +85,8 @@ static bool dev_discovery(int cif_sock, uint8_t slot)
 	return exist;
 }
 
-static bool dev_general_init(int cif_sock, uint8_t slot, uint8_t port, uint32_t ext_flg)
+static bool dev_general_init(int cif_sock, uint8_t slot, uint8_t port, uint32_t ext_flg,
+			     uint32_t pps)
 {
 	struct cif_raw_port_config port_cfg = {
 		.port = port,
@@ -95,7 +96,7 @@ static bool dev_general_init(int cif_sock, uint8_t slot, uint8_t port, uint32_t 
 		/** async configuration */
 		.async_interval = ASYNC_INTERVAL_TIME,
 		.async_timeout = ASYNC_TIMEOUT_TIME,
-		.async_bandwidth = ASYNC_DEFAULT_BANDWIDTH,
+		.async_bandwidth = pps,
 	};
 
 	if (ext_flg & CIF_PORT_FLG_PREEMPT) {
@@ -300,7 +301,8 @@ static int main_master(void)
 
 			bool res = dev_general_init(
 				sock, ctx_.target_sid, PORT_ID_CFG,
-				ctx_.target_opt == normal ? flags : flags | CIF_PORT_FLG_PREEMPT);
+				ctx_.target_opt == normal ? flags : flags | CIF_PORT_FLG_PREEMPT,
+				ASYNC_DEFAULT_BANDWIDTH);
 
 			if (res) {
 				static const char config_data[] = "cfg:123";
@@ -318,7 +320,8 @@ static int main_master(void)
 		case STATE_IO_START:
 			res = dev_general_init(sock, ctx_.target_sid, ctx_.target_port,
 					       ctx_.target_opt == preempt ? CIF_PORT_FLG_PREEMPT
-									  : 0);
+									  : 0,
+					       ctx_.target_pps);
 			cnt = ctx_.target_cnt + 1;
 			if (res) {
 				struct sockaddr_cif remote = {

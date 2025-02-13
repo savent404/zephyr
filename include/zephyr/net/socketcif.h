@@ -71,7 +71,7 @@ struct cif_raw_port_config {
 	unsigned int flags;              /* see CIF_PORT_FLG_* */
 	unsigned int async_interval;     /* query interval while port is idle. (in microseconds) */
 	unsigned int async_timeout;      /* async timeout. (in microseconds) */
-	unsigned int async_bandwidth;    /* async bandwidth. (in bps) */
+	unsigned int async_bandwidth;    /* async bandwidth. (in pps) */
 	unsigned int slave_max_recv_len; /* max receive length for slave. */
 };
 

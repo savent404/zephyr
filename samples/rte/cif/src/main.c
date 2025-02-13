@@ -59,15 +59,28 @@ static int cif_cmd(const struct shell *sh, size_t argc, char **argv)
 		} else if (!strcmp(argv[1], "io")) {
 			ctx_.cmd = CMD_IO;
 			ctx_.target_sid = atoi(argv[2]);
+
+			/* Handle port */
 			if (argc >= 4) {
 				ctx_.target_port = atoi(argv[3]);
 			} else {
 				ctx_.target_port = PORT_ID_IO;
 			}
+
+			/* Handle cnt */
 			if (argc >= 5) {
 				ctx_.target_cnt = atoi(argv[4]);
 			} else {
 				ctx_.target_cnt = 10;
+			}
+
+			/* Handle pps */
+			if (argc >= 6 && CIF_IS_ASYNC_PORT(ctx_.target_port)) {
+				ctx_.target_pps = atoi(argv[5]);
+			} else if (argc >= 6) {
+				ctx_.cmd = CMD_NONE;
+				shell_print(sh, "Invalid port, try async port");
+				return -EINVAL;
 			}
 			handled = true;
 		}
@@ -113,7 +126,7 @@ static int cif_cmd(const struct shell *sh, size_t argc, char **argv)
 		shell_print(sh, "cmd: discovery, config, io");
 		shell_print(sh, "\tdiscovery <slot>");
 		shell_print(sh, "\tconfig <slot>");
-		shell_print(sh, "\tio <slot> [port] [cnt]");
+		shell_print(sh, "\tio <slot> [port] [cnt] [pps]");
 		shell_print(sh, "\tswitch <slave|master> [preempt]");
 		return 0;
 	}
