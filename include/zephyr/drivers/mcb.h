@@ -32,6 +32,13 @@ extern "C" {
 
 /** @cond INTERNAL_HIDDEN */
 
+struct mcb_info {
+	unsigned int hw_version;        /* hw version of mcb */
+	unsigned int slot_id;           /* hw slot identify number */
+	unsigned int packet_per_second; /* max packets per second */
+	unsigned int poll_time;         /* poll time in microseconds */
+};
+
 /**
  * @brief Reset MCB to initial state
  *
@@ -204,6 +211,17 @@ typedef uint16_t (*mcb_get_tx_len_t)(const struct device *dev, uint8_t port);
  */
 typedef void (*mcb_set_tx_len_t)(const struct device *dev, uint8_t port, uint16_t len);
 
+/**
+ * @brief Get MCB driver information
+ *
+ * This function will get constant information of HW component
+ *
+ * @param dev MCB device instance
+ * @param port port number
+ * @param len length of the transmit frame
+ */
+typedef void (*mcb_get_mcb_info_t)(const struct device *dev, struct mcb_info *ptr);
+
 /** @endcond */
 
 __subsystem struct mcb_driver_api {
@@ -221,6 +239,7 @@ __subsystem struct mcb_driver_api {
 	mcb_get_rx_len_t get_rx_len;
 	mcb_get_tx_len_t get_tx_len;
 	mcb_set_tx_len_t set_tx_len;
+	mcb_get_mcb_info_t get_mcb_info;
 };
 /** @endcond */
 
@@ -538,6 +557,28 @@ static inline void z_impl_mcb_set_tx_len(const struct device *dev, uint8_t port,
 	}
 
 	api->set_tx_len(dev, port, len);
+}
+
+/**
+ * @brief Get MCB driver information
+ *
+ * This function will get constant information of HW component
+ *
+ * @param dev MCB device instance
+ * @param port port number
+ * @param len length of the transmit frame
+ */
+__syscall void mcb_get_mcb_info(const struct device *dev, struct mcb_info *ptr);
+
+static inline void z_impl_mcb_get_mcb_info(const struct device *dev, struct mcb_info *ptr)
+{
+	const struct mcb_driver_api *api = (const struct mcb_driver_api *)dev->api;
+
+	if (api->get_mcb_info == NULL) {
+		return;
+	}
+
+	api->get_mcb_info(dev, ptr);
 }
 
 #ifdef __cplusplus

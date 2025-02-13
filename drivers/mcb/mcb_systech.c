@@ -58,7 +58,8 @@ struct mcb_systech_config {
 	DEVICE_MMIO_NAMED_ROM(reg);
 	DEVICE_MMIO_NAMED_ROM(rx_buf);
 	DEVICE_MMIO_NAMED_ROM(tx_buf);
-	uint32_t max_bandwidth;
+	uint32_t pps;
+	uint32_t poll_time;
 };
 
 void mcb_systech_reset(const struct device *dev, uint8_t role)
@@ -453,6 +454,19 @@ int mcb_systech_rx_is_ready(const struct device *dev, uint8_t port)
 	return 0;
 }
 
+static void mcb_systech_get_mcb_info(const struct device *dev, struct mcb_info *info)
+{
+	const struct mcb_systech_config *cfg = DEV_CFG(dev);
+
+	memset(info, 0, sizeof(struct mcb_info));
+#if CONFIG_MCB_SYSTECH_HW_WORKAROUND
+	info->hw_version = 0x0100;
+	info->slot_id = 0xFF;
+#endif
+	info->packet_per_second = cfg->pps;
+	info->poll_time = cfg->poll_time;
+}
+
 static const struct mcb_driver_api mcb_systech_api = {
 	.reset = mcb_systech_reset,
 	.poll_time = mcb_systech_poll_time,
@@ -468,6 +482,7 @@ static const struct mcb_driver_api mcb_systech_api = {
 	.rx_clr = mcb_systech_rx_clr,
 	.rx_is_ready = mcb_systech_rx_is_ready,
 	.tx = mcb_systech_tx,
+	.get_mcb_info = mcb_systech_get_mcb_info,
 };
 
 static int mcb_systech_init(const struct device *dev)
@@ -486,7 +501,8 @@ static int mcb_systech_init(const struct device *dev)
 		DEVICE_MMIO_NAMED_ROM_INIT(reg, DT_DRV_INST(n)),                                   \
 		DEVICE_MMIO_NAMED_ROM_INIT(rx_buf, DT_DRV_INST(n)),                                \
 		DEVICE_MMIO_NAMED_ROM_INIT(tx_buf, DT_DRV_INST(n)),                                \
-		.max_bandwidth = DT_INST_PROP(n, bandwidth),                                       \
+		.pps = DT_INST_PROP(n, pps),                                                       \
+		.poll_time = DT_INST_PROP(n, poll),                                                \
 	};                                                                                         \
 	DEVICE_DT_INST_DEFINE(n, &mcb_systech_init, NULL, &mcb_systech_data_##n,                   \
 			      &mcb_systech_config_##n, POST_KERNEL, CONFIG_MCB_INIT_PRIORITY,      \

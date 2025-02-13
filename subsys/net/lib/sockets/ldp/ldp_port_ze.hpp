@@ -90,8 +90,18 @@ struct mcb_zephyr: public mcb_if {
 
 	uint8_t get_sid() override
 	{
-		/* FIXME: get SID from SoC */
-		return 0;
+		struct mcb_info info;
+
+		mcb_get_mcb_info(dev_, &info);
+		return info.slot_id;
+	}
+
+	uint32_t get_bus_pps() override
+	{
+		struct mcb_info info;
+
+		mcb_get_mcb_info(dev_, &info);
+		return info.packet_per_second;
 	}
 
       private:

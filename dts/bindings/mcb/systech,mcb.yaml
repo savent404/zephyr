@@ -8,9 +8,13 @@ compatible: "systech,mcb"
 include: base.yaml
 
 properties:
-  bandwidth:
+  poll:
     type: int
     description: |
-      The bandwidth of the MCB device in bps.
-      The bandwidth is the maximum data rate that the MCB device can handle.
-    default: 10000000
+      The duration in microseconds between each poll of the MCB device.
+    default: 100
+  pps:
+    type: int
+    description: |
+      The number of packets per second that the MCB device can handle.
+    default: 1000

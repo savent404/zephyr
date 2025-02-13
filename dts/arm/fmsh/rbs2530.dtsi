@@ -42,7 +42,8 @@
 			  <0x40020000 DT_SIZE_K(512)>;
 		reg-names = "reg", "tx_buf", "rx_buf";
 		status = "disabled";
-		bandwidth = <DT_FREQ_M(1)>;
+		poll = <50>;
+		pps = <100000>;
 	};
 
 	mcb1: mcb@1 {
@@ -52,7 +53,8 @@
 			  <0x40000000 DT_SIZE_K(512)>;
 		reg-names = "reg", "rx_buf", "tx_buf";
 		status = "disabled";
-		bandwidth = <DT_FREQ_M(40)>;
+		poll = <50>;
+		pps = <100000>;
 	};
 
 	chosen {
