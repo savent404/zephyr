@@ -111,10 +111,3 @@ static inline uint32_t mcb_port_map_(uint32_t raw)
 #define b_MCB_STATUS1_RDY         BIT(7)
 #define r_MCB_STATUS1_RxPort_pos  8
 #define r_MCB_STATUS1_RxPort_mask (BIT(8) - 1)
-
-#define _REG_MASK(reg, bit_name) r_MCB_##reg##_##bit_name##_mask
-#define _REG_POS(reg, bit_name)  r_MCB_##reg##_##bit_name##_pos
-#define REG2VALUE(reg, bit_name, value)                                                            \
-	(((value) >> _REG_POS(reg, bit_name)) & _REG_MASK(reg, bit_name))
-#define VALUE2REG(reg, bit_name, value)                                                            \
-	(((value) & _REG_MASK(reg, bit_name)) << _REG_POS(reg, bit_name))

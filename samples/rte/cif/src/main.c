@@ -79,6 +79,14 @@ static int cif_cmd(const struct shell *sh, size_t argc, char **argv)
 				    ctx_.target_role == role_master ? "master" : "slave");
 			handled = true;
 		} else if (!strcmp(argv[2], "slave")) {
+			if (argc == 3) {
+				ctx_.target_opt = normal;
+			} else if (argc == 4 && !strcmp(argv[3], "preempt")) {
+				ctx_.target_opt = preempt;
+			} else {
+				shell_print(sh, "Invalid option, try preempt");
+				return -EINVAL;
+			}
 			unconditional_switch(role_slave);
 			handled = true;
 		} else if (!strcmp(argv[2], "master")) {

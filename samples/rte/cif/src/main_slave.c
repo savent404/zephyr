@@ -11,6 +11,8 @@
 
 LOG_MODULE_REGISTER(main_s, CONFIG_CIF_LOG_LEVEL);
 
+extern struct context ctx_;
+
 struct reg_buf {
 	uint8_t *reg;    /* Actual register buffer */
 	uint8_t *modify; /* User modified buffer */
@@ -133,7 +135,20 @@ static int slave_task(void)
 	}
 
 	/**
-	 * Step 3: open config&io ports.
+	 * Step 3: set the CIF socket options
+	 */
+	struct cif_raw_slave_config opt = {
+		.want_preempt = ctx_.target_opt == preempt ? 1 : 0,
+	};
+	ret = setsockopt(sock, SOL_CIF_RAW, CIF_OPT_SLAVE_CONFIG, &opt, sizeof(opt));
+	if (ret < 0) {
+		LOG_ERR("Failed to set CIF socket options, errno %d", errno);
+		close(sock);
+		return -1;
+	}
+
+	/**
+	 * Step 4: open config&io ports.
 	 */
 #if CONFIG_MCB_SYSTECH_HW_WORKAROUND
 	LOG_WRN("Disc(port 0) shall not be configured by PS!");

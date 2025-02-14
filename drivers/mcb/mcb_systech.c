@@ -92,17 +92,16 @@ void mcb_systech_reset(const struct device *dev, uint8_t role)
 	/* FIXME: Set DT and DR via DeviceTree or user configuration */
 	switch (role) {
 	case _MCB_ROLE_MASTER:
-		val = VALUE2REG(CTRL2, DR, DR_MPU_P) | VALUE2REG(CTRL2, DT, DT_MPU_P) |
-		      /* FIXME: need to configure it via upper layer */
-		      (3000 << 16);
+		val = (DR_MPU_P << r_MCB_CTRL2_DR_pos) | (DT_MPU_P << r_MCB_CTRL2_DT_pos) |
+		      (3000 << r_MCB_CTRL2_PT_pos);
 		LOG_DBG("Set MCB to master mode, reg: %08x", val);
 		break;
 	case _MCB_ROLE_SLAVE:
 	default:
-		val = VALUE2REG(CTRL2, DR, DR_MPU_B) | VALUE2REG(CTRL2, DT, DT_MPU_B) |
+		val = (DR_MPU_B << r_MCB_CTRL2_DR_pos) | (DT_MPU_B << r_MCB_CTRL2_DT_pos) |
 #if CONFIG_MCB_SYSTECH_HW_WORKAROUND
 		      /* FIXME: Set poll time in slave is not necessary */
-		      (3000 << 16);
+		      (3000 << r_MCB_CTRL2_PT_pos);
 #else
 		      0;
 #endif
@@ -126,6 +125,17 @@ void mcb_systech_poll_time(const struct device *dev, uint32_t timeout)
 	val = mcb_read(reg_base + MCB_REG_CTRL2);
 	/* FIXME: Set PT via DeviceTree or user configuration */
 	LOG_DBG("Set poll time to %dns, reg: %x", timeout * 10, val);
+}
+
+void mcb_systech_preempt(const struct device *dev, bool preempt)
+{
+	uint32_t reg_base = DEVICE_MMIO_NAMED_GET(dev, reg);
+	uint32_t val;
+
+	val = mcb_read(reg_base + MCB_REG_CTRL1);
+	val |= (preempt ? R_Ack_set : R_Ack_echo) << 2;
+	LOG_INF("Set preempt to %d, reg: %08x", preempt, val);
+	mcb_write(val, reg_base + MCB_REG_CTRL1);
 }
 
 static inline void _config_port_general(const struct device *dev, uint8_t port, bool enable,
@@ -213,10 +223,10 @@ void mcb_systech_tx(const struct device *dev, uint8_t sid, uint8_t port, bool pr
 	}
 #endif
 
-	/* FIXME: assume src sid is 0 */
-	val = VALUE2REG(CTRL1, D_SID, sid) | VALUE2REG(CTRL1, PORT, port) |
-	      VALUE2REG(CTRL1, R_Ack, preempt ? R_Ack_set : R_Ack_echo) | b_MCB_CTRL1_TxEN |
-	      b_MCB_CTRL1_RxEN;
+	val = (sid & r_MCB_CTRL1_D_SID_mask) << r_MCB_CTRL1_D_SID_pos;
+	val |= (port & r_MCB_CTRL1_PORT_mask) << r_MCB_CTRL1_PORT_pos;
+	val |= b_MCB_CTRL1_TxEN | b_MCB_CTRL1_RxEN;
+	val |= (preempt ? R_Ack_set : R_Ack_echo) << 2;
 	mcb_write(val, reg_base + MCB_REG_CTRL1);
 
 	wanted = val;
@@ -446,6 +456,7 @@ int mcb_systech_rx_is_ready(const struct device *dev, uint8_t port)
 static const struct mcb_driver_api mcb_systech_api = {
 	.reset = mcb_systech_reset,
 	.poll_time = mcb_systech_poll_time,
+	.preempt = mcb_systech_preempt,
 	.config_port = mcb_systech_config_port,
 	.get_status = mcb_systech_get_status,
 	.clr_status = mcb_systech_clr_status,

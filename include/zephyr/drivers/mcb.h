@@ -55,6 +55,16 @@ typedef void (*mcb_reset_t)(const struct device *dev, uint8_t role);
 typedef void (*mcb_poll_time_t)(const struct device *dev, uint32_t timeout);
 
 /**
+ * @brief Set preempt flag for MCB
+ *
+ * @note only works for slave role (the master will ignore this api)
+ *
+ * @param dev MCB device instance
+ * @param preempt preempt flag
+ */
+typedef void (*mcb_preempt_t)(const struct device *dev, bool preempt);
+
+/**
  * @brief Configure MCB port
  *
  * @param dev MCB device instance
@@ -199,6 +209,7 @@ typedef void (*mcb_set_tx_len_t)(const struct device *dev, uint8_t port, uint16_
 __subsystem struct mcb_driver_api {
 	mcb_reset_t reset;
 	mcb_poll_time_t poll_time;
+	mcb_preempt_t preempt;
 	mcb_config_port_t config_port;
 	mcb_get_status_t get_status;
 	mcb_clr_status_t clr_status;
@@ -256,6 +267,27 @@ static inline void z_impl_mcb_poll_time(const struct device *dev, uint32_t timeo
 	}
 
 	api->poll_time(dev, timeout);
+}
+
+/**
+ * @brief Set preempt flag for MCB
+ *
+ * This function will set the preempt flag for MCB.
+ *
+ * @param dev MCB device instance
+ * @param preempt preempt flag
+ */
+__syscall void mcb_preempt(const struct device *dev, bool preempt);
+
+static inline void z_impl_mcb_preempt(const struct device *dev, bool preempt)
+{
+	const struct mcb_driver_api *api = (const struct mcb_driver_api *)dev->api;
+
+	if (api->preempt == NULL) {
+		return;
+	}
+
+	api->preempt(dev, preempt);
 }
 
 /**

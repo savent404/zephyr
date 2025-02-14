@@ -25,6 +25,8 @@ LOG_MODULE_REGISTER(net_sock_cif, CONFIG_NET_SOCKETS_LOG_LEVEL);
 
 #include "ldp/ldp_port_ze.hpp"
 
+#include <zephyr/drivers/mcb.h>
+
 using namespace systech::cif;
 
 struct cif_master_data {
@@ -32,6 +34,7 @@ struct cif_master_data {
 	using ldp_mcb_impl = zephyr::ldp_mcb_impl;
 	ldp_wq wq;
 	ldp_mcb_impl mcb[CIF_BUS_MAX];
+	const struct device *mcb_dev[CIF_BUS_MAX];
 	bool occupied[CIF_BUS_MAX];
 
 	/* wq background thread */
@@ -76,6 +79,7 @@ struct cif_sock_data {
 
 	ldp_ptr_t ldp; /* ldp instance */
 	mcb_ptr_t mcb;
+	const struct device *dev;
 	conn_list_t conns;                /* connection list */
 	cif_raw_master_config master_cfg; /* only for master */
 };
@@ -88,6 +92,7 @@ using conn_t = cif_sock_data::conn_t;
 
 static cif_master_data cif_data = {
 	.mcb = {zephyr::ldp_mcb_impl{MCB_DEV_LOW}, zephyr::ldp_mcb_impl{MCB_DEV_HIGH}},
+	.mcb_dev = {MCB_DEV_LOW, MCB_DEV_HIGH},
 	.occupied = {0},
 };
 
@@ -276,6 +281,7 @@ static int cif_sock_bind(struct net_context *ctx, const struct sockaddr_cif *add
 {
 	auto usr_data = reinterpret_cast<cif_sock_data *>(ctx->user_data);
 	mcb_if *mcb;
+	const struct device *mcb_dev;
 	work_queue_if *wq;
 
 	if (usr_data->ldp) {
@@ -288,6 +294,7 @@ static int cif_sock_bind(struct net_context *ctx, const struct sockaddr_cif *add
 	}
 
 	mcb = &cif_data.mcb[addr->bus];
+	mcb_dev = cif_data.mcb_dev[addr->bus];
 	wq = &cif_data.wq;
 
 	if (cif_data.occupied[addr->bus]) {
@@ -311,6 +318,7 @@ static int cif_sock_bind(struct net_context *ctx, const struct sockaddr_cif *add
 
 	cif_data.occupied[addr->bus] = true;
 	usr_data->mcb = mcb;
+	usr_data->dev = mcb_dev;
 
 	return 0;
 }
@@ -365,7 +373,7 @@ static ssize_t cif_sock_recvfrom(struct net_context *ctx, void *buf, size_t max_
 }
 
 static int cif_sock_getsockopt(struct net_context *ctx, int level, int optname, void *optval,
-							       socklen_t *optlen)
+			       socklen_t *optlen)
 {
 	auto usr_data = reinterpret_cast<cif_sock_data *>(ctx->user_data);
 
@@ -428,7 +436,7 @@ static int cif_sock_getsockopt(struct net_context *ctx, int level, int optname, 
 }
 
 static int cif_sock_setsockopt(struct net_context *ctx, int level, int optname, const void *optval,
-							       socklen_t optlen)
+			       socklen_t optlen)
 {
 	auto usr_data = reinterpret_cast<cif_sock_data *>(ctx->user_data);
 	int ret = 0;
@@ -452,6 +460,14 @@ static int cif_sock_setsockopt(struct net_context *ctx, int level, int optname, 
 		} else {
 			ret = cif_ldp_error_to_errno(ret);
 		}
+	} break;
+	case CIF_OPT_SLAVE_CONFIG: {
+		auto opt = reinterpret_cast<const cif_raw_slave_config *>(optval);
+		if (optlen != sizeof(cif_raw_slave_config) ||
+		    net_context_get_proto(ctx) != CIF_RAW_SLAVE) {
+			return -EINVAL;
+		}
+		mcb_preempt(usr_data->dev, opt->want_preempt);
 	} break;
 	case CIF_OPT_PORT: {
 		if (optlen != sizeof(cif_raw_port_config)) {

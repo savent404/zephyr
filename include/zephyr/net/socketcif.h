@@ -42,6 +42,7 @@ extern "C" {
 
 enum {
 	CIF_OPT_MASTER_CONFIG = 1,
+	CIF_OPT_SLAVE_CONFIG = 2,
 	CIF_OPT_PORT,
 	CIF_OPT_ERROR,
 	CIF_OPT_MAX,
@@ -50,6 +51,10 @@ enum {
 struct cif_raw_master_config {
 	uint32_t poll_time;  /* in microseconds */
 	uint32_t cycle_time; /* in microseconds */
+};
+
+struct cif_raw_slave_config {
+	unsigned int want_preempt;
 };
 
 struct cif_raw_port_config {
