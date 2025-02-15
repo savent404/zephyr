@@ -41,8 +41,8 @@ bool ldp_bc::add_conn(conn_ptr conn)
 		}
 		pps_sync_used_ += conn->pps_required;
 		break;
-	case bc_mode::BC_MODE_ASYNC_NO_LIMIT:
-		count_async_no_limit_++;
+	case bc_mode::BC_MODE_ASYNC_AUTO:
+		count_async_auto_++;
 		[[fallthrough]];
 	case bc_mode::BC_MODE_ASYNC:
 		pps_async_used_ += conn->pps_required;
@@ -62,8 +62,8 @@ void ldp_bc::rm_conn(conn_ptr conn)
 	case bc_mode::BC_MODE_SYNC:
 		pps_sync_used_ -= conn->pps_required;
 		break;
-	case bc_mode::BC_MODE_ASYNC_NO_LIMIT:
-		count_async_no_limit_--;
+	case bc_mode::BC_MODE_ASYNC_AUTO:
+		count_async_auto_--;
 		[[fallthrough]];
 	case bc_mode::BC_MODE_ASYNC:
 		pps_async_used_ -= conn->pps_required;
@@ -94,13 +94,13 @@ void ldp_bc::schedule(unsigned delta_microsec)
 			    (conn->pps_required / pps_for_async_limited) /
 			    (async_overrun > 1 ? async_overrun : 1);
 			break;
-		case bc_mode::BC_MODE_ASYNC_NO_LIMIT:
+		case bc_mode::BC_MODE_ASYNC_AUTO:
 			if (async_overrun < 1) {
 				t = (pps_for_async - pps_for_async_limited) * delta;
 			} else {
 				t = minimal_pps_for_async_no_limit * delta / async_overrun;
 			}
-			t /= count_async_no_limit_ > 0 ? count_async_no_limit_ : 1;
+			t /= count_async_auto_ > 0 ? count_async_auto_ : 1;
 			break;
 		}
 

@@ -19,7 +19,7 @@ namespace systech::cif::bc
 
 enum class bc_mode {
 	BC_MODE_SYNC,
-	BC_MODE_ASYNC_NO_LIMIT,
+	BC_MODE_ASYNC_AUTO,
 	BC_MODE_ASYNC,
 };
 
@@ -39,9 +39,9 @@ using conn_ptr = std::shared_ptr<conn_item>;
  * * The bandwidth is divided into two parts: reserved for sync and reserved for async.
  * * The reserved bandwidth for sync is fixed, while the reserved bandwidth for async is
  *   shared by all async connections.
- * * The reserved bandwidth for async is divided into two parts: limited and no limit.
+ * * The reserved bandwidth for async is divided into two parts: limited and auto.
  *   * The limited async conn will get shares based on the bias value.
- *   * The no limited async conns will share the rest of the reserved async bandwidth equally.
+ *   * The auto async conns will share the rest of the reserved async bandwidth equally.
  * * There is a situation that all the async bandwidth will scale down: when the reserved async
  *   bandwidth and the async bandwidth asked by user is larger than the total async bandwidth.
  *   In this case, all the async bandwidth will scale down by the ratio of overuse, to make sure
@@ -51,8 +51,8 @@ using conn_ptr = std::shared_ptr<conn_item>;
  * 	BUS_PPS = 1000, reserved_for_sync = 200, reserved_for_async = 200
  *  conn1: SYNC required 100 pps
  *  conn2: ASYNC required 500 pps
- *  conn3: ASYNC no bandwidth required
- *  conn4: ASYNC no bandwidth required
+ *  conn3: auto ASYNC required
+ *  conn4: auto ASYNC required
  *
  *  In this case, the bus is not overused, conn will get:
  *  - conn1: 100 pps
@@ -65,9 +65,9 @@ using conn_ptr = std::shared_ptr<conn_item>;
  *  conn1: SYNC required 100 pps
  *  conn2: ASYNC required 500 pps
  *  conn3: ASYNC required 500 pps
- *  conn4: ASYNC no bandwidth required
- *  conn5: ASYNC no bandwidth required
- *  conn6: ASYNC no bandwidth required
+ *  conn4: auto ASYNC required
+ *  conn5: auto ASYNC required
+ *  conn6: auto ASYNC required
  *
  *  In this case, the bus is overused (overrun ratio=1200/800), conn will get:
  *  - conn1: 100 pps
@@ -105,7 +105,7 @@ struct ldp_bc {
 	 * - For asynchronous connections with limits (BC_MODE_ASYNC), it calculates the allocation
 	 * using the limited asynchronous PPS adjusted by the async_overrun factor to prevent
 	 * overload.
-	 * - For asynchronous connections without limits (BC_MODE_ASYNC_NO_LIMIT), it computes the
+	 * - For asynchronous connections without limits (BC_MODE_ASYNC_AUTO), it computes the
 	 * allocation either using the surplus asynchronous PPS (when not overloaded) or by
 	 * adjusting the minimal reserved asynchronous PPS using the async_overrun factor. The
 	 * allocation is then equally distributed among all no-limit asynchronous connections.
@@ -133,10 +133,10 @@ struct ldp_bc {
 	std::list<conn_ptr> conn_list;
 	unsigned bus_pps_;
 	unsigned pps_reserved_for_sync_;  /* reserved pps for sync */
-	unsigned pps_reserved_for_async_; /* reserved pps for async (no limit) */
+	unsigned pps_reserved_for_async_; /* reserved pps for async (auto) */
 	unsigned pps_sync_used_ = 0;
 	unsigned pps_async_used_ = 0;
-	unsigned count_async_no_limit_ = 0;
+	unsigned count_async_auto_ = 0;
 };
 
 } // namespace systech::cif::bc

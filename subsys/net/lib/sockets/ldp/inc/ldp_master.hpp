@@ -327,7 +327,7 @@ template <typename T_mempool, typename T_cache> struct ldp_master: public ldp_ba
 		auto cfg = static_cast<const ldp_master_async_config *>(config);
 		auto ci = std::make_unique<async_conn_info>();
 		auto bc = std::make_shared<bc::conn_item>(
-			cfg->pps > 0 ? bc_mode::BC_MODE_ASYNC : bc_mode::BC_MODE_ASYNC_NO_LIMIT,
+			cfg->pps > 0 ? bc_mode::BC_MODE_ASYNC : bc_mode::BC_MODE_ASYNC_AUTO,
 			cfg->pps, 0);
 
 		if (!ci) {

@@ -84,8 +84,8 @@ TEST(bc, async_no_limit)
 	ldp_bc bc(1000, 0.5, 0); /* alloc 500 pps for sync */
 
 	auto conn1 = std::make_shared<conn_item>(bc_mode::BC_MODE_SYNC, 100, 0);
-	auto conn2 = std::make_shared<conn_item>(bc_mode::BC_MODE_ASYNC_NO_LIMIT, 0, 0);
-	auto conn3 = std::make_shared<conn_item>(bc_mode::BC_MODE_ASYNC_NO_LIMIT, 0, 0);
+	auto conn2 = std::make_shared<conn_item>(bc_mode::BC_MODE_ASYNC_AUTO, 0, 0);
+	auto conn3 = std::make_shared<conn_item>(bc_mode::BC_MODE_ASYNC_AUTO, 0, 0);
 
 	EXPECT_EQ(bc.add_conn(conn1), true);
 	EXPECT_EQ(bc.add_conn(conn2), true);
@@ -103,7 +103,7 @@ TEST(bc, async_hyp)
 	ldp_bc bc(1000, 0.2, 0.2);
 
 	auto conn1 = std::make_shared<conn_item>(bc_mode::BC_MODE_SYNC, 100, 0);
-	auto conn2 = std::make_shared<conn_item>(bc_mode::BC_MODE_ASYNC_NO_LIMIT, 0, 0);
+	auto conn2 = std::make_shared<conn_item>(bc_mode::BC_MODE_ASYNC_AUTO, 0, 0);
 	auto conn3 = std::make_shared<conn_item>(bc_mode::BC_MODE_ASYNC, 500, 0);
 
 	EXPECT_EQ(bc.add_conn(conn1), true);
@@ -122,7 +122,7 @@ TEST(bc, async_hyp_overrun)
 	ldp_bc bc(1000, 0.2, 0.2);
 
 	auto conn1 = std::make_shared<conn_item>(bc_mode::BC_MODE_SYNC, 100, 0);
-	auto conn2 = std::make_shared<conn_item>(bc_mode::BC_MODE_ASYNC_NO_LIMIT, 0, 0);
+	auto conn2 = std::make_shared<conn_item>(bc_mode::BC_MODE_ASYNC_AUTO, 0, 0);
 	auto conn3 = std::make_shared<conn_item>(bc_mode::BC_MODE_ASYNC, 500, 0);
 	auto conn4 = std::make_shared<conn_item>(bc_mode::BC_MODE_ASYNC, 500, 0);
 
