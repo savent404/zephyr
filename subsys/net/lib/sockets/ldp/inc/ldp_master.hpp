@@ -266,6 +266,7 @@ template <typename T_mempool, typename T_cache> struct ldp_master: public ldp_ba
 		uint32_t stat_rx_packet; /* run loop counter */
 		bool flg_one_shot;       /* one shot flag */
 		bool flg_hold_on;        /* Hold on for a seconds if no user action triggered */
+		bool flg_new_data;       /* new data received */
 
 		uint8_t *tx_buf; /* transmit buffer */
 		uint8_t *rx_buf; /* receive buffer */
@@ -413,6 +414,7 @@ template <typename T_mempool, typename T_cache> struct ldp_master: public ldp_ba
 		ci->flg_hold_on = cfg->one_shot ? true : false;
 		ci->stat_rx_packet = 0;
 		ci->bc = bc;
+		ci->flg_new_data = false;
 		sync_conns_.push_back(std::move(ci));
 		return next_id_++;
 	}
@@ -505,13 +507,15 @@ template <typename T_mempool, typename T_cache> struct ldp_master: public ldp_ba
 
 		ci->flg_hold_on = false;
 
-		if (ci->rx_len == 0) {
+		if (ci->rx_len == 0 || !ci->flg_new_data) {
 			return -LDP_ERR_AGAIN;
 		}
 
 		if (ci->rx_len > len) {
 			return -LDP_ERR_RX_BUF_TOO_SMALL;
 		}
+
+		ci->flg_new_data = false;
 
 		memcpy(buf, ci->rx_buf, ci->rx_len);
 		return ci->rx_len;
@@ -608,6 +612,7 @@ template <typename T_mempool, typename T_cache> struct ldp_master: public ldp_ba
 				ldp_memcpy::memcpy(ci->rx_buf, rx_buf, rx_len);
 				ci->rx_len = rx_len;
 				ci->stat_rx_packet++;
+				ci->flg_new_data = true;
 				mcb_->clr_rx(ci->port);
 			}
 
