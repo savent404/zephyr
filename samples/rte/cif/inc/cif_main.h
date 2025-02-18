@@ -54,6 +54,10 @@ struct context {
 		role_slave,
 	} target_role;
 	enum {
+		bus_low,
+		bus_high,
+	} target_bus;
+	enum {
 		normal,
 		preempt,
 	} target_opt;

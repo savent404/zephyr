@@ -118,7 +118,7 @@ static int slave_task(void)
 	 */
 	struct sockaddr_cif local = {
 		.cif_family = AF_CIF,
-		.bus = CIF_BUS_DEFAULT,
+		.bus = ctx_.target_bus == bus_low ? CIF_BUS_SLOW : CIF_BUS_FAST,
 		.slot = -1, /* not used */
 		.port = -1, /* not used */
 	};

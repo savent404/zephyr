@@ -54,7 +54,7 @@ static int cif_cmd(const struct shell *sh, size_t argc, char **argv)
 		_cmd_switch = CMD_SWITCH,
 	} cmd = _cmd_none;
 	const char *subcmd = argv[1];
-	const char *subcmd_list[] = {
+	static const char *const subcmd_list[] = {
 		"discovery",
 		"config",
 		"io",
@@ -150,19 +150,28 @@ static int cif_cmd(const struct shell *sh, size_t argc, char **argv)
 		}
 
 		ctx_.target_opt = normal;
+		ctx_.target_bus = bus_low;
 		for (int i = 3; i < argc; i++) {
 			if (!strcmp(argv[i], "preempt")) {
 				ctx_.target_opt = preempt;
 				break;
+			} else if (!strcmp(argv[i], "bus_low")) {
+				ctx_.target_bus = bus_low;
+			} else if (!strcmp(argv[i], "bus_high")) {
+				ctx_.target_bus = bus_high;
 			} else {
 				shell_print(sh, "Invalid option: %s", argv[i]);
 				return -EINVAL;
 			}
 		}
 
+		handled = true;
 		unconditional_switch(is_master ? role_master : role_slave);
 		break;
 	}
+	case _cmd_none:
+	default:
+		break;
 	}
 
 	if (!handled) {
