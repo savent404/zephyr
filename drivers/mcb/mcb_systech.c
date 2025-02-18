@@ -96,13 +96,7 @@ void mcb_systech_reset(const struct device *dev, uint8_t role)
 		break;
 	case _MCB_ROLE_SLAVE:
 	default:
-		val = (DR_MPU_B << r_MCB_CTRL2_DR_pos) | (DT_MPU_B << r_MCB_CTRL2_DT_pos) |
-#if CONFIG_MCB_SYSTECH_HW_WORKAROUND
-		      /* FIXME: Set poll time in slave is not necessary */
-		      (3000 << r_MCB_CTRL2_PT_pos);
-#else
-		      0;
-#endif
+		val = (DR_MPU_B << r_MCB_CTRL2_DR_pos) | (DT_MPU_B << r_MCB_CTRL2_DT_pos);
 		LOG_DBG("Set MCB to slave mode, reg: %08x", val);
 		break;
 	}
