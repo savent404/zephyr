@@ -19,10 +19,6 @@ struct reg_buf {
 	uint16_t len;    /* Register length */
 };
 
-#if CONFIG_MCB_SYSTECH_HW_WORKAROUND
-REG_BUF_REG_DEF(disc, 32) = {'d', 'i', 's', 'c', ':', '0', '0', '0'};
-REG_BUF_DEF(disc, 32);
-#endif
 REG_BUF_REG_DEF(config, 32) = {'c', 'f', 'g', ':', '0', '0', '0', '0'};
 REG_BUF_DEF(config, 32);
 REG_BUF_REG_DEF(io, 32) = {'i', 'o', ':', '0', '0', '0', '0', '0'};
@@ -150,14 +146,6 @@ static int slave_task(void)
 	/**
 	 * Step 4: open config&io ports.
 	 */
-#if CONFIG_MCB_SYSTECH_HW_WORKAROUND
-	LOG_WRN("Disc(port 0) shall not be configured by PS!");
-	if (!dev_port_open(sock, PORT_ID_DISC, REG_BUF_REG(disc), REG_BUF_LEN(disc),
-			   REG_BUF_LEN(disc))) {
-		close(sock);
-		return -1;
-	}
-#endif
 	if (!dev_port_open(sock, PORT_ID_CFG, REG_BUF_REG(config), REG_BUF_LEN(config),
 			   REG_BUF_LEN(config))) {
 		LOG_ERR("Failed to open config port");
