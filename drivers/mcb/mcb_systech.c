@@ -78,12 +78,7 @@ void mcb_systech_reset(const struct device *dev, uint8_t role)
 	/* Clear CTRL/STATUS register */
 	mcb_write(0, reg_base + MCB_REG_CTRL1);
 	mcb_write(0, reg_base + MCB_REG_CTRL2);
-#if CONFIG_MCB_SYSTECH_HW_WORKAROUND
-	mcb_write_unsafe(0xFFFFFFFF, reg_base + MCB_REG_STATUS1);
 	mcb_write(0, reg_base + MCB_REG_STATUS1);
-#else
-	mcb_write(0, reg_base + MCB_REG_STATUS1);
-#endif
 	mcb_write(0, reg_base + MCB_REG_I_A_COUNT);
 	mcb_write(0, reg_base + MCB_REG_I_B_COUNT);
 
@@ -154,15 +149,10 @@ static inline void _config_port_general(const struct device *dev, uint8_t port, 
 	mcb_write(val, reg_base + MCB_REG_PORT_RDY_MASK0 + port_idx * 4);
 
 	/* reset write mask */
-#if CONFIG_MCB_SYSTECH_HW_WORKAROUND
-	mcb_write_unsafe(port_bit, reg_base + MCB_REG_PORT_W_MASK0 + port_idx * 4);
-	mcb_write(0, reg_base + MCB_REG_PORT_W_MASK0 + port_idx * 4);
-#else
 	val = mcb_read(reg_base + MCB_REG_PORT_W_MASK0 + port_idx * 4);
 	val &= ~port_bit;
 	val |= write ? port_bit : 0;
 	mcb_write(val, reg_base + MCB_REG_PORT_W_MASK0 + port_idx * 4);
-#endif
 }
 
 void mcb_systech_config_port(const struct device *dev, uint8_t port, bool enable, bool write,
