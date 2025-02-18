@@ -46,79 +46,123 @@ static void unconditional_switch(int role)
 static int cif_cmd(const struct shell *sh, size_t argc, char **argv)
 {
 	bool handled = false;
+	enum {
+		_cmd_none = CMD_NONE,
+		_cmd_discovery = CMD_DISCOVERY,
+		_cmd_config = CMD_CONFIG,
+		_cmd_io = CMD_IO,
+		_cmd_switch = CMD_SWITCH,
+	} cmd = _cmd_none;
+	const char *subcmd = argv[1];
+	const char *subcmd_list[] = {
+		"discovery",
+		"config",
+		"io",
+		"switch",
+	};
 
-	if (ctx_.target_role == role_master) {
-		if (!strcmp(argv[1], "discovery")) {
-			ctx_.cmd = CMD_DISCOVERY;
-			ctx_.target_sid = atoi(argv[2]);
-			handled = true;
-		} else if (!strcmp(argv[1], "config")) {
-			ctx_.cmd = CMD_CONFIG;
-			ctx_.target_sid = atoi(argv[2]);
-			handled = true;
-		} else if (!strcmp(argv[1], "io")) {
-			ctx_.cmd = CMD_IO;
-			ctx_.target_sid = atoi(argv[2]);
-
-			/* Handle port */
-			if (argc >= 4) {
-				ctx_.target_port = atoi(argv[3]);
-			} else {
-				ctx_.target_port = PORT_ID_IO;
-			}
-
-			/* Handle cnt */
-			if (argc >= 5) {
-				ctx_.target_cnt = atoi(argv[4]);
-			} else {
-				ctx_.target_cnt = 10;
-			}
-
-			/* Handle pps */
-			if (argc >= 6 && CIF_IS_ASYNC_PORT(ctx_.target_port)) {
-				ctx_.target_pps = atoi(argv[5]);
-			} else if (argc >= 6) {
-				ctx_.cmd = CMD_NONE;
-				shell_print(sh, "Invalid port, try async port");
-				return -EINVAL;
-			}
-			handled = true;
+	for (int i = 0; i < ARRAY_SIZE(subcmd_list); i++) {
+		if (!strcmp(subcmd, subcmd_list[i])) {
+			cmd = i + 1;
+			break;
 		}
 	}
 
-	if (!strcmp(argv[1], "switch")) {
-		if (argc == 2) {
-			shell_print(sh, "Current role: %s\n",
-				    ctx_.target_role == role_master ? "master" : "slave");
-			handled = true;
-		} else if (!strcmp(argv[2], "slave")) {
-			if (argc == 3) {
-				ctx_.target_opt = normal;
-			} else if (argc == 4 && !strcmp(argv[3], "preempt")) {
-				ctx_.target_opt = preempt;
-			} else {
-				shell_print(sh, "Invalid option, try preempt");
-				return -EINVAL;
-			}
-			unconditional_switch(role_slave);
-			handled = true;
-		} else if (!strcmp(argv[2], "master")) {
-			if (argc == 3) {
-				ctx_.target_opt = normal;
-			} else if (argc == 4 && !strcmp(argv[3], "preempt")) {
-				ctx_.target_opt = preempt;
-			} else {
-				shell_print(sh, "Invalid option, try preempt");
-				return -EINVAL;
-			}
-			shell_print(sh, "Switch to master role, opt: %s\n",
-				    ctx_.target_opt == normal ? "normal" : "preempt");
-			unconditional_switch(role_master);
-			handled = true;
-		} else {
-			shell_print(sh, "Invalid role, try slave or master");
+	switch (cmd) {
+	case _cmd_discovery: {
+		if (ctx_.target_role != role_master) {
+			shell_print(sh, "Only master can discovery");
 			return -EINVAL;
 		}
+		if (argc != 3) {
+			shell_print(sh, "Invalid arguments number");
+			return -EINVAL;
+		}
+		ctx_.cmd = CMD_DISCOVERY;
+		ctx_.target_sid = atoi(argv[2]);
+		handled = true;
+	} break;
+	case _cmd_config: {
+		if (ctx_.target_role != role_master) {
+			shell_print(sh, "Only master can config");
+			return -EINVAL;
+		}
+		if (argc != 3) {
+			shell_print(sh, "Invalid arguments number");
+			return -EINVAL;
+		}
+		ctx_.cmd = CMD_CONFIG;
+		ctx_.target_sid = atoi(argv[2]);
+		handled = true;
+	} break;
+	case _cmd_io: {
+		if (ctx_.target_role != role_master) {
+			shell_print(sh, "Only master can io");
+			break;
+			return -EINVAL;
+		}
+		if (argc < 3) {
+			shell_print(sh, "Invalid arguments number");
+			break;
+		}
+		ctx_.cmd = CMD_IO;
+		ctx_.target_sid = atoi(argv[2]);
+
+		/* Handle port */
+		if (argc >= 4) {
+			ctx_.target_port = atoi(argv[3]);
+		} else {
+			ctx_.target_port = PORT_ID_IO;
+		}
+
+		/* Handle cnt */
+		if (argc >= 5) {
+			ctx_.target_cnt = atoi(argv[4]);
+		} else {
+			ctx_.target_cnt = 10;
+		}
+
+		/* Handle pps */
+		if (argc >= 6 && CIF_IS_ASYNC_PORT(ctx_.target_port)) {
+			ctx_.target_pps = atoi(argv[5]);
+		} else if (argc >= 6) {
+			ctx_.cmd = CMD_NONE;
+			shell_print(sh, "Invalid port, try async port");
+			return -EINVAL;
+		}
+		handled = true;
+	} break;
+	case _cmd_switch: {
+		if (argc < 3) {
+			shell_print(sh, "Current role: %s\n",
+				    ctx_.target_role == role_master ? "master" : "slave");
+			shell_print(sh, "Preempt: %s\n", ctx_.target_opt == normal ? "no" : "yes");
+			handled = true;
+			break;
+		}
+
+		bool is_master = !strcmp(argv[2], "master");
+		bool is_slave = !strcmp(argv[2], "slave");
+
+		if (!is_master && !is_slave) {
+			shell_print(sh, "Invalid role, try slave or master");
+			break;
+		}
+
+		ctx_.target_opt = normal;
+		for (int i = 3; i < argc; i++) {
+			if (!strcmp(argv[i], "preempt")) {
+				ctx_.target_opt = preempt;
+				break;
+			} else {
+				shell_print(sh, "Invalid option: %s", argv[i]);
+				return -EINVAL;
+			}
+		}
+
+		unconditional_switch(is_master ? role_master : role_slave);
+		break;
+	}
 	}
 
 	if (!handled) {
