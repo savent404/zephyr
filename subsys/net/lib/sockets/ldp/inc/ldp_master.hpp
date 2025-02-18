@@ -547,14 +547,6 @@ template <typename T_mempool, typename T_cache> struct ldp_master: public ldp_ba
 
 			/* prepare frame */
 			mcb_->config_port(ci->port, true, true, mcb_if::MCB_MAX_FRAME_LEN);
-
-#if CONFIG_MCB_SYSTECH_HW_WORKAROUND
-			/* force to output, HW can't send frame if len==0 */
-			/* FIXME: HW bug, if tx_len is 0, the function will not work */
-			if (ci->tx_len == 0) {
-				ci->tx_len = 4;
-			}
-#endif
 			mcb_->set_tx_len(ci->port, ci->tx_len);
 			tx_buf = mcb_->get_tx_buf(ci->port);
 			if (ci->tx_len) {

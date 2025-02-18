@@ -203,18 +203,12 @@ void mcb_systech_tx(const struct device *dev, uint8_t sid, uint8_t port, bool pr
 		return;
 	}
 
-#if CONFIG_MCB_SYSTECH_HW_WORKAROUND
-	if (mcb_get_tx_len(dev, port) == 0) {
-		/* HW bug, can't send empty frame */
-		LOG_WRN("Can't send empty frame, sid %d, port %d", sid, port);
-		k_panic();
-	} else if (mcb_get_tx_len(dev, port) % 4) {
+	if (mcb_get_tx_len(dev, port) % 4) {
 		/* HW bug, can't send frame with length not multiple of 4 */
 		LOG_WRN("Can't send frame with length not multiple of 4, sid %d, port %d", sid,
 			port);
 		k_panic();
 	}
-#endif
 
 	val = (sid & r_MCB_CTRL1_D_SID_mask) << r_MCB_CTRL1_D_SID_pos;
 	val |= (port & r_MCB_CTRL1_PORT_mask) << r_MCB_CTRL1_PORT_pos;
