@@ -84,9 +84,6 @@ void mcb_systech_reset(const struct device *dev, uint8_t role)
 	}
 
 	for (uint32_t addr = MCB_REG_PORT_RDY_MASK0; addr <= MCB_REG_PORT_RDY_MASK3; addr += 4) {
-#if CONFIG_MCB_SYSTECH_HW_WORKAROUND
-		mcb_write(0xFFFFFFFF, reg_base + addr);
-#endif
 		mcb_write(0, reg_base + addr);
 	}
 
@@ -150,14 +147,9 @@ static inline void _config_port_general(const struct device *dev, uint8_t port, 
 	mcb_write(max_rx_len, reg_base + MCB_REG_PORT_RX_MAX(port));
 
 	/* clear port ready mask */
-#if CONFIG_MCB_SYSTECH_HW_WORKAROUND
-	mcb_write(port_bit, reg_base + MCB_REG_PORT_RDY_MASK0 + port_idx * 4);
-	mcb_write(0, reg_base + MCB_REG_PORT_RDY_MASK0 + port_idx * 4);
-#else
 	val = mcb_read(reg_base + MCB_REG_PORT_RDY_MASK0 + port_idx * 4);
 	val &= ~port_bit;
 	mcb_write(val, reg_base + MCB_REG_PORT_RDY_MASK0 + port_idx * 4);
-#endif
 
 	/* reset write mask */
 #if !CONFIG_MCB_SYSTECH_HW_WORKAROUND
@@ -283,7 +275,6 @@ void mcb_systech_clr_status(const struct device *dev, uint32_t bits)
 		return;
 	}
 
-#if CONFIG_MCB_SYSTECH_HW_WORKAROUND
 	if (bits & _MCB_ERR_R_ERR) {
 		val |= b_MCB_STATUS1_RE;
 	}
@@ -299,21 +290,13 @@ void mcb_systech_clr_status(const struct device *dev, uint32_t bits)
 	if (bits & _MCB_ERR_P_ERR) {
 		val |= b_MCB_STATUS1_PE;
 	}
-#else
-	val = 0;
-#endif
 
-	mcb_write(val, reg_base + MCB_REG_STATUS1);
-#if CONFIG_MCB_SYSTECH_HW_WORKAROUND
-	/* FIXME: For the crap hw design, status register shall be cleared twice */
-	mcb_write(0, reg_base + MCB_REG_STATUS1);
-
+	mcb_write(~val, reg_base + MCB_REG_STATUS1);
 	/* Make sure status register is cleared */
 	if (mcb_read(reg_base + MCB_REG_STATUS1) & val) {
 		LOG_WRN_ONCE("Failed to clear status register, val = 0x%x, reg = 0x%x", val,
 			     mcb_read(reg_base + MCB_REG_STATUS1));
 	}
-#endif
 }
 
 void *mcb_systech_get_rx_buf(const struct device *dev, uint8_t port)
@@ -402,15 +385,13 @@ void mcb_systech_rx_clr(const struct device *dev, uint8_t port)
 	uint32_t reg_base = DEVICE_MMIO_NAMED_GET(dev, reg);
 	uint32_t val, reg;
 
+	/* As the specific of MCB, clear status flag is to write 0 to the bit */
 	val = b_MCB_STATUS1_RDY;
-	mcb_write(val, reg_base + MCB_REG_STATUS1);
-#if CONFIG_MCB_SYSTECH_HW_WORKAROUND
-	mcb_write(0, reg_base + MCB_REG_STATUS1);
+	mcb_write(~val, reg_base + MCB_REG_STATUS1);
 	if (mcb_read(reg_base + MCB_REG_STATUS1) & val) {
 		LOG_WRN_ONCE("Failed to clear rx ready, val = 0x%x, reg = 0x%x", val,
 			     mcb_read(reg_base + MCB_REG_STATUS1));
 	}
-#endif
 
 	if (port >= MCB_MAX_PORT) {
 		LOG_ERR("Invalid port number");
@@ -418,15 +399,11 @@ void mcb_systech_rx_clr(const struct device *dev, uint8_t port)
 	}
 	val = BIT(port % 32);
 	reg = MCB_REG_PORT_RDY_MASK0 + (port / 32) * 4;
-	mcb_write(val, reg_base + reg);
-#if CONFIG_MCB_SYSTECH_HW_WORKAROUND
-	mcb_write(0, reg_base + reg);
-
+	mcb_write(~val, reg_base + reg);
 	if (mcb_read(reg_base + reg) & val) {
 		LOG_WRN_ONCE("Failed to clear port ready mask, val = 0x%x, reg = 0x%x", val,
 			     mcb_read(reg_base + reg));
 	}
-#endif
 }
 
 int mcb_systech_rx_is_ready(const struct device *dev, uint8_t port)
