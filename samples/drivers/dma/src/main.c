@@ -7,20 +7,40 @@
 #include <zephyr/device.h>
 #include <zephyr/drivers/dma.h>
 #include <string.h>
+#include <zephyr/kernel/mm.h>
+#include <zephyr/cache.h>
+
+#if defined(CONFIG_DCACHE_LINE_SIZE)
+#define DMA_ALIGN CONFIG_DCACHE_LINE_SIZE
+#else
+#error "CONFIG_DCACHE_LINE_SIZE must be defined"
+#endif
 
 #define DMA_DEVICE_NAME DT_NODELABEL(dma0)
 #define MAX_CHANNELS    8
 #define BUFFER_SIZE     1024
 
 static const struct device *const dma_dev = DEVICE_DT_GET(DMA_DEVICE_NAME);
+
+#ifdef CONFIG_MMU
+static uint8_t __aligned(DMA_ALIGN) src_buf[BUFFER_SIZE];
+static uint8_t __aligned(DMA_ALIGN) dst_buf[BUFFER_SIZE];
+static uintptr_t src_phys;
+static uintptr_t dst_phys;
+#else
 static uint8_t src_buf[BUFFER_SIZE];
 static uint8_t dst_buf[BUFFER_SIZE];
+#endif
+
 static struct dma_config dma_cfg = {0};
 static struct dma_block_config dma_block = {0};
 static volatile bool transfer_done;
 
 static void dma_callback(const struct device *dev, void *user_data, uint32_t channel, int status)
 {
+#ifdef CONFIG_MMU
+	sys_cache_data_invd_range(dst_buf, BUFFER_SIZE);
+#endif
 	transfer_done = true;
 	printk("[CH-%d] Transfer completed, status: %d\n", channel, status);
 }
@@ -46,8 +66,18 @@ static int test_dma_channel(uint32_t channel)
 	dma_cfg.head_block = &dma_block;
 
 	dma_block.block_size = BUFFER_SIZE;
+
+#ifdef CONFIG_MMU
+	sys_cache_data_flush_range(src_buf, BUFFER_SIZE);
+	sys_cache_data_invd_range(dst_buf, BUFFER_SIZE);
+	src_phys = k_mem_phys_addr(src_buf);
+	dst_phys = k_mem_phys_addr(dst_buf);
+	dma_block.source_address = src_phys;
+	dma_block.dest_address = dst_phys;
+#else
 	dma_block.source_address = (uint32_t)src_buf;
 	dma_block.dest_address = (uint32_t)dst_buf;
+#endif
 
 	if (dma_config(dma_dev, channel, &dma_cfg)) {
 		printk("[CH-%d] Configuration failed\n", channel);
