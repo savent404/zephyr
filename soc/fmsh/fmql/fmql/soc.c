@@ -52,6 +52,11 @@ static const struct arm_mmu_region mmu_regions[] = {
 	MMU_REGION_FLAT_ENTRY("gic_cpu", DT_REG_ADDR_BY_IDX(DT_NODELABEL(gic), 1),
 			      DT_REG_SIZE_BY_IDX(DT_NODELABEL(gic), 1), M_DEVICE),
 
+#if DT_NODE_HAS_STATUS(DT_NODELABEL(dma0), okay)
+	MMU_REGION_FLAT_ENTRY("dma0", DT_REG_ADDR_BY_IDX(DT_NODELABEL(dma0), 0),
+			      DT_REG_SIZE_BY_IDX(DT_NODELABEL(dma0), 0), M_DEVICE),
+#endif
+
 #if DT_NODE_HAS_STATUS(DT_NODELABEL(slcr), okay)
 	MMU_REGION_FLAT_ENTRY("slcr", DT_REG_ADDR_BY_IDX(DT_NODELABEL(slcr), 0),
 			      DT_REG_SIZE_BY_IDX(DT_NODELABEL(slcr), 0), M_DEVICE),
