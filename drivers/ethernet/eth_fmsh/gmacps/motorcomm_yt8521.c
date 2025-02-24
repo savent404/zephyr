@@ -219,7 +219,7 @@ u8 yt8521_cfg(FGmacPs_Instance_T *pGmac)
 	if (pPhyConfig->phy_delay != 0x0) {
 		fmsh_mdio_write(pGmac, 0x1e, 0xa003);
 		fmsh_mdio_write(pGmac, 0x1f, pPhyConfig->phy_delay);
-		FMSH_INFO("PHY delay:0x%x\r\n", pPhyConfig->phy_delay);
+		FMSH_DEBUG("PHY delay:0x%x\r\n", pPhyConfig->phy_delay);
 	}
 
 	ytphy_write_ext(pGmac, PAGE0, 0xa00c, 0x6FF8);
@@ -227,11 +227,11 @@ u8 yt8521_cfg(FGmacPs_Instance_T *pGmac)
 	ytphy_write_ext(pGmac, PAGE0, 0xa00e, 0x6FF8);
 
 	reg = ytphy_read_ext(pGmac, PAGE0, 0xa00c);
-	FMSH_INFO("YT Read:0x%x\r\n", reg);
+	FMSH_DEBUG("YT Read:0x%x\r\n", reg);
 	reg = ytphy_read_ext(pGmac, PAGE0, 0xa00d);
-	FMSH_INFO("YT Read:0x%x\r\n", reg);
+	FMSH_DEBUG("YT Read:0x%x\r\n", reg);
 	reg = ytphy_read_ext(pGmac, PAGE0, 0xa00e);
-	FMSH_INFO("YT Read:0x%x\r\n", reg);
+	FMSH_DEBUG("YT Read:0x%x\r\n", reg);
 
 	return ETHERNET_PHY_OK;
 }

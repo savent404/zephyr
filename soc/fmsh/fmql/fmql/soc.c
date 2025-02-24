@@ -92,6 +92,11 @@ static const struct arm_mmu_region mmu_regions[] = {
 			      DT_REG_SIZE_BY_IDX(DT_NODELABEL(ethernet0), 0), M_DEVICE),
 #endif
 
+#if DT_NODE_HAS_STATUS(DT_NODELABEL(ethernet1), okay)
+	MMU_REGION_FLAT_ENTRY("ethernet1", DT_REG_ADDR_BY_IDX(DT_NODELABEL(ethernet1), 0),
+			      DT_REG_SIZE_BY_IDX(DT_NODELABEL(ethernet1), 0), M_DEVICE),
+#endif
+
 #if DT_NODE_HAS_STATUS(DT_NODELABEL(arch_timer), okay)
 	MMU_REGION_FLAT_ENTRY("arch_timer", DT_REG_ADDR(DT_NODELABEL(arch_timer)),
 			      DT_REG_SIZE(DT_NODELABEL(arch_timer)), M_DEVICE),

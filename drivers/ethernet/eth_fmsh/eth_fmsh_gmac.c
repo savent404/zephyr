@@ -21,90 +21,10 @@
 
 LOG_MODULE_REGISTER(eth_fmsh);
 
-/* 驱动私有数据 */
-FGmacPs_LinkStatus_T s_GMAC_LinkStatus;
-
 /* DMA缓冲区池 */
 NET_BUF_POOL_DEFINE(rx_dma_pool, 128, GMAC_RBUFFER_UNIT_SIZE, sizeof(uint32_t), NULL);
 
-FGmacPs_Config_T s_GMAC_Config = {
-	.DeviceId = FPAR_GMACPS_0_DEVICE_ID,
-	.BaseAddress = FPAR_GMACPS_0_BASEADDR,
-	.Speed = FPAR_GMACPS_0_SPEED,
-	.InterFaceType = FPAR_GMACPS_0_INTERFACE,
-};
-
-FGmacPs_PhyConfig_T s_GMAC_PhyCfg = {
-	.phy_device = PHY_YT8521,
-	.speed = FPAR_GMACPS_0_SPEED,
-	.auto_detect_ad_en = 1,
-	.mdio_address = DT_INST_PROP(0, mdio_addr),
-	.gmii2rgmii_mdio_addr1 = DT_INST_PROP(0, gmii2rgmii_addr1),
-	.gmii2rgmii_mdio_addr2 = DT_INST_PROP(0, gmii2rgmii_addr2),
-	.phy_mode = DT_INST_PROP(0, phy_mode),
-	.phy_delay = DT_INST_PROP(0, phy_delay),
-	.auto_nag_en = 1,
-	.interface = FPAR_GMACPS_0_INTERFACE,
-};
-
-FGmacPs_Instance_T s_GMAC_Instance = {
-	.index = 0,
-	.base_address = (void *)DT_INST_REG_ADDR(0),
-	.mac_address = DT_INST_PROP(0, local_mac_address),
-	.csr_clk = 5,
-	.wRxListSize = GMAC_RDES_NUM,
-	.wTxListSize = GMAC_TDES_NUM,
-	.RxDesBufSize = GMAC_RBUFFER_UNIT_SIZE,
-	.TxDesBufSize = GMAC_TBUFFER_UNIT_SIZE,
-	.pFrmBuffer = NULL,
-	.FrmBufferSize = GMAC_PACKET_BUFFER_SIZE,
-	.wTxHead = 0,
-	.wTxTail = 0,
-	.phy_cfg = &s_GMAC_PhyCfg,
-	.gmac_link_status = &s_GMAC_LinkStatus,
-	.gmac_cfg = &s_GMAC_Config,
-};
-
-FGmacPs_RxDescriptor_T __attribute__((section(".ocm_data")))
-__aligned(CONFIG_DCACHE_LINE_SIZE) GMAC0_RxDs[GMAC_RDES_NUM];
-FGmacPs_TxDescriptor_T __attribute__((section(".ocm_data")))
-__aligned(CONFIG_DCACHE_LINE_SIZE) GMAC0_TxDs[GMAC_TDES_NUM];
-uint8_t __aligned(CONFIG_DCACHE_LINE_SIZE) dw_tx[2 * GMAC_TDES_NUM * GMAC_RBUFFER_UNIT_SIZE];
-uint8_t __aligned(CONFIG_DCACHE_LINE_SIZE) dw_rx[2 * GMAC_RDES_NUM * GMAC_RBUFFER_UNIT_SIZE];
-uint8_t __aligned(CONFIG_DCACHE_LINE_SIZE) pack_buf[GMAC_PACKET_BUFFER_SIZE];
-
 /* 数据发送接口 */
-#define USE_GMAC_LIB_SEND 0
-#if (USE_GMAC_LIB_SEND == 1)
-static int eth_fmsh_send(const struct device *dev, struct net_pkt *pkt)
-{
-	struct eth_fmsh_data *ctx = dev->data;
-	int ret;
-
-	/* 获取发送锁 */
-	k_mutex_lock(&ctx->tx_mutex, K_FOREVER);
-	k_sem_reset(&ctx->tx_sem);
-
-	u32 size = net_pkt_get_len(pkt);
-
-	ret = net_pkt_read(pkt, pack_buf, size);
-
-	if (ret < 0) {
-		FMSH_ERROR("net_pkt_read error");
-		return ret;
-	}
-	FGmac_Ps_Send(ctx->gmac_inst, (u8 *)pack_buf, size, 0, 0);
-	FMSH_HEXDUMP("sendbuf", pack_buf, size);
-
-	/* 等待发送完成信号量 */
-	k_sem_take(&ctx->tx_sem, K_FOREVER);
-
-	k_mutex_unlock(&ctx->tx_mutex);
-
-	FMSH_DEBUG("TX end");
-	return 0;
-}
-#elif (USE_GMAC_LIB_SEND == 0)
 static int eth_fmsh_send(const struct device *dev, struct net_pkt *pkt)
 {
 	struct eth_fmsh_data *ctx = dev->data;
@@ -187,20 +107,23 @@ static int eth_fmsh_send(const struct device *dev, struct net_pkt *pkt)
 
 	return 0;
 }
-#endif
 
 static void eth_fmsh_phy_update(void *arg1, void *arg2, void *arg3)
 {
 	const struct device *dev = arg1;
 	struct eth_fmsh_data *ctx = dev->data;
+	const struct eth_fmsh_config *config = dev->config;
 
 	while (1) {
 		k_sleep(K_MSEC(1000));
 		FGmacPs_GmacLink_Updata(ctx->gmac_inst);
-		FGmacPS_Gmii2rgmii_Update_Speed(ctx->gmac_inst,
-						ctx->gmac_inst->phy_cfg->gmii2rgmii_mdio_addr1);
-		FGmacPS_Gmii2rgmii_Update_Speed(ctx->gmac_inst,
-						ctx->gmac_inst->phy_cfg->gmii2rgmii_mdio_addr2);
+		if (config->instance_id == 0) {
+			FGmacPS_Gmii2rgmii_Update_Speed(
+				ctx->gmac_inst, ctx->gmac_inst->phy_cfg->gmii2rgmii_mdio_addr1);
+		} else {
+			FGmacPS_Gmii2rgmii_Update_Speed(
+				ctx->gmac_inst, ctx->gmac_inst->phy_cfg->gmii2rgmii_mdio_addr2);
+		}
 	}
 }
 
@@ -210,7 +133,6 @@ static void eth_fmsh_rx_thread(void *arg1, void *arg2, void *arg3)
 	const struct device *dev = arg1;
 	struct eth_fmsh_data *data = dev->data;
 	int budget;
-
 	uint32_t rx_len;
 	uint8_t *rcv_packet;
 	struct net_pkt *pkt;
@@ -450,6 +372,7 @@ static void eth_fmsh_iface_init(struct net_if *iface)
 {
 	const struct device *dev = net_if_get_device(iface);
 	struct eth_fmsh_data *data = dev->data;
+	const struct eth_fmsh_config *config = dev->config;
 
 	data->iface = iface;
 
@@ -459,25 +382,45 @@ static void eth_fmsh_iface_init(struct net_if *iface)
 	net_eth_carrier_on(data->iface);
 
 	/* 设置MAC地址 */
-	net_if_set_link_addr(data->iface, data->gmac_inst->mac_address, 6, NET_LINK_ETHERNET);
-	LOG_INF("MAC address: %02x:%02x:%02x:%02x:%02x:%02x", data->gmac_inst->mac_address[0],
-		data->gmac_inst->mac_address[1], data->gmac_inst->mac_address[2],
-		data->gmac_inst->mac_address[3], data->gmac_inst->mac_address[4],
-		data->gmac_inst->mac_address[5]);
+	net_if_set_link_addr(data->iface, (uint8_t *)config->mac_address, 6, NET_LINK_ETHERNET);
+	LOG_INF("GMAC%d: MAC address: %02x:%02x:%02x:%02x:%02x:%02x", config->instance_id,
+		config->mac_address[0], config->mac_address[1], config->mac_address[2],
+		config->mac_address[3], config->mac_address[4], config->mac_address[5]);
+
+	/*  配置IP地址、子网掩码和网关  */
+	struct in_addr addr, netmask, gw;
+	struct net_if_addr *ifaddr;
+
+	/*  设置IP地址  */
+	net_addr_pton(AF_INET, config->ip_address, &addr);
+	ifaddr = net_if_ipv4_addr_add(iface, &addr, NET_ADDR_MANUAL, 0);
+
+	/*  设置子网掩码  */
+	net_addr_pton(AF_INET, config->netmask, &netmask);
+	net_if_ipv4_set_netmask_by_addr(iface, (const struct in_addr *)ifaddr, &netmask);
+
+	/*  设置网关  */
+	net_addr_pton(AF_INET, config->gateway, &gw);
+	net_if_ipv4_set_gw(iface, &gw);
 
 	data->napi_budget = 256;
 	atomic_clear(&data->rx_busy);
 
 	/* 创建接收线程 */
+	char thread_name[32];
+
+	snprintf(thread_name, sizeof(thread_name), "eth_fmsh_rx%d", config->instance_id);
 	k_thread_create(&data->rx_thread, data->rx_thread_stack, FMSH_ETH_RX_STACK_SIZE,
 			eth_fmsh_rx_thread, (void *)dev, NULL, NULL,
-			K_PRIO_COOP(FMSH_ETH_RX_THREAD_PRIORITY), 0, K_SECONDS(2));
-	k_thread_name_set(&data->rx_thread, "eth_fmsh_rx");
+			K_PRIO_COOP(FMSH_ETH_RX_THREAD_PRIORITY) + config->instance_id, 0,
+			K_SECONDS(2));
+	k_thread_name_set(&data->rx_thread, thread_name);
 
+	snprintf(thread_name, sizeof(thread_name), "eth_fmsh_phy_update%d", config->instance_id);
 	k_thread_create(&data->phy_update_thread, data->phy_update_thread_stack,
 			FMSH_ETH_PYH_STACK_SIZE, eth_fmsh_phy_update, (void *)dev, NULL, NULL,
-			K_IDLE_PRIO, 0, K_SECONDS(1));
-	k_thread_name_set(&data->phy_update_thread, "eth_fmsh_phy_update");
+			K_IDLE_PRIO + config->instance_id, 0, K_SECONDS(1));
+	k_thread_name_set(&data->phy_update_thread, thread_name);
 
 	FMSH_DEBUG("Interface init done.");
 }
@@ -495,7 +438,7 @@ void FGmacPs_GmacListener(FGmacPs_Instance_T *pGmac, int32_t ecode)
 		FMSH_ERROR("> Irq:Tx process stopped");
 		break;
 	case gdma_irq_tx_unbuffer:
-		FMSH_ERROR("> Irq:Tx Buffer Unavailable");
+		FMSH_DEBUG("> Irq:Tx Buffer Unavailable");
 		break;
 	case gdma_irq_tx_jabber_timeout:
 		FMSH_ERROR("> Irq:Tx jabber timeout");
@@ -524,7 +467,7 @@ void FGmacPs_GmacListener(FGmacPs_Instance_T *pGmac, int32_t ecode)
 		FMSH_ERROR("> Irq:Fatal bus error");
 		break;
 	case gdma_irq_early_rx:
-		FMSH_ERROR("> Irq:Early Rx interrupt");
+		FMSH_DEBUG("> Irq:Early Rx interrupt");
 		break;
 	case gdma_irq_gli: /* not finished */
 		FMSH_ERROR("> Irq:GMAC Line Interface Interrupt");
@@ -555,14 +498,14 @@ void FGmacPs_GmacTxCallback(FGmacPs_Instance_T *pGmac, int32_t ecode)
 static int eth_fmsh_init(const struct device *dev)
 {
 	struct eth_fmsh_data *data = dev->data;
+	const struct eth_fmsh_config *cfg = dev->config;
 	int ret;
 
 	/* 初始化信号量 */
 	k_sem_init(&data->tx_sem, 0, 1);
 	k_sem_init(&data->rx_sem, 0, 1);
 
-	data->gmac_inst = &s_GMAC_Instance;
-	data->gmac_inst->pFrmBuffer = pack_buf;
+	data->gmac_inst->pFrmBuffer = data->packet_buffer;
 
 	FGmac_Ps_phy_Init(data->gmac_inst->phy_cfg);
 	ret = FGmac_Ps_DeviceReset(data->gmac_inst);
@@ -571,7 +514,8 @@ static int eth_fmsh_init(const struct device *dev)
 		return -EIO;
 	}
 
-	ret = FGmac_Ps_DmaInit(data->gmac_inst, GMAC0_RxDs, dw_rx, GMAC0_TxDs, dw_tx);
+	ret = FGmac_Ps_DmaInit(data->gmac_inst, data->rx_descs, data->rx_buffer, data->tx_descs,
+			       data->tx_buffer);
 
 	if (ret != 0) {
 		FMSH_ERROR("DMA init failed");
@@ -596,16 +540,8 @@ static int eth_fmsh_init(const struct device *dev)
 		return -EIO;
 	}
 
-	FGmacPs_GmacLink_Updata(data->gmac_inst);
-	FGmacPS_Gmii2rgmii_Update_Speed(data->gmac_inst,
-					data->gmac_inst->phy_cfg->gmii2rgmii_mdio_addr1);
-	FGmacPS_Gmii2rgmii_Update_Speed(data->gmac_inst,
-					data->gmac_inst->phy_cfg->gmii2rgmii_mdio_addr2);
-
 	/* 配置中断 */
-	IRQ_CONNECT(DT_INST_IRQN(0), DT_INST_IRQ(0, priority), eth_fmsh_isr, DEVICE_DT_INST_GET(0),
-		    0);
-	irq_enable(DT_INST_IRQN(0));
+	cfg->irq_config_fn();
 
 	FMSH_DEBUG("eth Init done");
 
@@ -623,15 +559,87 @@ static const struct ethernet_api eth_fmsh_api = {
 
 /* 设备定义 */
 #define ETH_FMSH_INIT(n)                                                                           \
+                                                                                                   \
+	FGmacPs_RxDescriptor_T __attribute__((section(".ocm_data")))                               \
+	__aligned(CONFIG_DCACHE_LINE_SIZE) GMAC0_RxDs_##n[GMAC_RDES_NUM];                          \
+	FGmacPs_TxDescriptor_T __attribute__((section(".ocm_data")))                               \
+	__aligned(CONFIG_DCACHE_LINE_SIZE) GMAC0_TxDs_##n[GMAC_TDES_NUM];                          \
+	uint8_t __aligned(CONFIG_DCACHE_LINE_SIZE)                                                 \
+	dw_tx_##n[2 * GMAC_TDES_NUM * GMAC_RBUFFER_UNIT_SIZE];                                     \
+	uint8_t __aligned(CONFIG_DCACHE_LINE_SIZE)                                                 \
+	dw_rx_##n[2 * GMAC_RDES_NUM * GMAC_RBUFFER_UNIT_SIZE];                                     \
+	uint8_t __aligned(CONFIG_DCACHE_LINE_SIZE) pack_buf_##n[GMAC_PACKET_BUFFER_SIZE];          \
+                                                                                                   \
+	static FGmacPs_LinkStatus_T s_GMAC_LinkStatus_##n;                                         \
+                                                                                                   \
+	static FGmacPs_Config_T s_GMAC_Config_##n = {                                              \
+		.DeviceId = n,                                                                     \
+		.BaseAddress = DT_INST_REG_ADDR(n),                                                \
+		.Speed = FPAR_GMACPS_0_SPEED,                                                      \
+		.InterFaceType = FPAR_GMACPS_0_INTERFACE,                                          \
+	};                                                                                         \
+                                                                                                   \
+	static FGmacPs_PhyConfig_T s_GMAC_PhyCfg_##n = {                                           \
+		.phy_device = PHY_YT8521,                                                          \
+		.speed = FPAR_GMACPS_0_SPEED,                                                      \
+		.auto_detect_ad_en = 1,                                                            \
+		.mdio_address = DT_INST_PROP(n, mdio_addr),                                        \
+		.gmii2rgmii_mdio_addr1 = DT_INST_PROP(n, gmii2rgmii_addr1),                        \
+		.gmii2rgmii_mdio_addr2 = DT_INST_PROP(n, gmii2rgmii_addr2),                        \
+		.phy_mode = DT_INST_PROP(n, phy_mode),                                             \
+		.phy_delay = DT_INST_PROP(n, phy_delay),                                           \
+		.auto_nag_en = 1,                                                                  \
+		.interface = FPAR_GMACPS_0_INTERFACE,                                              \
+	};                                                                                         \
+                                                                                                   \
+	static FGmacPs_Instance_T s_GMAC_Instance_##n = {                                          \
+		.index = n,                                                                        \
+		.base_address = (void *)DT_INST_REG_ADDR(n),                                       \
+		.mdio_base_address = (void *)DT_INST_REG_ADDR(n),                                  \
+		.mac_address = DT_INST_PROP(n, local_mac_address),                                 \
+		.csr_clk = GMAC_CSR_CLK,                                                           \
+		.wRxListSize = GMAC_RDES_NUM,                                                      \
+		.wTxListSize = GMAC_TDES_NUM,                                                      \
+		.RxDesBufSize = GMAC_RBUFFER_UNIT_SIZE,                                            \
+		.TxDesBufSize = GMAC_TBUFFER_UNIT_SIZE,                                            \
+		.pFrmBuffer = NULL,                                                                \
+		.FrmBufferSize = GMAC_PACKET_BUFFER_SIZE,                                          \
+		.wTxHead = 0,                                                                      \
+		.wTxTail = 0,                                                                      \
+		.phy_cfg = &s_GMAC_PhyCfg_##n,                                                     \
+		.gmac_link_status = &s_GMAC_LinkStatus_##n,                                        \
+		.gmac_cfg = &s_GMAC_Config_##n,                                                    \
+	};                                                                                         \
+                                                                                                   \
+	static struct eth_fmsh_data eth_fmsh_runtime_##n = {                                       \
+		.gmac_inst = &s_GMAC_Instance_##n,                                                 \
+		.rx_descs = GMAC0_RxDs_##n,                                                        \
+		.tx_descs = GMAC0_TxDs_##n,                                                        \
+		.tx_buffer = dw_tx_##n,                                                            \
+		.rx_buffer = dw_rx_##n,                                                            \
+		.packet_buffer = pack_buf_##n,                                                     \
+	};                                                                                         \
+                                                                                                   \
+	static void eth_fmsh_irq_init_##n(void)                                                    \
+	{                                                                                          \
+		IRQ_CONNECT(DT_INST_IRQN(n), DT_INST_IRQ(n, priority), eth_fmsh_isr,               \
+			    DEVICE_DT_INST_GET(n), 0);                                             \
+		irq_enable(DT_INST_IRQN(n));                                                       \
+	}                                                                                          \
+                                                                                                   \
 	static const struct eth_fmsh_config eth_fmsh_config_##n = {                                \
 		.base_addr = DT_INST_REG_ADDR(n),                                                  \
 		.irq_num = DT_INST_IRQN(n),                                                        \
 		.irq_priority = DT_INST_IRQ(n, priority),                                          \
+		.instance_id = n,                                                                  \
+		.mac_address = DT_INST_PROP(n, local_mac_address),                                 \
+		.ip_address = DT_INST_PROP(n, local_ip_address),                                   \
+		.netmask = DT_INST_PROP(n, local_netmask),                                         \
+		.gateway = DT_INST_PROP(n, local_gateway),                                         \
+		.irq_config_fn = eth_fmsh_irq_init_##n,                                            \
 	};                                                                                         \
                                                                                                    \
-	static struct eth_fmsh_data eth_fmsh_runtime_##n;                                          \
-                                                                                                   \
-	ETH_NET_DEVICE_DT_INST_DEFINE(0, eth_fmsh_init, NULL, &eth_fmsh_runtime_##n,               \
+	ETH_NET_DEVICE_DT_INST_DEFINE(n, eth_fmsh_init, NULL, &eth_fmsh_runtime_##n,               \
 				      &eth_fmsh_config_##n, CONFIG_ETH_INIT_PRIORITY,              \
 				      &eth_fmsh_api, NET_ETH_MTU);
 

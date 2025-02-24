@@ -51,3 +51,18 @@ properties:
     type: int
     required: true
     description: "PHY delay configuration value (hex)"
+
+  local-ip-address:
+    type: string
+    required: true
+    description: "Static IP address"
+
+  local-netmask:
+    type: string
+    required: true
+    description: "Network mask"
+
+  local-gateway:
+    type: string
+    required: true
+    description: "Gateway address"

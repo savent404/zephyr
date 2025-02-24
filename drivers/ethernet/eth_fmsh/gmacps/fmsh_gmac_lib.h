@@ -38,7 +38,7 @@
 #define GMAC_TXPACKET_BUFFER_SIZE 1600 /* TxPacketBuffer size */
 #define GMAC_RBUFFER_UNIT_SIZE    1600 /* size for each Rx buffer;must be a multiple of 4,8 or 16 */
 #define GMAC_TBUFFER_UNIT_SIZE    1600
-
+#define GMAC_CSR_CLK              5
 #define GMAC_POLL_MAX 512
 
 /* return code */
@@ -260,12 +260,13 @@ typedef void (*FMSH_callback)(void *pDev, int32_t eCode);
 
 /* gmac link status struct */
 typedef struct _ethernet_link_status {
-	u8 smidrxs;        /* Delay SMII RX Data Sampling with respect to the SMII SYNC Signal */
-	u8 fals_car_dect;  /* False Carrier Detected */
-	u8 jabber_timeout; /* RT */
-	u8 link_status;    /* RT */
-	u8 link_speed;     /* RT */
-	u32 link_mod;      /* RT */
+	u8 smidrxs;         /* Delay SMII RX Data Sampling with respect to the SMII SYNC Signal */
+	u8 fals_car_dect;   /* False Carrier Detected */
+	u8 jabber_timeout;  /* RT */
+	u8 link_status;     /* RT */
+	u8 link_speed;      /* RT */
+	u8 last_link_speed; /* RT */
+	u32 link_mod;       /* RT */
 } FGmacPs_LinkStatus_T;
 
 /* gmac config */
@@ -321,6 +322,7 @@ typedef struct _phy_config {
 typedef struct _gmac_instance_s {
 	u8 index;
 	void *base_address;
+	void *mdio_base_address;
 
 	/* tx */
 	u8 *pTxBuffer;                                                 /* point to TxBuffer */

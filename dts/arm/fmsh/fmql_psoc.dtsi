@@ -272,6 +272,21 @@
 			phy-delay = <0x2000>;
 			status = "disabled";
 		};
+
+		ethernet1: ethernet@e0049000 {
+			compatible = "snps,fmsh-gmac";
+			reg = <0xe0049000 0x2000>;
+			interrupts = <GIC_SPI 40 IRQ_TYPE_LEVEL IRQ_DEFAULT_PRIORITY>;
+			interrupt-names = "irq_0";
+			clock-frequency = <25000000>;
+			phy-handle = <&phy0>;
+			mdio-addr = <3>;
+			gmii2rgmii-addr1 = <0x8>;
+			gmii2rgmii-addr2 = <0x9>;
+			phy-mode = "utp";  /* fiber or utp */
+			phy-delay = <0x2000>;
+			status = "disabled";
+		};
 	};
 
 	slcr: slcr@e0026000 {

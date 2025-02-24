@@ -22,7 +22,7 @@ u8 fmsh_mdio_idle(FGmacPs_Instance_T *pGmac)
 		reg = FMSH_IN32_32(pGmacPortMap->GMAC_GAR);
 		phy_timeout++;
 		if (phy_timeout > FMSH_ENET_PHY_TIMEOUT) {
-			FMSH_DEBUG("GMII busy timeout \r\n");
+			FMSH_ERROR("GMII busy timeout \r\n");
 			return ETHERNET_PHY_TIMEOUT;
 		}
 		FMSH_DELAY_MS(1);
@@ -55,7 +55,7 @@ u8 fmsh_mdio_init(FGmacPs_Instance_T *pGmac)
 
 	if (pPhyConfig->auto_detect_ad_en == 1) {
 		if (ETHERNET_PHY_ERR == fmsh_mdio_device_detect(pGmac)) {
-			FMSH_DEBUG("PHY detect fail \r\n");
+			FMSH_ERROR("PHY detect fail \r\n");
 		} else {
 			FMSH_DEBUG("PHY detected, address 0x%x \r\n", pPhyConfig->mdio_address);
 		}
@@ -67,7 +67,6 @@ u8 fmsh_mdio_init(FGmacPs_Instance_T *pGmac)
 	phy_timeout = 0;
 	do {
 		reg = fmsh_mdio_read(pGmac, ENET_PHY_ID1);
-		/* reg=mic_phy_read(pGmac,2); */
 		phy_timeout++;
 		if (phy_timeout > FMSH_ENET_PHY_TIMEOUT) {
 			FMSH_DEBUG("PHY ID read timeout \r\n");

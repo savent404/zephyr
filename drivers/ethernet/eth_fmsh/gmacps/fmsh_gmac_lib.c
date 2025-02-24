@@ -345,10 +345,29 @@ u8 FGmac_Ps_MacInit(FGmacPs_Instance_T *pGmac)
 	 * step 3 : program to control PHY
 	 * ------------------------------
 	 */
-	pPhyConfig->phy_op_init(pGmac);
-	pPhyConfig->phy_op_cfg(pGmac);
-	pPhyConfig->phy_op_reset(pGmac);
 
+	/*
+	 * Note: This PHY configuration is specific to GMAC0 interface.
+	 * GMAC0 requires initialization of both PHY ports (mdio address 1 and 3)
+	 * to support dual-port operation.
+	 * This design choice is based on hardware architecture where GMAC0 acts as
+	 * the primary interface handling dual PHY ports.
+	 */
+	if (pGmac->base_address == (void *)FPAR_GMACPS_0_BASEADDR) {
+		int mdio = pPhyConfig->mdio_address;
+
+		pPhyConfig->mdio_address = 1;
+		pPhyConfig->phy_op_init(pGmac);
+		pPhyConfig->phy_op_cfg(pGmac);
+		pPhyConfig->phy_op_reset(pGmac);
+
+		pPhyConfig->mdio_address = 3;
+		pPhyConfig->phy_op_init(pGmac);
+		pPhyConfig->phy_op_cfg(pGmac);
+		pPhyConfig->phy_op_reset(pGmac);
+
+		pPhyConfig->mdio_address = mdio;
+	}
 	/*
 	 * ----------------------------
 	 * step 5 : set MAC address

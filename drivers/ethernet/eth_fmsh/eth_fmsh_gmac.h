@@ -27,17 +27,22 @@ struct eth_fmsh_gmac_config {
 	const struct device *phy_dev;
 };
 
+typedef void (*eth_config_irq_t)(void);
+
 /* 驱动配置结构体 */
 struct eth_fmsh_config {
-	uint32_t base_addr;    /* 寄存器基地址 */
-	uint32_t irq_num;      /* 中断号 */
-	uint32_t irq_priority; /* 中断优先级 */
-	uint32_t mac_speed;    /* MAC速度 */
-	uint32_t phy_addr;     /* PHY地址 */
-	uint32_t feature0;     /* 硬件特性寄存器0 */
-	uint32_t feature1;     /* 硬件特性寄存器1 */
-	uint32_t feature2;     /* 硬件特性寄存器2 */
-	uint32_t feature3;     /* 硬件特性寄存器3 */
+	uint32_t instance_id;    /* GMAC实例号 */
+	uint32_t base_addr;      /* 寄存器基地址 */
+	uint32_t mdio_base_addr; /* mdio寄存器基地址 */
+	uint32_t irq_num;        /* 中断号 */
+	uint32_t irq_priority;   /* 中断优先级 */
+	uint32_t mac_speed;      /* MAC速度 */
+	uint32_t phy_addr;       /* PHY地址 */
+	uint8_t mac_address[6];  /* MAC地址 */
+	uint8_t *ip_address;     /* IP地址 */
+	uint8_t *netmask;        /* 子网掩码 */
+	uint8_t *gateway;        /* 网关地址 */
+	eth_config_irq_t irq_config_fn;
 };
 
 /* 驱动运行时数据结构体 */
@@ -73,6 +78,12 @@ struct eth_fmsh_data {
 
 	atomic_t rx_busy; /* NAPI处理状态标志 */
 	int napi_budget;  /* 单次处理配额 */
+
+	FGmacPs_RxDescriptor_T *rx_descs;
+	FGmacPs_TxDescriptor_T *tx_descs;
+	uint8_t *tx_buffer;
+	uint8_t *rx_buffer;
+	uint8_t *packet_buffer;
 };
 
 #endif /* ZEPHYR_DRIVERS_ETHERNET_ETH_FMSH_H_ */
