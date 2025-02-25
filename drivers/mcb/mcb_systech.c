@@ -33,16 +33,9 @@ static inline void mcb_write_unsafe(uint32_t value, uint32_t addr)
 
 static inline uint32_t mcb_read(uint32_t addr)
 {
-	volatile uint32_t val;
-#if CONFIG_MCB_SYSTECH_HW_WORKAROUND
-	/* FIXME: bus bandwidth is 10Mbps, needs delay for a while
-	 */
-	k_busy_wait(20);
-	val = sys_read32(addr);
-	k_busy_wait(20);
-#endif
-	val = sys_read32(addr);
+	uint32_t val;
 
+	val = sys_read32(addr);
 	return val;
 }
 
