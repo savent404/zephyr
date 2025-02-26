@@ -74,14 +74,8 @@ void mcb_systech_reset(const struct device *dev, uint8_t role)
 	mcb_write(0, reg_base + MCB_REG_STATUS1);
 	mcb_write(0, reg_base + MCB_REG_I_A_COUNT);
 	mcb_write(0, reg_base + MCB_REG_I_B_COUNT);
-
-	for (uint32_t addr = MCB_REG_PORT_MASK0; addr <= MCB_REG_PORT_MASK3; addr += 4) {
-		mcb_write(0, reg_base + addr);
-	}
-
-	for (uint32_t addr = MCB_REG_PORT_RDY_MASK0; addr <= MCB_REG_PORT_RDY_MASK3; addr += 4) {
-		mcb_write(0, reg_base + addr);
-	}
+	mcb_write(0, reg_base + MCB_REG_PORT_MASK0);
+	mcb_write(0, reg_base + MCB_REG_PORT_RDY_MASK0);
 
 	/* FIXME: Set DT and DR via DeviceTree or user configuration */
 	switch (role) {

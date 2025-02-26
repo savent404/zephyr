@@ -23,12 +23,12 @@
 #if CONFIG_MCB_SYSTECH_HW_WORKAROUND
 #define PORT_ID_DISC 0x00
 #endif
-#define PORT_ID_CFG  0x10
-#define PORT_ID_IO   0x40
-#define PORT_ID_ETH0 0x60
-#define PORT_ID_ETH1 0x61
-#define PORT_ID_ETH2 0x62
-#define PORT_ID_ETH3 0x63
+#define PORT_ID_CFG  0x08
+#define PORT_ID_IO   0x01
+#define PORT_ID_ETH0 0x10
+#define PORT_ID_ETH1 0x11
+#define PORT_ID_ETH2 0x12
+#define PORT_ID_ETH3 0x13
 
 /* Make sure that compile is satisfied */
 #define REG_BUF_REG_DEF(name, length)                                                              \

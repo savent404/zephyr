@@ -17,49 +17,15 @@
 #define MCB_REG_DEVICE_INF1    0x0018
 #define MCB_REG_DEVICE_INF2    0x001C
 #define MCB_REG_PORT_MASK0     0x0020
-#define MCB_REG_PORT_MASK1     0x0024
-#define MCB_REG_PORT_MASK2     0x0028
-#define MCB_REG_PORT_MASK3     0x002C
-#define MCB_REG_PORT_RDY_MASK0 0x0030
-#define MCB_REG_PORT_RDY_MASK1 0x0034
-#define MCB_REG_PORT_RDY_MASK2 0x0038
-#define MCB_REG_PORT_RDY_MASK3 0x003C
-#define MCB_REG_PORT_W_MASK0   0x0040
-#define MCB_REG_PORT_W_MASK1   0x0044
-#define MCB_REG_PORT_W_MASK2   0x0048
-#define MCB_REG_PORT_W_MASK3   0x004C
-#define MCB_PORT_MAP(n)        mcb_port_map_(n)
-#define MCB_REG_PORT_RX_LEN(n) (0x50 + MCB_PORT_MAP(n) * 16)
-#define MCB_REG_PORT_RX_MAX(n) (0x54 + MCB_PORT_MAP(n) * 16)
-#define MCB_REG_PORT_TX_LEN(n) (0x58 + MCB_PORT_MAP(n) * 16)
-#define MCB_REG_PORT_RX_SID(n) (0x5C + MCB_PORT_MAP(n) * 16)
+#define MCB_REG_PORT_RDY_MASK0 0x0040
+#define MCB_REG_PORT_W_MASK0   0x0060
+#define MCB_PORT_MAP(n)        (n)
+#define MCB_REG_PORT_RX_LEN(n) (0x100 + MCB_PORT_MAP(n) * 4)
+#define MCB_REG_PORT_RX_MAX(n) (0x200 + MCB_PORT_MAP(n) * 4)
+#define MCB_REG_PORT_TX_LEN(n) (0x300 + MCB_PORT_MAP(n) * 4)
+#define MCB_REG_PORT_RX_SID(n) (0x400 + MCB_PORT_MAP(n) * 4)
 #define MCB_REG_PORT_RX(n)     (MCB_PORT_MAP(n) * 0x800)
 #define MCB_REG_PORT_TX(n)     (MCB_PORT_MAP(n) * 0x800)
-
-static inline uint32_t mcb_port_map_(uint32_t raw)
-{
-	switch (raw) {
-	case 0:
-		return 0;
-	case 0x10:
-		return 1;
-	case 0x40:
-		return 2;
-	case 0x60:
-		return 3;
-	case 0x61:
-		return 4;
-	case 0x62:
-		return 5;
-	case 0x63:
-		return 6;
-	default:
-		break;
-	}
-
-	printk("Invalid port number: %d\n", raw);
-	return 0xFF;
-}
 
 /* For MCB_CTRL1 */
 #define b_MCB_CTRL1_TxEN       BIT(0)
