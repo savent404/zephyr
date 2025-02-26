@@ -3,15 +3,57 @@
 using namespace adc7124_8;
 
 
+template <>
+uint32_t adc::spi_r_<1>(cmd c)
+{
+    return spi_->read8(c());
+}
+template <>
+uint32_t adc::spi_r_<2>(cmd c)
+{
+    return spi_->read16(c());
+}
+template <>
+uint32_t adc::spi_r_<3>(cmd c)
+{
+    return spi_->read24(c());
+}
+template <>
+uint32_t adc::spi_r_<4>(cmd c)
+{
+    return spi_->read32(c());
+}
+template <>
+void adc::spi_w_<1>(cmd c, uint32_t data)
+{
+    spi_->write8(c(), data);
+}
+template <>
+void adc::spi_w_<2>(cmd c, uint32_t data)
+{
+    spi_->write16(c(), data);
+}
+template <>
+void adc::spi_w_<3>(cmd c, uint32_t data)
+{
+    spi_->write24(c(), data);
+}
+template <>
+void adc::spi_w_<4>(cmd c, uint32_t data)
+{
+    spi_->write32(c(), data);
+}
+
 bool adc::check_id(void)
 {
     uint8_t res;
-    return spi_->read8(cmd{true, true, reg::REG_ID}()) == 0x17;
+    r_<1>(cmd{true, true, reg::REG_ID}, &res);
+    return res == 0x17;
 }
 
 uint8_t adc::read_status(void)
 {
-    return spi_->read8(cmd{true, true, reg::REG_STATUS}());
+    return spi_r_<1>(cmd{true, true, reg::REG_STATUS});
 }
 
 bool adc::status_is_data_ready(uint8_t status)
@@ -39,7 +81,7 @@ bool adc::read_data(uint32_t *data, uint8_t *status)
         if (!data || !status) {
             return false;
         }
-        t = spi_->read32(cmd{true, true, reg::REG_DATA}());
+        t = spi_r_<4>(cmd{true, true, reg::REG_DATA});
         *data = t & 0x00'FF'FF'FF;
         *status = (t & 0xFF'00'00'00) >> 24;
         res = t & 0x80'00'00'00 ? false : true;
@@ -47,7 +89,7 @@ bool adc::read_data(uint32_t *data, uint8_t *status)
         if (!data) {
             return false;
         }
-        *data = spi_->read24(cmd{true, true, reg::REG_DATA}());
+        *data = spi_r_<3>(cmd{true, true, reg::REG_DATA});
         res = true;
     }
     return res;
@@ -55,7 +97,7 @@ bool adc::read_data(uint32_t *data, uint8_t *status)
 
 uint32_t adc::read_diag(void)
 {
-    return spi_->read24(cmd{true, true, reg::REG_ERR}());
+    return spi_r_<3>(cmd{true, true, reg::REG_ERR});
 }
 
 void adc::adc_config(adc_clock_ref clk_ref, adc_mode mode, bool internal_vol_ref, bool data_with_status, adc_pwr_mode pwr_mode)
@@ -66,7 +108,7 @@ void adc::adc_config(adc_clock_ref clk_ref, adc_mode mode, bool internal_vol_ref
     p |= (internal_vol_ref ? 0 : 1);
     p |= (data_with_status ? 0 : 1);
     p |= (static_cast<uint8_t>(pwr_mode) << 6);
-    spi_->write8(cmd{true, false, reg::REG_ADC_CTRL}(), p);
+    spi_w_<1>(cmd{true, false, reg::REG_ADC_CTRL}, p);
 }
 
 void adc::cha_config(uint8_t ch, bool enable, const cha_filter_param &param)
@@ -83,7 +125,7 @@ void adc::cha_config(uint8_t ch, bool enable, const cha_filter_param &param)
         p |= (ch*2 << 5);
         p |= (ch*2 + 1);
     }
-    spi_->write16(c(), p);
+    spi_w_<2>(c, p);
 
     cmd f{true, false, (reg)((uint8_t)reg::REG_FILTER_0 + ch)};
     uint32_t f_val = 0;
@@ -92,11 +134,11 @@ void adc::cha_config(uint8_t ch, bool enable, const cha_filter_param &param)
     f_val |= (static_cast<uint8_t>(param.post) & 0x7) << 17;
     f_val |= (param.reject_50_60Hz ? BIT(20) : 0);
     f_val |= (static_cast<uint8_t>(param.type) & 0x7) << 21;
-    spi_->write24(f(), f_val);
+    spi_w_<3>(f, f_val);
 }
 
 void adc::diag_config(uint32_t diag_mask)
 {
-    spi_->write24(cmd{true, false, reg::REG_ERR_EN}(), diag_mask & 0x7F'FF'FF);
+    spi_w_<3>(cmd{true, false, reg::REG_ERR_EN}, diag_mask & 0x7F'FF'FF);
 }
 

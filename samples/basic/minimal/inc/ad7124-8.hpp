@@ -162,11 +162,23 @@ struct adc {
     void diag_config(uint32_t diag_mask);
 
 private:
-    template <int bytes, typename T>
-    bool r_(cmd c, T* ptr, bool check_crc = false);
+    template <int bytes>
+    uint32_t spi_r_(cmd c);
+    template <int bytes>
+    void spi_w_(cmd c, uint32_t data);
 
     template <int bytes, typename T>
-    void w_(cmd c, T ptr, bool check_crc = false);
+    bool r_(cmd c, T* ptr, bool check_crc = false)
+    {
+        *ptr = spi_r_<bytes>(c);
+        return true;
+    }
+
+    template <int bytes, typename T>
+    void w_(cmd c, T ptr)
+    {
+        spi_w_<bytes>(c, ptr);
+    }
 
     spi_iface *spi_;
     bool data_with_status_ = false;
