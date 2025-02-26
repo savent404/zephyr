@@ -181,7 +181,7 @@ struct crc_validator {
 struct adc {
     explicit adc(spi_iface *spi) : spi_(spi) {}
 
-    bool check_id(void);
+    bool is_alive(void);
     uint8_t read_status(void);
     bool status_is_data_ready(uint8_t status);
     uint8_t status_has_error(uint8_t status);

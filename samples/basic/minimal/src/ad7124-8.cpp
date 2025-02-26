@@ -44,7 +44,7 @@ void adc::spi_w_<4>(cmd c, uint32_t data)
     spi_->write32(c(), data);
 }
 
-bool adc::check_id(void)
+bool adc::is_alive(void)
 {
     uint8_t res = 0;
 

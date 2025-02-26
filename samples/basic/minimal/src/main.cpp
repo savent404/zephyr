@@ -22,7 +22,7 @@ struct spi_iface_zephyr: public spi_iface {
 	}
 	virtual ~spi_iface_zephyr() {}
 
-	bool xfer(uint8_t *tx, uint8_t *rx, uint8_t tx_size, uint8_t rx_size);
+	bool xfer(uint8_t *tx, uint8_t *rx, uint8_t tx_size, uint8_t rx_size) override;
 	uint8_t read8(uint8_t cmd) override;
 	uint16_t read16(uint8_t cmd) override;
 	uint32_t read24(uint8_t cmd) override;
@@ -56,7 +56,7 @@ int main(void)
 
 	adc7124_8::adc adc(&spi);
 
-	if (adc.check_id()) {
+	if (adc.is_alive()) {
 		printk("ADC7124 detected\n");
 	} else {
 		printk("ADC7124 not detected\n");

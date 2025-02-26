@@ -33,7 +33,7 @@ struct backend_cb {
 	size_t counter;
 	bool panic;
 	bool keep_msgs;
-	bool check_id;
+	bool is_alive;
 	uint32_t exp_id[100];
 	bool check_timestamp;
 	uint32_t exp_timestamps[100];
