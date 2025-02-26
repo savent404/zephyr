@@ -79,7 +79,7 @@ int main(void)
 			.reject_50_60Hz = true,
 			.post = post_filter::post_filter_47hz,
 			.single_cycle = false,
-			.fs = 0x4,
+			.fs = 256,
 		};
 		for (int i = 0; i < 8; i++) {
 			adc.cha_config(i, true, param);
