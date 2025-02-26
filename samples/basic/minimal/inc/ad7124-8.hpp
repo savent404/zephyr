@@ -159,6 +159,25 @@ private:
     uint8_t cmd_;
 };
 
+
+struct crc_validator {
+    static inline uint8_t crc8(uint8_t *data, uint8_t len) {
+        uint8_t crc = 0;
+        for (uint8_t i = 0; i < len; i++) {
+            crc ^= data[i];
+            for (int j = 0; j < 8; j++) {
+                if (crc & 0x80) {
+                    crc = (crc << 1) ^ 0x07;
+                } else {
+                    crc <<= 1;
+                }
+            }
+        }
+        return crc;
+    }
+
+};
+
 struct adc {
     explicit adc(spi_iface *spi) : spi_(spi) {}
 
@@ -167,9 +186,9 @@ struct adc {
     bool status_is_data_ready(uint8_t status);
     uint8_t status_has_error(uint8_t status);
     uint8_t status_get_curr_cha(uint8_t status);
-    bool read_data(uint32_t *data, uint8_t *status);
+    bool read_data(uint32_t *data);
     uint32_t read_diag(void);
-    void adc_config(adc_clock_ref clk_ref, adc_mode mode, bool internal_vol_ref, bool data_with_status, adc_pwr_mode pwr_mode = adc_pwr_mode::ADC_PWR_MODE_FULL);
+    void adc_config(adc_clock_ref clk_ref, adc_mode mode, bool internal_vol_ref, adc_pwr_mode pwr_mode = adc_pwr_mode::ADC_PWR_MODE_FULL);
     void cha_config(uint8_t ch, bool enable, const cha_filter_param &param, adc_pin_mux mux);
     void diag_config(uint32_t diag_mask);
 
@@ -193,7 +212,6 @@ private:
     }
 
     spi_iface *spi_;
-    bool data_with_status_ = false;
 };
 
 

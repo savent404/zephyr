@@ -46,14 +46,18 @@ void adc::spi_w_<4>(cmd c, uint32_t data)
 
 bool adc::check_id(void)
 {
-    uint8_t res;
+    uint8_t res = 0;
+
     r_<1>(cmd{true, true, reg::REG_ID}, &res);
     return res == 0x17;
 }
 
 uint8_t adc::read_status(void)
 {
-    return spi_r_<1>(cmd{true, true, reg::REG_STATUS});
+    uint8_t t = 0;
+
+    r_<1>(cmd{true, true, reg::REG_STATUS}, &t);
+    return t;
 }
 
 bool adc::status_is_data_ready(uint8_t status)
@@ -72,42 +76,31 @@ uint8_t adc::status_get_curr_cha(uint8_t status)
     return status & 0x0F;
 }
 
-bool adc::read_data(uint32_t *data, uint8_t *status)
+bool adc::read_data(uint32_t *data)
 {
     bool res;
-    uint32_t t;
 
-    if (data_with_status_) {
-        if (!data || !status) {
-            return false;
-        }
-        t = spi_r_<4>(cmd{true, true, reg::REG_DATA});
-        *data = t & 0x00'FF'FF'FF;
-        *status = (t & 0xFF'00'00'00) >> 24;
-        res = t & 0x80'00'00'00 ? false : true;
-    } else {
-        if (!data) {
-            return false;
-        }
-        *data = spi_r_<3>(cmd{true, true, reg::REG_DATA});
-        res = true;
-    }
+    res = r_<3>(cmd{true, true, reg::REG_DATA}, data);
     return res;
 }
 
 uint32_t adc::read_diag(void)
 {
     return spi_r_<3>(cmd{true, true, reg::REG_ERR});
+
+    uint8_t t = 0;
+
+    r_<1>(cmd{true, true, reg::REG_ERR}, &t);
+    return t;
 }
 
-void adc::adc_config(adc_clock_ref clk_ref, adc_mode mode, bool internal_vol_ref, bool data_with_status, adc_pwr_mode pwr_mode)
+void adc::adc_config(adc_clock_ref clk_ref, adc_mode mode, bool internal_vol_ref, adc_pwr_mode pwr_mode)
 {
     uint8_t p = 0;
-    p |= (static_cast<uint8_t>(clk_ref) << 6);
-    p |= (static_cast<uint8_t>(mode) << 3);
-    p |= (internal_vol_ref ? 0 : 1);
-    p |= (data_with_status ? 0 : 1);
-    p |= (static_cast<uint8_t>(pwr_mode) << 6);
+    p |= (static_cast<uint8_t>(clk_ref) << 0);
+    p |= ((static_cast<uint8_t>(mode) & 0x7) << 2);
+    p |= ((static_cast<uint8_t>(pwr_mode) & 0x3) << 6);
+    p |= (internal_vol_ref ? 0 : BIT(8));
     spi_w_<1>(cmd{true, false, reg::REG_ADC_CTRL}, p);
 }
 

@@ -65,8 +65,7 @@ int main(void)
 	{
 		using namespace adc7124_8;
 
-		/* FIXME: data_with_status is not working */
-		adc.adc_config(adc_clock_ref::ADC_CLK_REF_INT, adc_mode::ADC_MODE_ONESHOT, true, false);
+		adc.adc_config(adc_clock_ref::ADC_CLK_REF_INT, adc_mode::ADC_MODE_ONESHOT, true);
 
 		/* FIXME: enable diag will block channel convert, need to handle diag firstly, then we can enable diag check */
 #if 0
@@ -107,7 +106,7 @@ int main(void)
 		diag = adc.read_diag();
 
 		/* Read data */
-		if (adc.read_data(&val, &status) != true) {
+		if (adc.read_data(&val) != true) {
 			printk("Error reading data: status %02X\n", status);
 			continue;
 		}
