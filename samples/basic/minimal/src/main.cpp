@@ -82,7 +82,7 @@ int main(void)
 			.fs = 256,
 		};
 		for (int i = 0; i < 8; i++) {
-			adc.cha_config(i, true, param);
+			adc.cha_config(i, true, param, adc_pin_mux::ADC_PIN_MUX_DIFF_AUTO);
 		}
 	}
 

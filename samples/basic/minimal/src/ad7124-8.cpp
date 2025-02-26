@@ -111,7 +111,7 @@ void adc::adc_config(adc_clock_ref clk_ref, adc_mode mode, bool internal_vol_ref
     spi_w_<1>(cmd{true, false, reg::REG_ADC_CTRL}, p);
 }
 
-void adc::cha_config(uint8_t ch, bool enable, const cha_filter_param &param)
+void adc::cha_config(uint8_t ch, bool enable, const cha_filter_param &param, adc_pin_mux mux)
 {
 
     cmd c{true, false, (reg)((uint8_t)reg::REG_CHA_0 + ch)};
@@ -122,8 +122,15 @@ void adc::cha_config(uint8_t ch, bool enable, const cha_filter_param &param)
     if (enable) {
         p |= 0x8000;
         p |= (ch << 12); /* use different setup as default */
-        p |= (ch*2 << 5);
-        p |= (ch*2 + 1);
+
+        if (mux == adc_pin_mux::ADC_PIN_MUX_DIFF_AUTO) {
+            p |= (ch*2 << 5);
+            p |= (ch*2 + 1);
+        } else {
+            uint8_t _c = static_cast<uint8_t>(mux) & 0x7;
+            p |= (_c << 5);
+            p |= (_c + 1);
+        }
     }
     spi_w_<2>(c, p);
 

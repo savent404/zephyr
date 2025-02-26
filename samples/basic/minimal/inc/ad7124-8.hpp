@@ -95,6 +95,18 @@ enum class adc_clock_ref : uint8_t {
 	ADC_CLK_EXT_DIV4 = 3,
 };
 
+enum class adc_pin_mux: uint8_t {
+    ADC_PIN_MUX_DIFF_0 = 0, /* asign channel to use AI+0 and AI-1 */
+    ADC_PIN_MUX_DIFF_1 = 1, /* asign channel to use AI+2 and AI-3 */
+    ADC_PIN_MUX_DIFF_2 = 2, /* asign channel to use AI+4 and AI-5 */
+    ADC_PIN_MUX_DIFF_3 = 3, /* asign channel to use AI+6 and AI-7 */
+    ADC_PIN_MUX_DIFF_4 = 4, /* asign channel to use AI+8 and AI-9 */
+    ADC_PIN_MUX_DIFF_5 = 5, /* asign channel to use AI+10 and AI-11 */
+    ADC_PIN_MUX_DIFF_6 = 6, /* asign channel to use AI+12 and AI-13 */
+    ADC_PIN_MUX_DIFF_7 = 7, /* asign channel to use AI+14 and AI-15 */
+    ADC_PIN_MUX_DIFF_AUTO = 8, /* auto asign channel, AI+{ch*2} and AI-{ch*2+1} */
+};
+
 enum class adc_mode : uint8_t {
 	ADC_MODE_CONTINUE = 0,
 	ADC_MODE_ONESHOT = 1,
@@ -158,7 +170,7 @@ struct adc {
     bool read_data(uint32_t *data, uint8_t *status);
     uint32_t read_diag(void);
     void adc_config(adc_clock_ref clk_ref, adc_mode mode, bool internal_vol_ref, bool data_with_status, adc_pwr_mode pwr_mode = adc_pwr_mode::ADC_PWR_MODE_FULL);
-    void cha_config(uint8_t ch, bool enable, const cha_filter_param &param);
+    void cha_config(uint8_t ch, bool enable, const cha_filter_param &param, adc_pin_mux mux);
     void diag_config(uint32_t diag_mask);
 
 private:
@@ -168,7 +180,7 @@ private:
     void spi_w_(cmd c, uint32_t data);
 
     template <int bytes, typename T>
-    bool r_(cmd c, T* ptr, bool check_crc = false)
+    bool r_(cmd c, T* ptr)
     {
         *ptr = spi_r_<bytes>(c);
         return true;
