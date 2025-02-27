@@ -1,48 +1,7 @@
 #include "ad7124-8.hpp"
+#include <zephyr/kernel.h>
 
 using namespace adc7124_8;
-
-
-template <>
-uint32_t adc::spi_r_<1>(cmd c)
-{
-    return spi_->read8(c());
-}
-template <>
-uint32_t adc::spi_r_<2>(cmd c)
-{
-    return spi_->read16(c());
-}
-template <>
-uint32_t adc::spi_r_<3>(cmd c)
-{
-    return spi_->read24(c());
-}
-template <>
-uint32_t adc::spi_r_<4>(cmd c)
-{
-    return spi_->read32(c());
-}
-template <>
-void adc::spi_w_<1>(cmd c, uint32_t data)
-{
-    spi_->write8(c(), data);
-}
-template <>
-void adc::spi_w_<2>(cmd c, uint32_t data)
-{
-    spi_->write16(c(), data);
-}
-template <>
-void adc::spi_w_<3>(cmd c, uint32_t data)
-{
-    spi_->write24(c(), data);
-}
-template <>
-void adc::spi_w_<4>(cmd c, uint32_t data)
-{
-    spi_->write32(c(), data);
-}
 
 bool adc::is_alive(void)
 {
@@ -157,8 +116,10 @@ void adc::diag_config(uint32_t diag_mask)
 
     if (diag_mask & static_cast<uint32_t>(adc_diag::DIAG_SPI_CRC)) {
         crc_check_ = true;
+        printk("CRC check enabled\n");
     } else {
         crc_check_ = false;
+        printk("CRC check disabled\n");
     }
 }
 

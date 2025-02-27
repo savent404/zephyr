@@ -9,15 +9,7 @@
 
 struct spi_iface {
 	virtual ~spi_iface() = default;
-
-	virtual uint8_t read8(uint8_t cmd) = 0;
-	virtual uint16_t read16(uint8_t cmd) = 0;
-	virtual uint32_t read24(uint8_t cmd) = 0;
-	virtual uint32_t read32(uint8_t cmd) = 0;
-	virtual void write8(uint8_t cmd, uint8_t data) = 0;
-	virtual void write16(uint8_t cmd, uint16_t data) = 0;
-	virtual void write24(uint8_t cmd, uint32_t data) = 0;
-	virtual void write32(uint8_t cmd, uint32_t data) = 0;
+	virtual bool xfer(uint8_t *tx, uint8_t *rx, uint8_t tx_size, uint8_t rx_size) = 0;
 };
 
 namespace adc7124_8
@@ -141,6 +133,36 @@ enum class post_filter : uint8_t {
     post_filter_92hz = 6,
 };
 
+enum class adc_diag : uint32_t {
+	DIAG_ROM_CRC = BIT(0),
+	DIAG_MEM_CRC = BIT(1),
+	DIAG_SPI_CRC = BIT(2),
+	DIAG_SPI_WR = BIT(3),
+	DIAG_SPI_RD = BIT(4),
+	DIAG_SPI_SCK = BIT(5),
+	DIAG_SPI_IGNORE = BIT(6),
+	DIAG_ALDO_PSM = BIT(7),
+	DIAG_ALDO_PSM_TRIP_TEST = BIT(8),
+	DIAG_DLDO_PSM = BIT(9),
+	DIAG_DLDO_PSM_TRIP_TEST = BIT(10),
+	DIAG_REF_DET = BIT(11),
+	DIAG_AINM_UV = BIT(12),
+	DIAG_AINM_OV = BIT(13),
+	DIAG_AINP_UV = BIT(14),
+	DIAG_AINP_OV = BIT(15),
+	DIAG_ADC_SAT = BIT(16),
+	DIAG_ADC_CONV = BIT(17),
+	DIAG_ADC_CAL = BIT(18),
+	DIAG_LDO_CAP_CHK = BIT(19),
+	DIAG_LDO_CAP_CHK_TRIP_TEST = BIT(20),
+	DIAG_MCK_CNT = BIT(21),
+	DIAG_MASK = 0x7F'FF'FF,
+};
+
+enum class REG_CHA: uint16_t {
+	REG_CHA_EN = BIT(15),
+};
+
 struct cha_filter_param {
     filter_type type;
     bool reject_50_60Hz;
@@ -159,28 +181,10 @@ private:
     uint8_t cmd_;
 };
 
-
-struct crc_validator {
-    static inline uint8_t crc8(uint8_t *data, uint8_t len) {
-        uint8_t crc = 0;
-        for (uint8_t i = 0; i < len; i++) {
-            crc ^= data[i];
-            for (int j = 0; j < 8; j++) {
-                if (crc & 0x80) {
-                    crc = (crc << 1) ^ 0x07;
-                } else {
-                    crc <<= 1;
-                }
-            }
-        }
-        return crc;
-    }
-
-};
-
 struct adc {
     explicit adc(spi_iface *spi) : spi_(spi) {}
 
+	bool initialize(void);
     bool is_alive(void);
     uint8_t read_status(void);
     bool status_is_data_ready(uint8_t status);
@@ -193,25 +197,73 @@ struct adc {
     void diag_config(uint32_t diag_mask);
 
 private:
-    template <int bytes>
-    uint32_t spi_r_(cmd c);
-    template <int bytes>
-    void spi_w_(cmd c, uint32_t data);
+	static inline uint8_t crc8_(uint8_t *data, uint8_t len) {
+		uint8_t crc = 0;
+
+		for (uint8_t i = 0; i < len; i++) {
+			crc ^= data[i];
+			for (int j = 0; j < 8; j++) {
+				if (crc & 0x80) {
+					crc = (crc << 1) ^ 0x07;
+				} else {
+					crc <<= 1;
+				}
+			}
+		}
+		return crc;
+	}
 
     template <int bytes, typename T>
-    bool r_(cmd c, T* ptr)
+    bool r_(cmd c, T* ptr, bool check_crc = false)
     {
-        *ptr = spi_r_<bytes>(c);
+		uint8_t tx_bf[bytes + 2] = { c() };
+		uint8_t rx_bf[bytes + 2]; /* cmd:data:crc */
+		T v = 0;
+		uint8_t crc_expected;
+		uint8_t crc;
+
+		if (!spi_->xfer(tx_bf, rx_bf, sizeof(tx_bf), sizeof(rx_bf))) {
+			return false;
+		}
+
+		for (int i = 0; i < bytes; i++) {
+			v |= rx_bf[i + 1] << (8 * i);
+		}
+		crc_expected = rx_bf[bytes + 1];
+
+		/* crc including cmd and data */
+		rx_bf[0] = c();
+		crc = crc8_(&rx_bf[0], bytes + 1);
+
+		if (check_crc && crc != crc_expected) {
+			return false;
+		}
+
+		*ptr = v;
         return true;
     }
 
-    template <int bytes, typename T>
-    void w_(cmd c, T ptr)
-    {
-        spi_w_<bytes>(c, ptr);
-    }
+	template <int bytes, typename T>
+	void w_(cmd c, T ptr, bool check_crc = false)
+	{
+		uint8_t tx_buf[bytes + 2] = { c() };
+		uint8_t size = sizeof(tx_buf);
+		uint8_t crc;
+
+		for (int i = 0; i < bytes; i++) {
+			tx_buf[i + 1] = (ptr >> (8 * (bytes -i - 1))) & 0xFF;
+		}
+		if (check_crc) {
+			crc = crc8_(&tx_buf[0], bytes + 1);
+			tx_buf[bytes + 1] = crc;
+		} else {
+			size--;
+		}
+		spi_->xfer(tx_buf, nullptr, size, 0);
+	}
 
     spi_iface *spi_;
+	bool crc_check_;
 };
 
 
