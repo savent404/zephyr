@@ -214,7 +214,7 @@ private:
 	}
 
     template <int bytes, typename T>
-    bool r_(cmd c, T* ptr, bool check_crc = false)
+    bool r_(cmd c, T* ptr, bool check_crc)
     {
 		uint8_t tx_bf[bytes + 2] = { c() };
 		uint8_t rx_bf[bytes + 2]; /* cmd:data:crc */
@@ -244,7 +244,7 @@ private:
     }
 
 	template <int bytes, typename T>
-	void w_(cmd c, T ptr, bool check_crc = false)
+	void w_(cmd c, T ptr, bool check_crc)
 	{
 		uint8_t tx_buf[bytes + 2] = { c() };
 		uint8_t size = sizeof(tx_buf);

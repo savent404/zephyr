@@ -7,7 +7,8 @@ bool adc::is_alive(void)
 {
     uint8_t res = 0;
 
-    r_<1>(cmd{true, true, reg::REG_ID}, &res);
+    /* This function will be called no matter crc_check_ is true or false */
+    r_<1>(cmd{true, true, reg::REG_ID}, &res, false);
     return res == 0x17;
 }
 
