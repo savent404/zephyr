@@ -26,13 +26,9 @@ bool adc::initialize(void)
     return true;
 }
 
-uint8_t adc::read_status(void)
+bool adc::get_status(uint8_t *status)
 {
-    uint8_t t = 0;
-
-    // FIXME: make sure crc checked
-    r_<1>(cmd{true, true, reg::REG_STATUS}, &t, false);
-    return t;
+    return r_<1>(cmd{true, true, reg::REG_STATUS}, status, false);
 }
 
 bool adc::status_is_data_ready(uint8_t status)
@@ -51,20 +47,14 @@ uint8_t adc::status_get_curr_cha(uint8_t status)
     return status & 0x0F;
 }
 
-bool adc::read_data(uint32_t *data)
+bool adc::get_data(uint32_t *data)
 {
-    bool res;
-
-    res = r_<3>(cmd{true, true, reg::REG_DATA}, data, crc_check_);
-    return res;
+    return r_<3>(cmd{true, true, reg::REG_DATA}, data, crc_check_);
 }
 
-uint32_t adc::read_diag(void)
+bool adc::get_diag(uint32_t *diag)
 {
-    uint32_t t = 0;
-    // FIXME: make sure crc checked
-    r_<3>(cmd{true, true, reg::REG_ERR}, &t, false);
-    return t;
+    return r_<3>(cmd{true, true, reg::REG_ERR}, diag, crc_check_);
 }
 
 void adc::adc_config(adc_clock_ref clk_ref, adc_mode mode, bool internal_vol_ref, adc_pwr_mode pwr_mode)

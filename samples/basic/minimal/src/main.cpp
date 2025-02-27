@@ -85,7 +85,10 @@ int main(void)
 		uint32_t val;
 
 		/* Check status */
-		status = adc.read_status();
+		if (!adc.get_status(&status)) {
+			printk("Error reading status\n");
+			continue;
+		}
 		if (!adc.status_is_data_ready(status)) {
 			continue;
 		}
@@ -93,19 +96,25 @@ int main(void)
 		convert_duration = k_uptime_ticks() - convert_time;
 
 		/* check diagnostics */
-		diag = adc.read_diag();
+		if (!adc.get_diag(&diag)) {
+			printk("Error reading diag\n");
+			continue;
+		}
 
 		/* Read data */
-		if (adc.read_data(&val) != true) {
+		if (adc.get_data(&val) != true) {
 			printk("Error reading data: status %02X\n", status);
 			continue;
 		}
 
 		/* spin till adc start to convert */
 		int64_t tick = k_uptime_ticks();
-		while (adc.status_is_data_ready(adc.read_status())) {
-			k_busy_wait(1);
-		}
+		do {
+			if (!adc.get_status(&status)) {
+				printk("Error reading status\n");
+				break;
+			}
+		} while (adc.status_is_data_ready(status));
 		convert_time = k_uptime_ticks();
 		tick = k_uptime_ticks() - tick;
 		/* Print data */
