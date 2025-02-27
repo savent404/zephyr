@@ -52,11 +52,27 @@ bool adc::is_alive(void)
     return res == 0x17;
 }
 
+bool adc::initialize(void)
+{
+    uint32_t reg_diag;
+
+    /* read back some register to check if driver is out of track */
+    r_<3>(cmd{true, true, reg::REG_ERR_EN}, &reg_diag, false);
+    if (reg_diag & static_cast<uint8_t>(adc_diag::DIAG_SPI_CRC)) {
+        crc_check_ = true;
+    } else {
+        crc_check_ = false;
+    }
+
+    return true;
+}
+
 uint8_t adc::read_status(void)
 {
     uint8_t t = 0;
 
-    r_<1>(cmd{true, true, reg::REG_STATUS}, &t);
+    // FIXME: make sure crc checked
+    r_<1>(cmd{true, true, reg::REG_STATUS}, &t, false);
     return t;
 }
 
@@ -80,17 +96,15 @@ bool adc::read_data(uint32_t *data)
 {
     bool res;
 
-    res = r_<3>(cmd{true, true, reg::REG_DATA}, data);
+    res = r_<3>(cmd{true, true, reg::REG_DATA}, data, crc_check_);
     return res;
 }
 
 uint32_t adc::read_diag(void)
 {
-    return spi_r_<3>(cmd{true, true, reg::REG_ERR});
-
-    uint8_t t = 0;
-
-    r_<1>(cmd{true, true, reg::REG_ERR}, &t);
+    uint32_t t = 0;
+    // FIXME: make sure crc checked
+    r_<3>(cmd{true, true, reg::REG_ERR}, &t, false);
     return t;
 }
 
@@ -101,7 +115,7 @@ void adc::adc_config(adc_clock_ref clk_ref, adc_mode mode, bool internal_vol_ref
     p |= ((static_cast<uint8_t>(mode) & 0x7) << 2);
     p |= ((static_cast<uint8_t>(pwr_mode) & 0x3) << 6);
     p |= (internal_vol_ref ? 0 : BIT(8));
-    spi_w_<1>(cmd{true, false, reg::REG_ADC_CTRL}, p);
+    w_<1>(cmd{true, false, reg::REG_ADC_CTRL}, p, crc_check_);
 }
 
 void adc::cha_config(uint8_t ch, bool enable, const cha_filter_param &param, adc_pin_mux mux)
@@ -109,23 +123,23 @@ void adc::cha_config(uint8_t ch, bool enable, const cha_filter_param &param, adc
 
     cmd c{true, false, (reg)((uint8_t)reg::REG_CHA_0 + ch)};
     uint16_t p = 0;
+
     if (ch > 8) {
         return;
     }
     if (enable) {
-        p |= 0x8000;
-        p |= (ch << 12); /* use different setup as default */
-
-        if (mux == adc_pin_mux::ADC_PIN_MUX_DIFF_AUTO) {
-            p |= (ch*2 << 5);
-            p |= (ch*2 + 1);
-        } else {
-            uint8_t _c = static_cast<uint8_t>(mux) & 0x7;
-            p |= (_c << 5);
-            p |= (_c + 1);
-        }
+        p |= static_cast<uint16_t>(REG_CHA::REG_CHA_EN);
     }
-    spi_w_<2>(c, p);
+    p |= (ch << 12); /* use different setup as default */
+    if (mux == adc_pin_mux::ADC_PIN_MUX_DIFF_AUTO) {
+        p |= (ch*2 << 5);
+        p |= (ch*2 + 1);
+    } else {
+        uint8_t _c = static_cast<uint8_t>(mux) & 0x7;
+        p |= (_c << 5);
+        p |= (_c + 1);
+    }
+    w_<2>(cmd{true, false, (reg)((uint8_t)reg::REG_CHA_0 + ch)}, p, crc_check_);
 
     cmd f{true, false, (reg)((uint8_t)reg::REG_FILTER_0 + ch)};
     uint32_t f_val = 0;
@@ -134,11 +148,17 @@ void adc::cha_config(uint8_t ch, bool enable, const cha_filter_param &param, adc
     f_val |= (static_cast<uint8_t>(param.post) & 0x7) << 17;
     f_val |= (param.reject_50_60Hz ? BIT(20) : 0);
     f_val |= (static_cast<uint8_t>(param.type) & 0x7) << 21;
-    spi_w_<3>(f, f_val);
+    w_<3>(f, f_val, crc_check_);
 }
 
 void adc::diag_config(uint32_t diag_mask)
 {
-    spi_w_<3>(cmd{true, false, reg::REG_ERR_EN}, diag_mask & 0x7F'FF'FF);
+    w_<3>(cmd{true, false, reg::REG_ERR_EN}, diag_mask & 0x7F'FF'FF, crc_check_);
+
+    if (diag_mask & static_cast<uint32_t>(adc_diag::DIAG_SPI_CRC)) {
+        crc_check_ = true;
+    } else {
+        crc_check_ = false;
+    }
 }
 

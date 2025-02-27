@@ -56,34 +56,32 @@ int main(void)
 
 	adc7124_8::adc adc(&spi);
 
+	k_msleep(100);
+
 	if (adc.is_alive()) {
 		printk("ADC7124 detected\n");
 	} else {
 		printk("ADC7124 not detected\n");
 	}
 
+	adc.initialize();
 	{
 		using namespace adc7124_8;
 
-		adc.adc_config(adc_clock_ref::ADC_CLK_REF_INT, adc_mode::ADC_MODE_ONESHOT, true);
-
-		/* FIXME: enable diag will block channel convert, need to handle diag firstly, then we can enable diag check */
-#if 0
-		adc.diag_config(-1);
-#else
-		adc.diag_config(0);
-#endif
+		adc.adc_config(adc_clock_ref::ADC_CLK_REF_INT, adc_mode::ADC_MODE_CONTINUE, true, adc_pwr_mode::ADC_PWR_MODE_FULL);
+		adc.diag_config(static_cast<uint32_t>(adc_diag::DIAG_SPI_CRC));
 		cha_filter_param param = {
-			.type = filter_type::FILTER_TYPE_SINC4,
-			.reject_50_60Hz = true,
+			.type = filter_type::FILTER_TYPE_SINC3,
+			.reject_50_60Hz = false,
 			.post = post_filter::post_filter_47hz,
-			.single_cycle = false,
-			.fs = 256,
+			.single_cycle = true,
+			.fs = 24,
 		};
 		for (int i = 0; i < 8; i++) {
 			adc.cha_config(i, true, param, adc_pin_mux::ADC_PIN_MUX_DIFF_AUTO);
 		}
 	}
+	printk("ADC7124 initialized\n");
 
 	int64_t convert_time = 0;
 	int64_t convert_duration;
