@@ -1,10 +1,24 @@
+#include <zephyr/dt-bindings/gpio/gpio.h>
+
 / {
 	aliases {
+		// mmc0 - eMMC
+		// mmc1 - SD card
 		mmc = &mmc0;
+		// mmc = &mmc1;
 	};
 };
 
 &mmc0 {
 	status = "okay";
 	non-removable;
+};
+
+&mmc1 {
+	status = "okay";
+	cd-gpios = <&gpio1 15 GPIO_ACTIVE_LOW>; // MIO47
+};
+
+&gpio1 {
+	status = "okay";
 };
