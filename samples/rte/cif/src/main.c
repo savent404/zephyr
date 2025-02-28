@@ -19,6 +19,9 @@ struct context ctx_ = {0};
 
 int main(void)
 {
+	/* log needs to be initialized first */
+	k_msleep(100);
+
 	ctx_.target_role = role_slave;
 	slave_start();
 
