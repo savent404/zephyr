@@ -330,7 +330,13 @@ static ssize_t cif_sock_sendto(struct net_context *ctx, const void *buf, size_t 
 	conn_idx id{addr->port, addr->slot};
 
 	if (!usr_data->ldp) {
+		NET_ERR("Not connected");
 		return -ENOTCONN;
+	}
+
+	if (addr->bus != CIF_BUS_DEFAULT) {
+		NET_ERR("Invalid bus %d", addr->bus);
+		return -EINVAL;
 	}
 
 	auto conn_it = usr_data->conns.find(id);
@@ -354,11 +360,18 @@ static ssize_t cif_sock_recvfrom(struct net_context *ctx, void *buf, size_t max_
 	conn_idx id{addr->port, addr->slot};
 
 	if (!usr_data->ldp) {
+		NET_DBG("Not connected");
 		return -ENOTCONN;
+	}
+
+	if (addr->bus != CIF_BUS_DEFAULT) {
+		NET_DBG("Invalid bus %d", addr->bus);
+		return -EINVAL;
 	}
 
 	auto conn_it = usr_data->conns.find(id);
 	if (conn_it == usr_data->conns.end()) {
+		NET_DBG("Connection not found");
 		return -ENOENT;
 	}
 
@@ -366,6 +379,7 @@ static ssize_t cif_sock_recvfrom(struct net_context *ctx, void *buf, size_t max_
 	int ret = (*usr_data->ldp).recv(conn, reinterpret_cast<uint8_t *>(buf), max_len);
 
 	if (ret < 0) {
+		NET_DBG("Failed to receive data");
 		ret = cif_ldp_error_to_errno(ret);
 	}
 
@@ -378,6 +392,7 @@ static int cif_sock_getsockopt(struct net_context *ctx, int level, int optname, 
 	auto usr_data = reinterpret_cast<cif_sock_data *>(ctx->user_data);
 
 	if (!usr_data->ldp) {
+		NET_DBG("Not connected");
 		return -ENOTCONN;
 	}
 
@@ -385,6 +400,7 @@ static int cif_sock_getsockopt(struct net_context *ctx, int level, int optname, 
 	case CIF_OPT_MASTER_CONFIG: {
 		if (*optlen != sizeof(cif_raw_master_config) ||
 		    net_context_get_proto(ctx) != CIF_RAW_MASTER) {
+			NET_DBG("Invalid master config");
 			return -EINVAL;
 		}
 		memcpy(optval, &usr_data->master_cfg, sizeof(cif_raw_master_config));
@@ -392,12 +408,14 @@ static int cif_sock_getsockopt(struct net_context *ctx, int level, int optname, 
 	}
 	case CIF_OPT_PORT: {
 		if (*optlen != sizeof(cif_raw_port_config)) {
+			NET_DBG("Invalid port config");
 			return -EINVAL;
 		}
 		auto conn_it = usr_data->conns.find(
 			conn_idx{reinterpret_cast<cif_raw_port_config *>(optval)->port,
 				 reinterpret_cast<cif_raw_port_config *>(optval)->slot});
 		if (conn_it == usr_data->conns.end()) {
+			NET_DBG("Connection not found");
 			return -ENOENT;
 		}
 		memcpy(optval, &conn_it->second.config, sizeof(cif_raw_port_config));
@@ -408,6 +426,7 @@ static int cif_sock_getsockopt(struct net_context *ctx, int level, int optname, 
 		uint32_t errors = 0;
 		uint32_t matched_cnt = 0;
 		if (*optlen != sizeof(cif_error_filter)) {
+			NET_DBG("Invalid error filter");
 			return -EINVAL;
 		}
 		for (auto &conn : usr_data->conns) {
@@ -424,6 +443,9 @@ static int cif_sock_getsockopt(struct net_context *ctx, int level, int optname, 
 				errors |= (*usr_data->ldp).get_extra_error(conn.second.conn_id);
 				matched_cnt++;
 			}
+		}
+		if (!matched_cnt) {
+			NET_DBG("No matched connection");
 		}
 		filter->error_mask = errors & CIF_ERR_MASK;
 		return matched_cnt ? 0 : -ENOENT;
@@ -442,6 +464,7 @@ static int cif_sock_setsockopt(struct net_context *ctx, int level, int optname, 
 	int ret = 0;
 
 	if (!usr_data->ldp) {
+		NET_DBG("Not connected");
 		return -ENOTCONN;
 	}
 
@@ -450,6 +473,7 @@ static int cif_sock_setsockopt(struct net_context *ctx, int level, int optname, 
 		auto opt = reinterpret_cast<const cif_raw_master_config *>(optval);
 		if (optlen != sizeof(cif_raw_master_config) ||
 		    net_context_get_proto(ctx) != CIF_RAW_MASTER) {
+			NET_DBG("Invalid master config");
 			return -EINVAL;
 		}
 		ldp_mcb_config cfg{opt->poll_time};
@@ -465,12 +489,14 @@ static int cif_sock_setsockopt(struct net_context *ctx, int level, int optname, 
 		auto opt = reinterpret_cast<const cif_raw_slave_config *>(optval);
 		if (optlen != sizeof(cif_raw_slave_config) ||
 		    net_context_get_proto(ctx) != CIF_RAW_SLAVE) {
+			NET_DBG("Invalid slave config");
 			return -EINVAL;
 		}
 		mcb_preempt(usr_data->dev, opt->want_preempt);
 	} break;
 	case CIF_OPT_PORT: {
 		if (optlen != sizeof(cif_raw_port_config)) {
+			NET_DBG("Invalid port config");
 			return -EINVAL;
 		}
 		ret = cif_ctrl_port(ctx, reinterpret_cast<const cif_raw_port_config *>(optval));
@@ -481,6 +507,7 @@ static int cif_sock_setsockopt(struct net_context *ctx, int level, int optname, 
 		uint32_t matched_cnt = 0;
 
 		if (optlen != sizeof(cif_error_filter)) {
+			NET_DBG("Invalid error filter");
 			return -EINVAL;
 		}
 
@@ -499,9 +526,13 @@ static int cif_sock_setsockopt(struct net_context *ctx, int level, int optname, 
 				matched_cnt++;
 			}
 		}
+		if (!matched_cnt) {
+			NET_DBG("No matched connection");
+		}
 		return matched_cnt ? 0 : -ENOENT;
 	}
 	default: {
+		NET_DBG("Invalid option %d", optname);
 		return -ENOTSUP;
 	}
 	}
@@ -527,6 +558,7 @@ static int cif_ctrl_port(struct net_context *ctx, const struct cif_raw_port_conf
 
 	if (prev_enable && next_enable) {
 		/* Connection already enabled, disable it first. Not support config in run mode */
+		NET_DBG("Connection already enabled, disable it first");
 		ret = -EBUSY;
 	} else if (!prev_enable && !next_enable) {
 		/* Connection already disabled */
@@ -553,6 +585,7 @@ static int cif_ctrl_port(struct net_context *ctx, const struct cif_raw_port_conf
 		bool is_strong_order = cfg->flags & CIF_PORT_FLG_STRONG_ORDER;
 
 		if (CIF_IS_UNKNOWN_PORT(cfg->port)) {
+			NET_DBG("Unknown port %d", cfg->port);
 			return -EINVAL;
 		}
 
