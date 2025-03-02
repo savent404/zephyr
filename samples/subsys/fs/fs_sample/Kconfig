@@ -18,4 +18,8 @@ config FS_SAMPLE_CREATE_SOME_ENTRIES
 	  flash or (Q)SPI connected memories, where it is not possible to
 	  easily add files with use of other device.
 
+config FS_SAMPLE_BENCHMARK
+	bool "Benchmark read/write performance"
+	default n
+
 source "Kconfig.zephyr"

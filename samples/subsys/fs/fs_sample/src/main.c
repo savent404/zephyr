@@ -102,6 +102,94 @@ static bool create_some_entries(const char *base_path)
 }
 #endif
 
+#ifdef CONFIG_FS_SAMPLE_BENCHMARK
+
+#define CHUNK_SIZE  (8192)
+#define CHUNK_COUNT (512)
+static bool benchmark(const char *path)
+{
+	/* Read/Write benchmark, bs=256, count=4096, read-back verify */
+
+	struct fs_file_t file;
+	static uint8_t buffer[CHUNK_SIZE];
+	static uint8_t verify[CHUNK_SIZE];
+	int i;
+	int res;
+	int count = CHUNK_COUNT;
+	int size = CHUNK_SIZE;
+	int64_t t_start;
+	int64_t t_write = 0;
+	int64_t t_read = 0;
+
+	fs_file_t_init(&file);
+
+	printk("Benchmarking %s, chunk size %d, chunk count %d\n", path, size, count);
+
+	if (fs_open(&file, path, FS_O_CREATE | FS_O_RDWR) != 0) {
+		LOG_ERR("Failed to open file %s", path);
+		return false;
+	}
+
+	for (i = 0; i < count; i++) {
+		/* Prepare buffer */
+		memset(buffer, i, size);
+
+		/* Record timestamp */
+		t_start = k_uptime_get();
+
+		/* Write buffer */
+		res = fs_write(&file, buffer, size);
+		if (res != size) {
+			LOG_ERR("Failed to write buffer at %d", i);
+			return false;
+		}
+
+		t_write += k_uptime_delta(&t_start);
+	}
+
+	/* Make sure all buffers are written */
+	t_start = k_uptime_get();
+	fs_sync(&file);
+	t_write += k_uptime_delta(&t_start);
+
+	printk("Write time: %lld ms\n", t_write);
+	printk("Write speed: %lld KB/s\n", (int64_t)count * size / t_write);
+
+	/* Seek to beginning of file */
+	fs_seek(&file, 0, FS_SEEK_SET);
+
+	for (i = 0; i < count; i++) {
+		/* Prepare verify buffer */
+		memset(verify, i, size);
+
+		/* Record timestamp */
+		t_start = k_uptime_get();
+
+		/* Read buffer */
+		res = fs_read(&file, buffer, size);
+		if (res != size) {
+			LOG_ERR("Failed to read buffer at %d", i);
+			return false;
+		}
+
+		t_read += k_uptime_delta(&t_start);
+
+		/* Verify buffer */
+		if (memcmp(buffer, verify, size)) {
+			LOG_ERR("Data mismatch at %d", i);
+			LOG_HEXDUMP_ERR(buffer, size, "Written");
+			LOG_HEXDUMP_ERR(verify, size, "Read");
+			return false;
+		}
+	}
+
+	printk("Read time: %lld ms\n", t_read);
+	printk("Read speed: %lld KB/s\n", (int64_t)count * size / t_read);
+
+	return true;
+}
+#endif
+
 static const char *disk_mount_pt = DISK_MOUNT_PT;
 
 int main(void)
@@ -168,6 +256,9 @@ int main(void)
 			}
 #endif
 		}
+#ifdef CONFIG_FS_SAMPLE_BENCHMARK
+		benchmark(DISK_MOUNT_PT "/" SOME_FILE_NAME);
+#endif
 	} else {
 		printk("Error mounting disk.\n");
 	}
