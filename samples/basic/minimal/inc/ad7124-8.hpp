@@ -159,8 +159,44 @@ enum class adc_diag : uint32_t {
 	DIAG_MASK = 0x7F'FF'FF,
 };
 
+enum class cha_range : uint8_t {
+	CHA_RANGE_2_5V = 0,
+	CHA_RANGE_1_25V = 1,
+	CHA_RANGE_625mV = 2,
+	CHA_RANGE_312_5mV = 3,
+	CHA_RANGE_156_25mV = 4,
+	CHA_RANGE_78_125mV = 5,
+	CHA_RANGE_39_0625mV = 6,
+	CHA_RANGE_19_53125mV = 7,
+};
+
+enum class cha_ref : uint8_t {
+	CHA_REF_1 = 0,
+	CHA_REF_2 = 1,
+	CHA_REF_INTERNAL = 2,
+	CHA_REF_AVDD = 3, /* Analog VDD */
+};
+
+enum class cha_burnout : uint8_t {
+	CHA_BURNOUT_OFF = 0,
+	CHA_BURNOUT_0_5uA = 1,
+	CHA_BURNOUT_2uA = 2,
+	CHA_BURNOUT_4uA = 3,
+};
+
 enum class REG_CHA: uint16_t {
 	REG_CHA_EN = BIT(15),
+};
+
+struct cha_ctrl_param {
+	cha_range range;
+	cha_ref ref;
+	bool AIN_BUF_P;
+	bool AIN_BUF_N;
+	bool REF_BUF_P;
+	bool REF_BUF_N;
+	cha_burnout burnout;
+	bool bipolar;
 };
 
 struct cha_filter_param {
@@ -190,7 +226,7 @@ struct adc {
     bool get_data(uint32_t *data);
     bool get_diag(uint32_t *diag);
     void adc_config(adc_clock_ref clk_ref, adc_mode mode, bool internal_vol_ref, adc_pwr_mode pwr_mode = adc_pwr_mode::ADC_PWR_MODE_FULL);
-    void cha_config(uint8_t ch, bool enable, const cha_filter_param &param, adc_pin_mux mux);
+    void cha_config(uint8_t ch, bool enable, const cha_ctrl_param ctrl, const cha_filter_param filter, adc_pin_mux mux);
     void diag_config(uint32_t diag_mask);
 
     bool status_is_data_ready(uint8_t status);
@@ -227,7 +263,7 @@ private:
 		}
 
 		for (int i = 0; i < bytes; i++) {
-			v |= rx_bf[i + 1] << (8 * i);
+			v |= rx_bf[i + 1] << (8 * (bytes - i - 1));
 		}
 		crc_expected = rx_bf[bytes + 1];
 

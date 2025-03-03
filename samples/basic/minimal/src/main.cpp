@@ -29,6 +29,71 @@ struct spi_iface_zephyr: public spi_iface {
 	const struct gpio_dt_spec *cs_;
 };
 
+template <int depth>
+void record(uint32_t v, int32_t *max, int32_t *min, int32_t *avg)
+{
+	static uint32_t rec[depth];
+	static int idx = 0;
+	static bool init = false;
+
+	rec[idx] = v;
+
+	if (idx == depth - 1) {
+		init = true;
+	}
+
+	if (init) {
+		int64_t max_v = 0;
+		int64_t min_v = 0xFFFFFFFF;
+		int64_t sum = 0;
+
+		for (int i = 0; i < depth; i++) {
+			if (rec[i] > max_v) {
+				max_v = rec[i];
+			}
+			if (rec[i] < min_v) {
+				min_v = rec[i];
+			}
+			sum += rec[i];
+		}
+
+		int32_t avg_v = sum / depth;
+
+		if (max) {
+			*max = (int32_t)(max_v - avg_v);
+		}
+		if (min) {
+			*min = (int32_t)(min_v - avg_v);
+		}
+		if (avg) {
+			*avg = (int32_t)(avg_v);
+		}
+	}
+	idx = (idx + 1) % depth;
+}
+
+float fn_val(uint32_t val, adc7124_8::cha_range r, bool bipolar, double gain=1e3)
+{
+	double val_to_vol[] = {
+		2.5 / (0x800000 - 1),
+		1.25 / (0x800000 - 1),
+		0.625 / (0x800000 - 1),
+		0.3125 / (0x800000 - 1),
+		0.15625 / (0x800000 - 1),
+		0.078125 / (0x800000 - 1),
+		0.0390625 / (0x800000 - 1),
+		0.01953125 / (0x800000 - 1),
+	};
+	double v;
+	
+	if (bipolar) {
+		v = ((int64_t)val - 0x800000) * val_to_vol[static_cast<uint8_t>(r)];
+	} else {
+		v = val * val_to_vol[static_cast<uint8_t>(r)];
+	}
+	v *= gain;
+	return (float)v;
+}
 
 int main(void)
 {
@@ -57,20 +122,38 @@ int main(void)
 	}
 
 	adc.initialize();
+
+	adc7124_8::cha_range range = adc7124_8::cha_range::CHA_RANGE_2_5V;
+	uint8_t fs_reject[] = { 48, 40}; // 50Hz, 60Hz
 	{
 		using namespace adc7124_8;
 
 		adc.adc_config(adc_clock_ref::ADC_CLK_REF_INT, adc_mode::ADC_MODE_CONTINUE, true, adc_pwr_mode::ADC_PWR_MODE_FULL);
 		adc.diag_config(static_cast<uint32_t>(adc_diag::DIAG_MASK));
-		cha_filter_param param = {
+		cha_ctrl_param ctrl = {
+			.range = range,
+			.ref = cha_ref::CHA_REF_1,
+			.AIN_BUF_P = false,
+			.AIN_BUF_N = false,
+			.REF_BUF_P = false,
+			.REF_BUF_N = false,
+			.burnout = cha_burnout::CHA_BURNOUT_OFF,
+			.bipolar = true
+		};
+		cha_filter_param filter = {
 			.type = filter_type::FILTER_TYPE_SINC3,
 			.reject_50_60Hz = true,
-			.post = post_filter::post_filter_47hz,
+			.post = post_filter::post_filter_resrved,
 			.single_cycle = false,
-			.fs = 24,
+			.fs = fs_reject[0],
 		};
 		for (int i = 0; i < 8; i++) {
-			adc.cha_config(i, true ? true : false, param, adc_pin_mux::ADC_PIN_MUX_DIFF_AUTO);
+			if (i < 2) {
+				adc.cha_config(i, true ? true : false, ctrl, filter, adc_pin_mux::ADC_PIN_MUX_DIFF_AUTO);
+			}
+			else {
+				adc.cha_config(i, false, ctrl, filter, adc_pin_mux::ADC_PIN_MUX_DIFF_AUTO);
+			}
 		}
 	}
 	printk("ADC7124 initialized\n");
@@ -117,9 +200,14 @@ int main(void)
 		} while (adc.status_is_data_ready(status));
 		convert_time = k_uptime_ticks();
 		tick = k_uptime_ticks() - tick;
-		/* Print data */
-		printk("Channel %d: %d\tdiag: %06X\tspin: %lld us\tconvert: %lld ms\n", ch,
-			val, diag, k_ticks_to_us_near64(tick), k_ticks_to_ms_near64(convert_duration));
+		if (ch == 1) {
+			int32_t max = 0, min = 0;
+			record<128>(val, &max, &min, nullptr);
+			/* Print data */
+			printk("Channel %d: %06x(%08.4fmV)\t {%06d, %06d, %08.3fuV}\tdiag: %06X\tspin: %lld us\tconvert: %lld ms\n", ch,
+				val, fn_val(val, range, true), max, min, fn_val(max-min, range, false, 1e6),
+				diag, k_ticks_to_us_near64(tick), k_ticks_to_ms_near64(convert_duration));
+		}
 
 	}
 

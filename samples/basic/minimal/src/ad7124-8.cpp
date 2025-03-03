@@ -68,7 +68,7 @@ void adc::adc_config(adc_clock_ref clk_ref, adc_mode mode, bool internal_vol_ref
     w_<1>(cmd{true, false, reg::REG_ADC_CTRL}, p, crc_check_);
 }
 
-void adc::cha_config(uint8_t ch, bool enable, const cha_filter_param &param, adc_pin_mux mux)
+void adc::cha_config(uint8_t ch, bool enable, const cha_ctrl_param ctrl, const cha_filter_param filter, adc_pin_mux mux)
 {
 
     cmd c{true, false, (reg)((uint8_t)reg::REG_CHA_0 + ch)};
@@ -91,13 +91,25 @@ void adc::cha_config(uint8_t ch, bool enable, const cha_filter_param &param, adc
     }
     w_<2>(cmd{true, false, (reg)((uint8_t)reg::REG_CHA_0 + ch)}, p, crc_check_);
 
+    cmd cfg{true, false, (reg)((uint8_t)reg::REG_CONFIG_0 + ch)};
+    uint16_t cfg_val = 0;
+    cfg_val |= (ctrl.bipolar ? BIT(11) : 0);
+    cfg_val |= (static_cast<uint8_t>(ctrl.burnout) & 0x3) << 9;
+    cfg_val |= (ctrl.REF_BUF_P ? BIT(8) : 0);
+    cfg_val |= (ctrl.REF_BUF_N ? BIT(7) : 0);
+    cfg_val |= (ctrl.AIN_BUF_P ? BIT(6) : 0);
+    cfg_val |= (ctrl.AIN_BUF_N ? BIT(5) : 0);
+    cfg_val |= (static_cast<uint8_t>(ctrl.ref) & 0x3) << 3;
+    cfg_val |= (static_cast<uint8_t>(ctrl.range) & 0x7);
+    w_<2>(cfg, cfg_val, crc_check_);
+
     cmd f{true, false, (reg)((uint8_t)reg::REG_FILTER_0 + ch)};
     uint32_t f_val = 0;
-    f_val |= param.fs & 0x3FF; /* output data rate */
-    f_val |= (param.single_cycle ? BIT(16) : 0);
-    f_val |= (static_cast<uint8_t>(param.post) & 0x7) << 17;
-    f_val |= (param.reject_50_60Hz ? BIT(20) : 0);
-    f_val |= (static_cast<uint8_t>(param.type) & 0x7) << 21;
+    f_val |= filter.fs & 0x3FF; /* output data rate */
+    f_val |= (filter.single_cycle ? BIT(16) : 0);
+    f_val |= (static_cast<uint8_t>(filter.post) & 0x7) << 17;
+    f_val |= (filter.reject_50_60Hz ? BIT(20) : 0);
+    f_val |= (static_cast<uint8_t>(filter.type) & 0x7) << 21;
     w_<3>(f, f_val, crc_check_);
 }
 
