@@ -16,6 +16,7 @@
 
 #define MCB_POLL_TIME           (50 * 1000) /* 50us */
 #define SYNC_CYCLE_TIME         2000        /* 2ms */
+#define SYNC_TIMEOUT_TIME       10000       /* 10ms (5 times of SYNC_CYCLE_TIME) */
 #define ASYNC_INTERVAL_TIME     10000       /* 10ms */
 #define ASYNC_TIMEOUT_TIME      100000      /* 100ms */
 #define ASYNC_DEFAULT_BANDWIDTH 0           /* no limitation */

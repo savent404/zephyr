@@ -261,6 +261,7 @@ static int main_master(void)
 	const struct cif_raw_master_config config = {
 		.poll_time = MCB_POLL_TIME,
 		.cycle_time = SYNC_CYCLE_TIME,
+		.sync_timeout = SYNC_TIMEOUT_TIME,
 	};
 	ret = setsockopt(sock, SOL_CIF_RAW, CIF_OPT_MASTER_CONFIG, &config, sizeof(config));
 	if (ret < 0) {

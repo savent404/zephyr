@@ -47,8 +47,8 @@ TEST_F(test_ldp_sm, basic_concept)
 		{0x10, 2, 1000, 2000, false, true, true},
 	};
 	ldp_master_sync_config m_cfg_io[2] = {
-		{0x40, 1, 1000, false, false},
-		{0x40, 2, 1000, false, false},
+		{0x40, 1, 1000, 1000, false, false},
+		{0x40, 2, 1000, 1000, false, false},
 	};
 	ldp_master_async_config m_cfg_async_io[2] = {
 		{0x60, 1, 1000, 2000, false, false, false},
@@ -276,6 +276,45 @@ TEST_F(test_ldp_sm, DISABLED_harq)
 	}
 }
 
+TEST_F(test_ldp_sm, sync_timeout)
+{
+	simu_work_queue wq;
+	simu_mcb bus_m(0), bus_s1(1);
+	ldp_master_impl m(&bus_m, &wq);
+	ldp_slave_impl s1(&bus_s1);
+
+	ldp_master_sync_config m_cfg_cfg[] = {
+		{0x40, 1, 1000, 3000, false, false},
+	};
+	ldp_slave_sync_config s_cfg_cfg[] = {
+		{0x40, 32, true},
+	};
+	uint8_t rx_buf[32];
+
+	int m_conn = m.create(false, &m_cfg_cfg[0]);
+	int s_conn = s1.create(false, &s_cfg_cfg[0]);
+
+	ASSERT_EQ(m_conn, 0);
+	ASSERT_EQ(s_conn, 0);
+
+	int ret = 0;
+
+	for (int i = 0; i < 4; i++) {
+		ret = m.send(m_conn, (const uint8_t *)"io:000", 8);
+		ASSERT_EQ(ret, 8);
+
+		wq.sync();
+
+		ret = m.recv(m_conn, rx_buf, 32);
+
+		if (i < 2) {
+			ASSERT_EQ(ret, -err::LDP_ERR_AGAIN);
+		} else {
+			ASSERT_EQ(ret, -err::LDP_ERR_ATIMEOUT);
+		}
+	}
+}
+
 TEST_F(test_ldp_sm, async_timeout)
 {
 	simu_work_queue wq;
@@ -342,8 +381,8 @@ TEST_F(test_ldp_sm, worst_case_slave_no_response)
 		{0x10, 2, 1000, 10000, false, true, true},
 	};
 	ldp_master_sync_config m_cfg_io[2] = {
-		{0x40, 1, 1000, false, false},
-		{0x40, 2, 1000, false, false},
+		{0x40, 1, 1000, 1000, false, false},
+		{0x40, 2, 1000, 1000, false, false},
 	};
 	ldp_master_async_config m_cfg_async_io[2] = {
 		{0x60, 1, 1000, 2000, false, false, false},
@@ -453,8 +492,8 @@ TEST_F(test_ldp_sm, master_slave_switch)
 			{0x60, 2, 1000, 10000, false, false, false},
 		};
 		const ldp_master_sync_config m_cfg_io[] = {
-			{0x40, 1, 1000, false, false},
-			{0x40, 2, 1000, false, false},
+			{0x40, 1, 1000, 1000, false, false},
+			{0x40, 2, 1000, 1000, false, false},
 		};
 		mpu_conn[0] = mpu->create(true, &m_cfg_cfg[0]);
 		mpu_conn[1] = mpu->create(true, &m_cfg_cfg[1]);
@@ -490,7 +529,7 @@ TEST_F(test_ldp_sm, master_slave_switch)
 
 		s1_m = std::make_unique<ldp_master_impl>(&bus_mpu_bak, &wq);
 		ldp_master_sync_config cfg_io[] = {
-			{0x40, 0, 1000, true, false},
+			{0x40, 0, 1000, 1000, true, false},
 		};
 		mpu_bak_conn[0] = s1_m->create(false, &cfg_io[0]);
 		s1_m->send(mpu_bak_conn[0], (const uint8_t *)"io>000", 8);
@@ -552,7 +591,7 @@ TEST_F(test_ldp_sm, master_slave_switch)
 	{
 		s1_m->destroy(mpu_bak_conn[0]);
 		ldp_master_sync_config cfg_io[] = {
-			{0x40, 0, 1000, true, false},
+			{0x40, 0, 1000, 1000, true, false},
 		};
 		mpu_bak_conn[0] = s1_m->create(false, &cfg_io[0]);
 	}
@@ -633,8 +672,8 @@ TEST_F(test_ldp_sm, sync_send_memleak)
 	int s_conn[2];
 
 	ldp_master_sync_config m_cfg_io[] = {
-		{0x40, 1, 1000, true, false},
-		{0x40, 2, 1000, true, false},
+		{0x40, 1, 1000, 1000, true, false},
+		{0x40, 2, 1000, 1000, true, false},
 	};
 
 	ldp_slave_sync_config s_cfg_io[] = {
@@ -707,9 +746,9 @@ TEST_F(test_ldp_sm, async_bandwidth_control)
 	int mpu_conn[5], s_conn[5];
 
 	ldp_master_sync_config m_cfg_io[] = {
-		{0x40, 1, 1'000'000, false, false},
-		{0x40, 2, 1'000'000, false, false},
-		{0x41, 1, 1'000'000, false, false},
+		{0x40, 1, 1'000'000, 1'000'000, false, false},
+		{0x40, 2, 1'000'000, 1'000'000, false, false},
+		{0x41, 1, 1'000'000, 1'000'000, false, false},
 	};
 	ldp_master_async_config m_cfg_async_io[] = {
 		{0x60, 1, 1'000'000, 1'000'000, false, false, false, 1},

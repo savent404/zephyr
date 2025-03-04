@@ -32,6 +32,7 @@ struct ldp_config {
 struct ldp_master_sync_config: ldp_config {
 	unsigned dst;        /* destination slave id */
 	unsigned cycle_time; /* cycle time in microseconds */
+	unsigned timeout;    /* sync timeout in microseconds */
 	bool preempt;        /* set R flag, means want to take over the bus */
 	bool one_shot;       /* one shot mode, keep sync till receive response */
 };
@@ -145,9 +146,9 @@ struct ldp_basic {
 
 	enum ldp_error {
 		LDP_ERR_OK,
+		LDP_ERR_ATIMEOUT,           /* User Period timeout */
 		LDP_ERR_T_ERROR,            /* T_ERROR, no response found */
 		LDP_ERR_P_ERROR,            /* P_ERROR, port rejected */
-		LDP_ERR_ATIMEOUT,           /* Async timeout */
 		LDP_ERR_INVALID_ASYNC_PACK, /* Magic number not match, or length too short*/
 		LDP_ERR_INVALID,            /* parameter invalid */
 		LDP_ERR_AGAIN,              /* Previous operation not completed, try it later */

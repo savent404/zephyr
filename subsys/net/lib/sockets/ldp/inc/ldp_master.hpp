@@ -228,51 +228,40 @@ template <typename T_mempool, typename T_cache> struct ldp_master: public ldp_ba
 		uint16_t len;
 	};
 
-	struct async_conn_info {
-		conn id;                 /* connection id */
-		int sid;                 /* dest slot id */
-		int port;                /* dest port */
-		work_queue_if::id wq_id; /* work queue id */
-
-		uint32_t cycle;           /* cycle time in microsecond */
-		bool preempt;             /* preempt flag (R flag) */
-		uint32_t timeout_cnt;     /* timeout counter */
+	struct conn_info_base {
+		conn id;              /* connection id */
+		int sid;              /* dest slot id */
+		int port;             /* dest port */
+		uint32_t cycle;       /* cycle time in microsecond */
+		bool preempt;         /* preempt flag */
+		int last_err;         /* last error */
+		bool flg_one_shot;    /* one shot flag */
+		bool flg_hold_on;     /* Hold on flag for a second if no user action triggered */
+		bc::conn_ptr bc;      /* bandwidth control handle */
+		uint32_t timeout_cnt; /* timeout counter */
 		uint32_t timeout_allowed; /* timeout allowed in cycle count */
-		uint32_t stat_rx_packet;  /* run loop counter */
-		bool flg_one_shot;        /* one shot flag */
-		bool flg_wait_for_rx;     /* This is the flag to activate timeout mechanism
-					 Rising edge means reset timeout, activate timer
-					 Falling edge means deactivate timer */
-		bool flg_hold_on;         /* Hold on for a seconds if no user action triggered */
-		bool flg_strong_order;    /* only accept response if rsp.xid == req.rxid+1 */
-		uint8_t xid;              /* transaction id */
-		int rxid;                 /* last received transaction id, -1 means no
-					     response received */
-		int last_err;             /* last error */
 
-		bc::conn_ptr bc; /* bandwidth control handle */
+		uint32_t stat_rx_packet; /* run loop counter */
+		virtual ~conn_info_base() = default;
+	};
+
+	struct async_conn_info: public conn_info_base {
+		work_queue_if::id wq_id; /* work queue id */
+		bool flg_wait_for_rx;    /* flag to activate timeout mechanism */
+		bool flg_strong_order;   /* only accept response if rsp.xid == req.rxid+1 */
+		uint8_t xid;             /* transaction id */
+		int rxid; /* last received transaction id, -1 means no response received */
 
 		std::list<async_buf> rx_bufs; /* received buffers */
 		std::list<async_buf> tx_bufs; /* transmit buffers */
 	};
 
-	struct sync_conn_info {
-		conn id;                 /* connection id */
-		int sid;                 /* dest slot id */
-		int port;                /* dest port */
-		uint32_t cycle;          /* cycle time in microsecond */
-		bool preempt;            /* preempt flag (R flag) */
-		int last_err;            /* last error */
-		uint32_t stat_rx_packet; /* run loop counter */
-		bool flg_one_shot;       /* one shot flag */
-		bool flg_hold_on;        /* Hold on for a seconds if no user action triggered */
-		bool flg_new_data;       /* new data received */
-
-		uint8_t *tx_buf; /* transmit buffer */
-		uint8_t *rx_buf; /* receive buffer */
-		uint16_t tx_len; /* transmit length */
-		uint16_t rx_len; /* receive length */
-		bc::conn_ptr bc; /* bandwidth control handle */
+	struct sync_conn_info: public conn_info_base {
+		bool flg_new_data; /* new data received */
+		uint8_t *tx_buf;   /* transmit buffer */
+		uint8_t *rx_buf;   /* receive buffer */
+		uint16_t tx_len;   /* transmit length */
+		uint16_t rx_len;   /* receive length */
 	};
 
 	using sync_conn_ptr = std::unique_ptr<sync_conn_info>;
@@ -415,6 +404,8 @@ template <typename T_mempool, typename T_cache> struct ldp_master: public ldp_ba
 		ci->stat_rx_packet = 0;
 		ci->bc = bc;
 		ci->flg_new_data = false;
+		ci->timeout_allowed = cfg->timeout / cfg->cycle_time;
+		ci->timeout_cnt = ci->timeout_allowed;
 		sync_conns_.push_back(std::move(ci));
 		return next_id_++;
 	}
@@ -586,10 +577,11 @@ template <typename T_mempool, typename T_cache> struct ldp_master: public ldp_ba
 			}
 #endif
 
+			rx_buf = mcb_->get_rx_buf(ci->port);
+			rx_len = mcb_->get_rx_len(ci->port);
+
 			/* handle received frame */
-			if (data_ready) {
-				rx_buf = mcb_->get_rx_buf(ci->port);
-				rx_len = mcb_->get_rx_len(ci->port);
+			if (data_ready && rx_len) {
 
 				/* if rx buffer is not enough, reallocate */
 				if (ci->rx_len < rx_len) {
@@ -606,6 +598,17 @@ template <typename T_mempool, typename T_cache> struct ldp_master: public ldp_ba
 				ci->stat_rx_packet++;
 				ci->flg_new_data = true;
 				mcb_->clr_rx(ci->port);
+
+				/* If new data received, reset timeout */
+				ci->timeout_cnt = ci->timeout_allowed;
+				ci->last_err &= ~(1 << LDP_ERR_ATIMEOUT);
+			} else {
+				if (ci->timeout_cnt > 1) {
+					ci->timeout_cnt--;
+				} else {
+					ci->timeout_cnt = 0;
+					ci->last_err |= 1 << LDP_ERR_ATIMEOUT;
+				}
 			}
 
 			/* General error handling */
@@ -811,8 +814,11 @@ template <typename T_mempool, typename T_cache> struct ldp_master: public ldp_ba
 			ci->flg_wait_for_rx = false;
 			ci->last_err &= ~(1 << LDP_ERR_ATIMEOUT);
 		} else if (ci->flg_wait_for_rx) {
-			if (--ci->timeout_cnt == 0) {
-				ci->last_err |= (1 << LDP_ERR_ATIMEOUT);
+			if (ci->timeout_cnt > 1) {
+				ci->timeout_cnt--;
+			} else {
+				ci->timeout_cnt = 0;
+				ci->last_err |= 1 << LDP_ERR_ATIMEOUT;
 			}
 		}
 		work_queue_->reset(ci->wq_id, ci->cycle);

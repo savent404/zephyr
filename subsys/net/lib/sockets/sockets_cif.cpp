@@ -595,6 +595,7 @@ static int cif_ctrl_port(struct net_context *ctx, const struct cif_raw_port_conf
 			config.port = cfg->port;
 			config.dst = cfg->slot;
 			config.cycle_time = usr_data->master_cfg.cycle_time;
+			config.timeout = usr_data->master_cfg.sync_timeout;
 			config.preempt = is_preempt;
 			config.one_shot = is_one_shot;
 			conn.conn_id = (*usr_data->ldp).create(false, &config);

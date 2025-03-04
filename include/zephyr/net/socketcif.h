@@ -49,8 +49,9 @@ enum {
 };
 
 struct cif_raw_master_config {
-	uint32_t poll_time;  /* in microseconds */
-	uint32_t cycle_time; /* in microseconds */
+	uint32_t poll_time;    /* in microseconds */
+	uint32_t cycle_time;   /* in microseconds */
+	uint32_t sync_timeout; /* in microseconds */
 };
 
 struct cif_raw_slave_config {
