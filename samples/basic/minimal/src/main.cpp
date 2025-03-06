@@ -72,7 +72,7 @@ void record(uint32_t v, int32_t *max, int32_t *min, int32_t *avg)
 	idx = (idx + 1) % depth;
 }
 
-float fn_val(uint32_t val, adc7124_8::cha_range r, bool bipolar, double gain=1e3)
+float fn_val(uint32_t val, uint8_t r, bool bipolar, double gain=1e3)
 {
 	double val_to_vol[] = {
 		2.5 / (0x800000 - 1),
@@ -87,9 +87,9 @@ float fn_val(uint32_t val, adc7124_8::cha_range r, bool bipolar, double gain=1e3
 	double v;
 	
 	if (bipolar) {
-		v = ((int64_t)val - 0x800000) * val_to_vol[static_cast<uint8_t>(r)];
+		v = ((int64_t)val - 0x800000) * val_to_vol[r];
 	} else {
-		v = val * val_to_vol[static_cast<uint8_t>(r)];
+		v = val * val_to_vol[r];
 	}
 	v *= gain;
 	return (float)v;
@@ -123,27 +123,35 @@ int main(void)
 
 	adc.initialize();
 
-	adc7124_8::cha_range range = adc7124_8::cha_range::CHA_RANGE_2_5V;
+	// adc7124_8::cha_range range = adc7124_8::cha_range::CHA_RANGE_2_5V;
+	auto range = adc7124_8::cha_ctrl_param::CHA_RANGE_2_5V;
 	uint8_t fs_reject[] = { 48, 40}; // 50Hz, 60Hz
 	{
 		using namespace adc7124_8;
 
-		adc.adc_config(adc_clock_ref::ADC_CLK_REF_INT, adc_mode::ADC_MODE_CONTINUE, true, adc_pwr_mode::ADC_PWR_MODE_FULL);
+		adc_ctrl_param adc_ctrl = {
+			.clk_ref = adc_ctrl_param::ADC_CLK_REF_INT,
+			.mode = adc_ctrl_param::ADC_MODE_CONTINUE,
+			.internal_vol_ref = true,
+			.pwr_mode = adc_ctrl_param::ADC_PWR_MODE_FULL
+		};
+
+		adc.adc_config(adc_ctrl);
 		adc.diag_config(static_cast<uint32_t>(adc_diag::DIAG_MASK));
 		cha_ctrl_param ctrl = {
 			.range = range,
-			.ref = cha_ref::CHA_REF_1,
+			.ref = cha_ctrl_param::CHA_REF_1,
 			.AIN_BUF_P = false,
 			.AIN_BUF_N = false,
 			.REF_BUF_P = false,
 			.REF_BUF_N = false,
-			.burnout = cha_burnout::CHA_BURNOUT_OFF,
+			.burnout = cha_ctrl_param::CHA_BURNOUT_OFF,
 			.bipolar = true
 		};
 		cha_filter_param filter = {
-			.type = filter_type::FILTER_TYPE_SINC3,
+			.type = cha_filter_param::FILTER_TYPE_SINC3,
 			.reject_50_60Hz = true,
-			.post = post_filter::post_filter_resrved,
+			.post = cha_filter_param::post_filter_reserved,
 			.single_cycle = false,
 			.fs = fs_reject[0],
 		};

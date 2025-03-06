@@ -14,7 +14,7 @@ struct spi_iface {
 
 namespace adc7124_8
 {
-enum class reg : uint8_t {
+enum {
 	REG_STATUS = 0x00,
 	REG_ADC_CTRL = 0x01,
 	REG_DATA = 0x02,
@@ -80,13 +80,6 @@ enum class status : uint8_t {
 	STATUS_POR = BIT(4),
 };
 
-enum class adc_clock_ref : uint8_t {
-	ADC_CLK_REF_INT = 0,
-	ADC_CLK_REF_INT_OUT = 1, /* output internal clock at CLK pin */
-	ADC_CLK_EXT = 2,
-	ADC_CLK_EXT_DIV4 = 3,
-};
-
 enum class adc_pin_mux: uint8_t {
     ADC_PIN_MUX_DIFF_0 = 0, /* asign channel to use AI+0 and AI-1 */
     ADC_PIN_MUX_DIFF_1 = 1, /* asign channel to use AI+2 and AI-3 */
@@ -97,40 +90,6 @@ enum class adc_pin_mux: uint8_t {
     ADC_PIN_MUX_DIFF_6 = 6, /* asign channel to use AI+12 and AI-13 */
     ADC_PIN_MUX_DIFF_7 = 7, /* asign channel to use AI+14 and AI-15 */
     ADC_PIN_MUX_DIFF_AUTO = 8, /* auto asign channel, AI+{ch*2} and AI-{ch*2+1} */
-};
-
-enum class adc_mode : uint8_t {
-	ADC_MODE_CONTINUE = 0,
-	ADC_MODE_ONESHOT = 1,
-	ADC_MODE_STANDBY = 2,
-	ADC_MODE_PWR_DOWN = 3,
-	ADC_MODE_IDLE = 4,
-	ADC_MODE_INT_OFFSET_CALIBRATION = 5,
-	ADC_MODE_INT_GAIN_CALIBRATION = 6,
-	ADC_MODE_SYS_OFFSET_CALIBRATION = 7,
-	ADC_MODE_SYS_GAIN_CALIBRATION = 8,
-};
-
-enum class adc_pwr_mode : uint8_t {
-    ADC_PWR_MODE_LOW = 0,
-    ADC_PWR_MODE_MID = 1,
-    ADC_PWR_MODE_FULL = 2,
-};
-
-enum class filter_type : uint8_t {
-    FILTER_TYPE_SINC4 = 0, /* default */
-    FILTER_TYPE_SINC3 = 2,
-    FILTER_TYPE_SINC4_FAST = 4,
-    FILTER_TYPE_SINC3_FAST = 5,
-    FILTER_TYPE_POST_FILTER = 7,
-};
-
-enum class post_filter : uint8_t {
-    post_filter_resrved = 0,
-    post_filter_47hz = 2,
-    post_filter_62hz = 3,
-    post_filter_86hz = 5,
-    post_filter_92hz = 6,
 };
 
 enum class adc_diag : uint32_t {
@@ -159,56 +118,88 @@ enum class adc_diag : uint32_t {
 	DIAG_MASK = 0x7F'FF'FF,
 };
 
-enum class cha_range : uint8_t {
-	CHA_RANGE_2_5V = 0,
-	CHA_RANGE_1_25V = 1,
-	CHA_RANGE_625mV = 2,
-	CHA_RANGE_312_5mV = 3,
-	CHA_RANGE_156_25mV = 4,
-	CHA_RANGE_78_125mV = 5,
-	CHA_RANGE_39_0625mV = 6,
-	CHA_RANGE_19_53125mV = 7,
-};
-
-enum class cha_ref : uint8_t {
-	CHA_REF_1 = 0,
-	CHA_REF_2 = 1,
-	CHA_REF_INTERNAL = 2,
-	CHA_REF_AVDD = 3, /* Analog VDD */
-};
-
-enum class cha_burnout : uint8_t {
-	CHA_BURNOUT_OFF = 0,
-	CHA_BURNOUT_0_5uA = 1,
-	CHA_BURNOUT_2uA = 2,
-	CHA_BURNOUT_4uA = 3,
-};
-
 enum class REG_CHA: uint16_t {
 	REG_CHA_EN = BIT(15),
 };
 
+struct adc_ctrl_param {
+	enum {
+		ADC_CLK_REF_INT = 0,
+		ADC_CLK_REF_INT_OUT = 1, /* output internal clock at CLK pin */
+		ADC_CLK_EXT = 2,
+		ADC_CLK_EXT_DIV4 = 3,
+	} clk_ref;
+	enum {
+		ADC_MODE_CONTINUE = 0,
+		ADC_MODE_ONESHOT = 1,
+		ADC_MODE_STANDBY = 2,
+		ADC_MODE_PWR_DOWN = 3,
+		ADC_MODE_IDLE = 4,
+		ADC_MODE_INT_OFFSET_CALIBRATION = 5,
+		ADC_MODE_INT_GAIN_CALIBRATION = 6,
+		ADC_MODE_SYS_OFFSET_CALIBRATION = 7,
+		ADC_MODE_SYS_GAIN_CALIBRATION = 8,
+	} mode;
+	bool internal_vol_ref;
+	enum {
+    	ADC_PWR_MODE_LOW = 0,
+    	ADC_PWR_MODE_MID = 1,
+    	ADC_PWR_MODE_FULL = 2,
+	} pwr_mode;
+};
+
 struct cha_ctrl_param {
-	cha_range range;
-	cha_ref ref;
+	enum {
+		CHA_RANGE_2_5V = 0,
+		CHA_RANGE_1_25V = 1,
+		CHA_RANGE_625mV = 2,
+		CHA_RANGE_312_5mV = 3,
+		CHA_RANGE_156_25mV = 4,
+		CHA_RANGE_78_125mV = 5,
+		CHA_RANGE_39_0625mV = 6,
+		CHA_RANGE_19_53125mV = 7,
+	} range;
+	enum {
+		CHA_REF_1 = 0,
+		CHA_REF_2 = 1,
+		CHA_REF_INTERNAL = 2,
+		CHA_REF_AVDD = 3, /* Analog VDD */
+	} ref;
 	bool AIN_BUF_P;
 	bool AIN_BUF_N;
 	bool REF_BUF_P;
 	bool REF_BUF_N;
-	cha_burnout burnout;
+	enum {
+		CHA_BURNOUT_OFF = 0,
+		CHA_BURNOUT_0_5uA = 1,
+		CHA_BURNOUT_2uA = 2,
+		CHA_BURNOUT_4uA = 3,
+	} burnout;
 	bool bipolar;
 };
 
 struct cha_filter_param {
-    filter_type type;
+	enum {
+    	FILTER_TYPE_SINC4 = 0, /* default */
+    	FILTER_TYPE_SINC3 = 2,
+    	FILTER_TYPE_SINC4_FAST = 4,
+    	FILTER_TYPE_SINC3_FAST = 5,
+    	FILTER_TYPE_POST_FILTER = 7,
+	} type;
     bool reject_50_60Hz;
-    post_filter post;
+	enum {
+    	post_filter_reserved = 0,
+    	post_filter_47hz = 2,
+    	post_filter_62hz = 3,
+    	post_filter_86hz = 5,
+    	post_filter_92hz = 6,
+	} post;
     bool single_cycle; /* only works on single analog input channel and continue conversion mode */
     uint16_t fs; /* 10:0 */
 };
 
 struct cmd {
-    explicit cmd(bool wen, bool read, reg reg):
+    explicit cmd(bool wen, bool read, int reg):
         cmd_(static_cast<uint8_t>(reg) | (wen ? 0 : BIT(7)) | (read ? BIT(6) : 0))
     {}
     uint8_t operator()() const { return cmd_; }
@@ -225,7 +216,7 @@ struct adc {
 	bool get_status(uint8_t *status);
     bool get_data(uint32_t *data);
     bool get_diag(uint32_t *diag);
-    void adc_config(adc_clock_ref clk_ref, adc_mode mode, bool internal_vol_ref, adc_pwr_mode pwr_mode = adc_pwr_mode::ADC_PWR_MODE_FULL);
+	void adc_config(adc_ctrl_param ctrl);
     void cha_config(uint8_t ch, bool enable, const cha_ctrl_param ctrl, const cha_filter_param filter, adc_pin_mux mux);
     void diag_config(uint32_t diag_mask);
 
