@@ -51,7 +51,7 @@
 		reg = <0x43c20000 DT_SIZE_K(4)>,
 			  <0x40020000 DT_SIZE_K(64)>,
 			  <0x40030000 DT_SIZE_K(64)>;
-		reg-names = "reg", "rx_buf", "tx_buf";
+		reg-names = "reg", "tx_buf", "rx_buf";
 		status = "disabled";
 		poll = <50>;
 		pps = <100000>;
