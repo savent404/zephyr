@@ -37,7 +37,7 @@ static inline uint32_t mcb_read(uint32_t addr)
 
 	val = sys_read32(addr);
 #if CONFIG_MCB_SYSTECH_HW_WORKAROUND
-	k_busy_wait(1);
+	k_busy_wait(100);
 #endif
 	return val;
 }
