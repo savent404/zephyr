@@ -50,6 +50,16 @@ u8 yt8521_reg_dump(FGmacPs_Instance_T *pGmac)
 	return ETHERNET_PHY_OK;
 }
 
+u32 yt8521_get_rx_err_count(FGmacPs_Instance_T *pGmac)
+{
+	u32 reg_val;
+
+	reg_val = yt8521_reg_read(pGmac, PAGE0, YT8521_RXERC);
+	FMSH_DEBUG("YT8521 RX Error Counter: 0x%x\r\n", reg_val);
+
+	return reg_val;
+}
+
 u8 yt8521_detect(FGmacPs_Instance_T *pGmac)
 {
 	u32 reg1 = yt8521_reg_read(pGmac, PAGE0, YT8521_ID1);

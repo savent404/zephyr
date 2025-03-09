@@ -353,6 +353,8 @@ static int eth_fmsh_set_config(const struct device *dev, enum ethernet_config_ty
 static int eth_fmsh_get_config(const struct device *dev, enum ethernet_config_type type,
 			       struct ethernet_config *config)
 {
+	const struct eth_fmsh_data *ctx = dev->data;
+
 	FMSH_DEBUG("Get config");
 	switch (type) {
 	case ETHERNET_CONFIG_TYPE_PRIORITY_QUEUES_NUM:
@@ -361,7 +363,41 @@ static int eth_fmsh_get_config(const struct device *dev, enum ethernet_config_ty
 	case ETHERNET_CONFIG_TYPE_MAC_ADDRESS:
 		/* 获取MAC地址 */
 		break;
+	case ETHERNET_CONFIG_TYPE_LINK:
+		/* 获取链接配置 */
+		config->l.link_10bt = false;
+		config->l.link_100bt = false;
+		config->l.link_1000bt = false;
+
+		if (!ctx || !ctx->gmac_inst || !ctx->gmac_inst->gmac_link_status) {
+			break;
+		}
+
+		uint8_t link_status = ctx->gmac_inst->gmac_link_status->link_status;
+		uint8_t link_speed = ctx->gmac_inst->gmac_link_status->link_speed;
+
+		FMSH_DEBUG("link status: %d, speed: %d", link_status, link_speed);
+
+		if (!link_status) {
+			break;
+		}
+
+		switch (link_speed) {
+		case 0:
+			config->l.link_10bt = true;
+			break;
+		case 1:
+			config->l.link_100bt = true;
+			break;
+		case 2:
+			config->l.link_1000bt = true;
+			break;
+		default:
+			break;
+		}
+		break;
 	default:
+		FMSH_DEBUG("unsupported config type: %d", type);
 		return -ENOTSUP;
 	}
 	return 0;
@@ -548,9 +584,27 @@ static int eth_fmsh_init(const struct device *dev)
 	return 0;
 }
 
+#if defined(CONFIG_NET_STATISTICS_ETHERNET)
+static struct net_stats_eth *eth_fmsh_get_stats(const struct device *dev)
+{
+	struct eth_fmsh_data *data = dev->data;
+
+	/* 获取PHY接收错误计数并更新统计信息 */
+	uint32_t rx_err_count = yt8521_get_rx_err_count(data->gmac_inst);
+
+	/* 将PHY接收错误计数存储在rx_crc_errors字段中 */
+	data->stats.error_details.rx_crc_errors = rx_err_count;
+
+	return &data->stats;
+}
+#endif
+
 /* 更新后的网络接口操作集 */
 static const struct ethernet_api eth_fmsh_api = {
 	.iface_api.init = eth_fmsh_iface_init,
+#if defined(CONFIG_NET_STATISTICS_ETHERNET)
+	.get_stats = eth_fmsh_get_stats,
+#endif
 	.send = eth_fmsh_send,
 	.get_capabilities = eth_fmsh_get_capabilities,
 	.set_config = eth_fmsh_set_config,

@@ -99,5 +99,6 @@ u8 yt8521_init(FGmacPs_Instance_T *pGmac);
 u8 yt8521_reset(FGmacPs_Instance_T *pGmac);
 u8 yt8521_cfg(FGmacPs_Instance_T *pGmac);
 u8 yt8521_reg_dump(FGmacPs_Instance_T *pGmac);
+u32 yt8521_get_rx_err_count(FGmacPs_Instance_T *pGmac);
 
 #endif /* _FMSH_YT8521_H_ */
