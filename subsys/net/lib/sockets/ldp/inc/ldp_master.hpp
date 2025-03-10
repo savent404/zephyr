@@ -427,7 +427,7 @@ template <typename T_mempool, typename T_cache> struct ldp_master: public ldp_ba
 			return -LDP_ERR_NOMEM;
 		}
 		abuf.len = len;
-		memcpy(abuf.buf, buf, len);
+		ldp_memcpy::memcpy(abuf.buf, buf, len);
 		ci->tx_bufs.push_back(std::move(abuf));
 
 		ci->flg_hold_on = false;
@@ -441,7 +441,7 @@ template <typename T_mempool, typename T_cache> struct ldp_master: public ldp_ba
 		if (!tx_buf) {
 			return -LDP_ERR_NOMEM;
 		}
-		memcpy(tx_buf, buf, len);
+		ldp_memcpy::memcpy(tx_buf, buf, len);
 		ci->tx_buf = tx_buf;
 		ci->tx_len = len;
 		ci->flg_hold_on = false;
@@ -480,7 +480,7 @@ template <typename T_mempool, typename T_cache> struct ldp_master: public ldp_ba
 
 		abuf = ci->rx_bufs.front();
 		if (abuf.len <= len) {
-			memcpy(buf, abuf.buf, abuf.len);
+			ldp_memcpy::memcpy(buf, abuf.buf, abuf.len);
 			ci->rx_bufs.pop_front();
 			mempool_if::free(abuf.buf);
 			return abuf.len;
@@ -508,7 +508,7 @@ template <typename T_mempool, typename T_cache> struct ldp_master: public ldp_ba
 
 		ci->flg_new_data = false;
 
-		memcpy(buf, ci->rx_buf, ci->rx_len);
+		ldp_memcpy::memcpy(buf, ci->rx_buf, ci->rx_len);
 		return ci->rx_len;
 	}
 

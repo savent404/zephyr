@@ -448,7 +448,7 @@ TEST_F(test_ldp_sm, worst_case_slave_no_response)
 		ASSERT_EQ(m.recv(m_conn_cfg[0], rx_buf, 32), -err::LDP_ERR_AGAIN);
 		ASSERT_EQ(m.recv(m_conn_cfg[1], rx_buf, 32), -err::LDP_ERR_P_ERROR);
 		ASSERT_EQ(m.recv(m_conn_io[0], rx_buf, 32), 8);
-		ASSERT_EQ(m.recv(m_conn_io[1], rx_buf, 32), -err::LDP_ERR_P_ERROR);
+		ASSERT_EQ(m.recv(m_conn_io[1], rx_buf, 32), -err::LDP_ERR_ATIMEOUT);
 		ASSERT_EQ(m.recv(m_conn_async_io[0], rx_buf, 32), -err::LDP_ERR_AGAIN);
 		ASSERT_EQ(m.recv(m_conn_async_io[1], rx_buf, 32), 8);
 	}

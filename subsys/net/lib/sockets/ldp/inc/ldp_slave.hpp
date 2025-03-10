@@ -134,7 +134,7 @@ template <typename T_cache> struct ldp_slave: public ldp_basic {
 			uint8_t *tx_buf = mcb_->get_tx_buf(port);
 			unsigned offset = 0;
 
-			memcpy(tx_buf + offset, buf, len);
+			ldp_memcpy::memcpy(tx_buf + offset, buf, len);
 			cache_if::wmb(); /* make sure buffer is updated */
 			mcb_->set_tx_len(port, len);
 		} else {
@@ -158,7 +158,7 @@ template <typename T_cache> struct ldp_slave: public ldp_basic {
 				return -LDP_ERR_AGAIN;
 			}
 
-			memcpy(tx_buf + offset, buf, len);
+			ldp_memcpy::memcpy(tx_buf + offset, buf, len);
 
 			/* update header(32-bit aligned) */
 			ldp_a_header tmp;
@@ -197,7 +197,7 @@ template <typename T_cache> struct ldp_slave: public ldp_basic {
 			}
 			mcb_->clr_rx(port);
 			if (rx_len <= len) {
-				memcpy(buf, rx_buf, rx_len);
+				ldp_memcpy::memcpy(buf, rx_buf, rx_len);
 			} else {
 				return -LDP_ERR_RX_BUF_TOO_SMALL;
 			}
