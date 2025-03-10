@@ -116,8 +116,9 @@ enum {
 };
 
 /* This is for CIF socket address */
-#define CIF_IS_SYNC_PORT(port)    ((port < 0x10) || (port >= 0x40 && port < 0x60))
-#define CIF_IS_ASYNC_PORT(port)   ((port >= 0x10 && port < 0x40) || (port >= 0x60 && port < 0x80))
+#define CIF_PORT_MOD(n)           ((n) & 0x1F) /* 0x00 ~ 0x1F */
+#define CIF_IS_SYNC_PORT(port)    (CIF_PORT_MOD(port) < 0x08)
+#define CIF_IS_ASYNC_PORT(port)   (CIF_PORT_MOD(port) >= 0x08)
 #define CIF_IS_UNKNOWN_PORT(port) (!(CIF_IS_SYNC_PORT(port) || CIF_IS_ASYNC_PORT(port)))
 
 /**

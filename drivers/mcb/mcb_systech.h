@@ -6,7 +6,7 @@
 
 #include <zephyr/kernel.h>
 
-#define MCB_MAX_PORT 0x80
+#define MCB_MAX_PORT 0x20
 
 #define MCB_REG_CTRL1          0x0000
 #define MCB_REG_CTRL2          0x0004

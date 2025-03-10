@@ -334,11 +334,6 @@ static ssize_t cif_sock_sendto(struct net_context *ctx, const void *buf, size_t 
 		return -ENOTCONN;
 	}
 
-	if (addr->bus != CIF_BUS_DEFAULT) {
-		NET_ERR("Invalid bus %d", addr->bus);
-		return -EINVAL;
-	}
-
 	auto conn_it = usr_data->conns.find(id);
 	if (conn_it == usr_data->conns.end()) {
 		return -ENOENT;
@@ -362,11 +357,6 @@ static ssize_t cif_sock_recvfrom(struct net_context *ctx, void *buf, size_t max_
 	if (!usr_data->ldp) {
 		NET_DBG("Not connected");
 		return -ENOTCONN;
-	}
-
-	if (addr->bus != CIF_BUS_DEFAULT) {
-		NET_DBG("Invalid bus %d", addr->bus);
-		return -EINVAL;
 	}
 
 	auto conn_it = usr_data->conns.find(id);
