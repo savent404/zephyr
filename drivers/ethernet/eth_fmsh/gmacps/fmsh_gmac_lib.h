@@ -305,6 +305,7 @@ typedef struct _phy_config {
 	char *phy_mode;
 	/* PHY delay configuration value */
 	u32 phy_delay;
+	u32 rx_err_count;
 	FGmacPs_Speed speed;
 	u8 is_duplex;
 

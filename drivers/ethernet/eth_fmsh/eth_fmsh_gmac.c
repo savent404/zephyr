@@ -117,6 +117,7 @@ static void eth_fmsh_phy_update(void *arg1, void *arg2, void *arg3)
 	while (1) {
 		k_sleep(K_MSEC(1000));
 		FGmacPs_GmacLink_Updata(ctx->gmac_inst);
+		FGmacPs_GetRxErrCount(ctx->gmac_inst);
 		if (config->instance_id == 0) {
 			FGmacPS_Gmii2rgmii_Update_Speed(
 				ctx->gmac_inst, ctx->gmac_inst->phy_cfg->gmii2rgmii_mdio_addr1);
@@ -588,12 +589,9 @@ static int eth_fmsh_init(const struct device *dev)
 static struct net_stats_eth *eth_fmsh_get_stats(const struct device *dev)
 {
 	struct eth_fmsh_data *data = dev->data;
+	FGmacPs_Instance_T *pGmac = data->gmac_inst;
 
-	/* 获取PHY接收错误计数并更新统计信息 */
-	uint32_t rx_err_count = yt8521_get_rx_err_count(data->gmac_inst);
-
-	/* 将PHY接收错误计数存储在rx_crc_errors字段中 */
-	data->stats.error_details.rx_crc_errors = rx_err_count;
+	data->stats.error_details.rx_crc_errors = pGmac->phy_cfg->rx_err_count;
 
 	return &data->stats;
 }

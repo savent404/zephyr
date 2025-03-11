@@ -142,3 +142,8 @@ int FGmacPS_Gmii2rgmii_Update_Speed(FGmacPs_Instance_T *pGmac, uint8_t gmii2rgmi
 	pPhyConfig->mdio_address = ext_phy_address;
 	return 0;
 }
+
+u32 FGmacPs_GetRxErrCount(FGmacPs_Instance_T *pGmac)
+{
+	return yt8521_get_rx_err_count(pGmac);
+}

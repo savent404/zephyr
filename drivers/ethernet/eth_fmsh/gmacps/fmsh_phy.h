@@ -15,5 +15,6 @@ extern u32 g_GmacLinkStatus;
 
 int FGmacPs_GmacLink_Updata(FGmacPs_Instance_T *pGmac);
 int FGmacPS_Gmii2rgmii_Update_Speed(FGmacPs_Instance_T *pGmac, uint8_t gmii2rgmii_addr);
+u32 FGmacPs_GetRxErrCount(FGmacPs_Instance_T *pGmac);
 
 #endif
