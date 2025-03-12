@@ -1,0 +1,21 @@
+/**
+ * Copyright (c) 2024 SYSTech Co.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+#include <common/mem.h>
+
+&mmc0 {
+	status = "okay";
+	non-removable;
+
+	usr {
+		compatible = "zephyr,mmc-disk";
+		status = "okay";
+		bus-width = <4>;
+	};
+};
+
+&uart1 {
+	status = "disabled";
+};

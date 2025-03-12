@@ -22,6 +22,20 @@ LOG_MODULE_REGISTER(main);
 #define MAX_PATH_LEN 255
 #define TEST_FILE_SIZE 547
 
+/* if defined CONFIG_RAM_CONSOLE, use printk to output log */
+#if defined(CONFIG_RAM_CONSOLE)
+#undef LOG_PRINTK
+#undef LOG_ERR
+#undef LOG_INF
+#undef LOG_WRN
+#undef LOG_DBG
+#define LOG_PRINTK(fmt, ...) printk(fmt, ##__VA_ARGS__)
+#define LOG_ERR(fmt, ...)    printk(fmt, ##__VA_ARGS__)
+#define LOG_INF(fmt, ...)    printk(fmt, ##__VA_ARGS__)
+#define LOG_WRN(fmt, ...)    printk(fmt, ##__VA_ARGS__)
+#define LOG_DBG(fmt, ...)    printk(fmt, ##__VA_ARGS__)
+#endif
+
 static uint8_t file_test_pattern[TEST_FILE_SIZE];
 static int lsdir(const char *path)
 {
