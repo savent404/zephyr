@@ -33,6 +33,7 @@ jobs:
         with:
           path: zephyr
           fetch-depth: 0
+          token: ${{ secrets.PRJ_TOKEN }}
 
       - name: Rebase
         if: github.event_name == 'pull_request'
