@@ -1,0 +1,13 @@
+/*
+ * Copyright (c) 2024 SYSTech Co.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+/dts-v1/;
+
+#include <fmsh/rbs2530.dtsi>
+
+
+&ethernet0 {
+	status = "disabled";
+};
