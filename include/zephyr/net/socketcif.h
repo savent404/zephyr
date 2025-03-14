@@ -97,7 +97,11 @@ struct cif_error_filter {
 #define CIF_ERR_PREV_PREEMPT  BIT(21) /* R=1 frame receive in previous operation */
 #define CIF_ERR_PREV_INVALID_ASYNC_PACK                                                            \
 	BIT(22) /* Invalid async packet happened in previous operation */
-#define CIF_ERR_MASK (0x3FF << 12)
+#define CIF_ERR_PREV_RX_DROP_NOMEM     BIT(23) /* Drop packet due to no memory */
+#define CIF_ERR_PREV_RX_DROP_FIFO_FULL BIT(24) /* Drop packet due to rx buffer full */
+#define CIF_ERR_PREV_RX_DROP_DUPLICATE BIT(25) /* Drop packet due to duplicate */
+#define CIF_ERR_PREV_RX_DROP_INVALID   BIT(26) /* Drop packet due to invalid */
+#define CIF_ERR_MASK                   ((BIT_MASK(15) << 12))
 	uint32_t error_mask;
 };
 

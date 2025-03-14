@@ -171,6 +171,10 @@ struct ldp_basic {
 		LDP_ERR_PREV_PREEMPT,  /* R=1 frame receive in previous operation */
 		LDP_ERR_PREV_INVALID_ASYNC_PACK, /* Invalid async packet happened in
 						    previous operation */
+		LDP_ERR_PREV_RX_DROP_NOMEM,  /* Drop packet due to no memory */
+		LDP_ERR_PREV_RX_DROP_FIFO_FULL, /* Drop packet due to rx fifo full */
+		LDP_ERR_PREV_RX_DROP_DUPLICATE, /* Drop packet due to duplicate */
+		LDP_ERR_PREV_RX_DROP_INVALID,  /* Drop packet due to invalid */
 		LDP_ERR_MAX,
 	};
 	static_assert(LDP_ERR_MAX < 32, "Too many error codes");

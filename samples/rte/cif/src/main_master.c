@@ -217,6 +217,14 @@ static int handle_extra_errors(int sock)
 			LOG_WRN("PREV_MAY_LOST detected");
 		} else if (err_mask.error_mask & CIF_ERR_PREV_INVALID_ASYNC_PACK) {
 			LOG_WRN("PREV_INVALID_ASYNC_PACK detected");
+		} else if (err_mask.error_mask & CIF_ERR_PREV_RX_DROP_NOMEM) {
+			LOG_WRN("PREV_RX_DROP_NOMEM detected");
+		} else if (err_mask.error_mask & CIF_ERR_PREV_RX_DROP_FIFO_FULL) {
+			LOG_WRN("PREV_RX_DROP_FIFO_FULL detected");
+		} else if (err_mask.error_mask & CIF_ERR_PREV_RX_DROP_DUPLICATE) {
+			LOG_WRN("PREV_RX_DROP_DUPLICATE detected");
+		} else if (err_mask.error_mask & CIF_ERR_PREV_RX_DROP_INVALID) {
+			LOG_WRN("PREV_RX_DROP_INVALID detected");
 		} else {
 			LOG_ERR("Unknown error mask 0x%08x detected", err_mask.error_mask);
 		}

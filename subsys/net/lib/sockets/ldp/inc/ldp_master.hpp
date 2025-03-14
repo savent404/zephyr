@@ -589,6 +589,7 @@ template <typename T_mempool, typename T_cache> struct ldp_master: public ldp_ba
 
 			/* handle received frame */
 			if (data_ready && rx_len) {
+				bool buffer_available = true;
 
 				/* if rx buffer is not enough, reallocate */
 				if (ci->rx_len < rx_len) {
@@ -598,12 +599,22 @@ template <typename T_mempool, typename T_cache> struct ldp_master: public ldp_ba
 					}
 					ci->rx_buf = reinterpret_cast<uint8_t *>(
 						mempool_if::alloc(rx_len));
+
+					/* if no memory available, set rx_len to 0 and report error */
+					if (!ci->rx_buf) {
+						ci->rx_len = 0;
+						ci->last_err |= 1 << LDP_ERR_NOMEM;
+						buffer_available = false;
+					}
 				}
-				cache_if::rmb(); /* make sure buffer is updated */
-				ldp_memcpy::memcpy(ci->rx_buf, rx_buf, rx_len);
-				ci->rx_len = rx_len;
-				ci->stat_rx_packet++;
-				ci->flg_new_data = true;
+
+				if (buffer_available) {
+					cache_if::rmb(); /* make sure buffer is updated */
+					ldp_memcpy::memcpy(ci->rx_buf, rx_buf, rx_len);
+					ci->rx_len = rx_len;
+					ci->stat_rx_packet++;
+					ci->flg_new_data = true;
+				}
 				mcb_->clr_rx(ci->port);
 
 				/* If new data received, reset timeout */
@@ -664,6 +675,8 @@ template <typename T_mempool, typename T_cache> struct ldp_master: public ldp_ba
 				false; /* new rsp but not ordered(including first rsp)*/
 			bool is_acceptable_rsp = false; /* accept rsp */
 			bool is_rx_full = false;        /* rx buffer is full */
+			bool is_memalloc_fail = false;  /* memory allocation failure */
+			bool is_rx_duplicate = false;   /* duplicate packet */
 			uint8_t *rx_buf = mcb_->get_rx_buf(ci->port);
 			uint16_t rx_len = 0;
 			constexpr unsigned hdr_size = sizeof(ldp_a_header);
@@ -746,6 +759,7 @@ template <typename T_mempool, typename T_cache> struct ldp_master: public ldp_ba
 				is_acceptable_rsp = is_new_rsp &&
 						    (ci->flg_strong_order ? is_ordered_rsp : true);
 				is_rx_full = ci->rx_bufs.size() >= LDP_MAX_RX_BUF;
+				is_rx_duplicate = !is_invalid_hdr && (rx_hdr->xid == ci->rxid); /* Check for duplicate packet - same XID as previously received */
 
 				mcb_->clr_rx(ci->port);
 			}
@@ -758,8 +772,12 @@ template <typename T_mempool, typename T_cache> struct ldp_master: public ldp_ba
 				if (rx_abuf.len) {
 					rx_abuf.buf = reinterpret_cast<uint8_t *>(
 						mempool_if::alloc(rx_abuf.len));
-					ldp_memcpy::memcpy(rx_abuf.buf, rx_data, rx_abuf.len);
-					ci->rx_bufs.push_back(std::move(rx_abuf));
+					if (!rx_abuf.buf) {
+						is_memalloc_fail = true;
+					} else {
+						ldp_memcpy::memcpy(rx_abuf.buf, rx_data, rx_abuf.len);
+						ci->rx_bufs.push_back(std::move(rx_abuf));
+					}
 				}
 			}
 
@@ -810,6 +828,19 @@ template <typename T_mempool, typename T_cache> struct ldp_master: public ldp_ba
 						    LDP_ERR_PREV_INVALID_ASYNC_PACK);
 			ci->last_err = handle_error(is_unordered_rsp, ci->last_err,
 						    LDP_ERR_MAY_LOST, LDP_ERR_PREV_MAY_LOST);
+			if (is_memalloc_fail) {
+				ci->last_err |= 1 << LDP_ERR_PREV_RX_DROP_NOMEM;
+			}
+			if (is_rx_full) {
+				ci->last_err |= 1 << LDP_ERR_PREV_RX_DROP_FIFO_FULL;
+			}
+			if (is_rx_duplicate) {
+				ci->last_err |= 1 << LDP_ERR_PREV_RX_DROP_DUPLICATE;
+			}
+			if (is_invalid_hdr) {
+				ci->last_err |= 1 << LDP_ERR_PREV_RX_DROP_INVALID;
+			}
+
 			if (is_acceptable_rsp) {
 				ci->stat_rx_packet++;
 			}
