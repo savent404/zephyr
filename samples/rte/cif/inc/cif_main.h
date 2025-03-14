@@ -68,6 +68,8 @@ struct context {
 #define CMD_CONFIG    2
 #define CMD_IO        3
 #define CMD_SWITCH    4
+#define CMD_OPEN      5
+#define CMD_CLOSE     6
 	uint32_t cmd;
 
 #define STATE_IDLE     0
@@ -75,6 +77,8 @@ struct context {
 #define STATE_CONFIG   2
 #define STATE_IO_START 3
 #define STATE_IO       4
+#define STATE_OPEN     5
+#define STATE_CLOSE    6
 	uint32_t state;
 
 	uint32_t stat_ok;
@@ -87,6 +91,11 @@ struct context {
 	socklen_t curr_len;
 
 	struct k_sem terminate_sem;
+
+	/* For open command */
+	uint8_t initial_data[64];
+	size_t initial_data_len;
+	bool check_response;
 };
 
 int slave_start(void);

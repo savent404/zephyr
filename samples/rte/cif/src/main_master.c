@@ -25,6 +25,12 @@ static void parse_cmd(void)
 	case CMD_IO:
 		ctx_.state = STATE_IO_START;
 		break;
+	case CMD_OPEN:
+		ctx_.state = STATE_OPEN;
+		break;
+	case CMD_CLOSE:
+		ctx_.state = STATE_CLOSE;
+		break;
 	case CMD_NONE:
 	default:
 		break;
@@ -142,6 +148,7 @@ static bool dev_general_cfg(int cif_sock, uint8_t slot, uint8_t port, const void
 	int ret, max_try = 10;
 
 	ret = sendto(cif_sock, cfg, len, 0, (struct sockaddr *)&remote, sizeof(remote));
+
 	if (ret < 0) {
 		LOG_ERR("Failed to send data, errno %d", errno);
 		return false;
@@ -232,23 +239,221 @@ static int handle_extra_errors(int sock)
 	return 0;
 }
 
+static bool handle_idle_state(void)
+{
+	parse_cmd();
+	/* Give up CPU and hand over */
+	k_usleep(SYNC_CYCLE_TIME);
+	return true;
+}
+
+static bool handle_discover_state(int sock)
+{
+	bool res = dev_discovery(sock, ctx_.target_sid);
+
+	LOG_INF("Slot %d %s", ctx_.target_sid, res ? "exist" : "not exist");
+	ctx_.state = STATE_IDLE;
+	return true;
+}
+
+static bool handle_config_state(int sock)
+{
+	uint32_t flags = CIF_PORT_FLG_STRONG_ORDER | CIF_PORT_FLG_ONE_SHOT;
+
+	bool res =
+		dev_general_init(sock, ctx_.target_sid, PORT_ID_CFG,
+				 ctx_.target_opt == normal ? flags : flags | CIF_PORT_FLG_PREEMPT,
+				 ASYNC_DEFAULT_BANDWIDTH);
+
+	if (res) {
+		static const char config_data[] = "cfg:123";
+
+		res = dev_general_cfg(sock, ctx_.target_sid, PORT_ID_CFG, config_data,
+				      sizeof(config_data));
+		LOG_INF("Slot %d configuration %s", ctx_.target_sid, res ? "done" : "not done");
+		dev_general_deinit(sock, ctx_.target_sid, PORT_ID_CFG);
+	}
+
+	ctx_.state = STATE_IDLE;
+	return true;
+}
+
+static bool handle_io_start_state(int sock, uint32_t *cnt)
+{
+	bool res = dev_general_init(sock, ctx_.target_sid, ctx_.target_port,
+				    ctx_.target_opt == preempt ? CIF_PORT_FLG_PREEMPT : 0,
+				    ctx_.target_pps);
+	*cnt = ctx_.target_cnt + 1;
+	if (!res) {
+		LOG_ERR("Failed to establish connection to slot%d", ctx_.target_sid);
+		ctx_.state = STATE_IDLE;
+		return false;
+	}
+
+	struct sockaddr_cif remote = {
+		.cif_family = AF_CIF,
+		.slot = ctx_.target_sid,
+		.port = ctx_.target_port,
+	};
+	ctx_.curr.cif_family = remote.cif_family;
+	ctx_.curr.slot = remote.slot;
+	ctx_.curr.port = remote.port;
+	ctx_.curr_len = sizeof(ctx_.curr);
+	ctx_.stat_ok = 0;
+	ctx_.stat_failed = 0;
+	ctx_.systick_begin = sys_clock_tick_get();
+
+	int ret = sendto(sock, "io:0", 4, 0, (struct sockaddr *)&remote, sizeof(remote));
+
+	if (ret < 0) {
+		LOG_ERR("Failed to send data, errno %d", errno);
+		ctx_.state = STATE_IDLE;
+		return false;
+	}
+
+	ctx_.state = STATE_IO;
+	return true;
+}
+
+static bool handle_io_state(int sock, uint32_t *cnt, uint8_t *in_buf, size_t in_buf_size)
+{
+	if (--(*cnt) > 0) {
+		k_usleep(SYNC_CYCLE_TIME);
+		int ret = recvfrom(sock, in_buf, in_buf_size, 0, (struct sockaddr *)&ctx_.curr,
+				   &ctx_.curr_len);
+		if (ret < 0) {
+			LOG_ERR("Failed to receive data, errno %d", errno);
+			ctx_.stat_failed++;
+		} else {
+			LOG_HEXDUMP_DBG(in_buf, ret, "Received data from slot");
+			ctx_.stat_ok++;
+		}
+
+		ret = sendto(sock, "io:0", 4, 0, (struct sockaddr *)&ctx_.curr, ctx_.curr_len);
+		if (ret < 0) {
+			LOG_ERR("Failed to send data, errno %d", errno);
+			ctx_.stat_failed++;
+		}
+	} else {
+		ctx_.systick_end = sys_clock_tick_get();
+		ctx_.state = STATE_IDLE;
+		dev_general_deinit(sock, ctx_.target_sid, ctx_.target_port);
+
+		LOG_INF("IO tested, package passed: %d err: %d, percentage: %3d%%", ctx_.stat_ok,
+			ctx_.stat_failed, ctx_.stat_ok * 100 / (ctx_.stat_ok + ctx_.stat_failed));
+		LOG_INF("Duration: %lldms", (ctx_.systick_end - ctx_.systick_begin));
+	}
+	return true;
+}
+
+static bool handle_open_state(int sock, uint8_t *response_buf, size_t response_buf_size)
+{
+	/* Open port and initialize with data */
+	bool res = dev_general_init(sock, ctx_.target_sid, ctx_.target_port,
+				    ctx_.target_opt == preempt ? CIF_PORT_FLG_PREEMPT : 0,
+				    ASYNC_DEFAULT_BANDWIDTH);
+
+	if (!res) {
+		LOG_ERR("Failed to open port %d on slot %d", ctx_.target_port, ctx_.target_sid);
+		ctx_.state = STATE_IDLE;
+		return false;
+	}
+
+	struct sockaddr_cif remote = {
+		.cif_family = AF_CIF,
+		.slot = ctx_.target_sid,
+		.port = ctx_.target_port,
+	};
+
+	/* Send initial data */
+	int ret = sendto(sock, ctx_.initial_data, ctx_.initial_data_len, 0,
+			 (struct sockaddr *)&remote, sizeof(remote));
+
+	if (ret < 0) {
+		LOG_ERR("Failed to send initial data, errno %d", errno);
+		ctx_.state = STATE_IDLE;
+		return false;
+	}
+
+	LOG_INF("Port %d on slot %d opened successfully with initial data", ctx_.target_port,
+		ctx_.target_sid);
+
+	/* If check response is enabled, wait and check for response */
+	if (ctx_.check_response) {
+		k_usleep(SYNC_CYCLE_TIME * 2);
+		struct sockaddr_cif port_addr = {
+			.cif_family = AF_CIF,
+			.slot = ctx_.target_sid,
+			.port = ctx_.target_port,
+		};
+		socklen_t addr_len = sizeof(port_addr);
+
+		ret = recvfrom(sock, response_buf, response_buf_size, 0,
+			       (struct sockaddr *)&port_addr, &addr_len);
+
+		if (ret > 0) {
+			LOG_INF("Received response from slot %d port %d:", ctx_.target_sid,
+				ctx_.target_port);
+			LOG_HEXDUMP_INF(response_buf, ret, "Response data:");
+		} else {
+			LOG_WRN("No response received from slot %d port %d", ctx_.target_sid,
+				ctx_.target_port);
+		}
+	}
+
+	ctx_.state = STATE_IDLE;
+	return true;
+}
+
+static bool handle_close_state(int sock)
+{
+	/* Close the port */
+	bool res = dev_general_deinit(sock, ctx_.target_sid, ctx_.target_port);
+
+	if (res) {
+		LOG_INF("Port %d on slot %d closed successfully", ctx_.target_port,
+			ctx_.target_sid);
+	} else {
+		LOG_ERR("Failed to close port %d on slot %d", ctx_.target_port, ctx_.target_sid);
+	}
+
+	ctx_.state = STATE_IDLE;
+	return true;
+}
+
+static bool check_for_idle_responses(int sock, uint8_t *response_buf, size_t response_buf_size)
+{
+	struct sockaddr_cif port_addr = {
+		.cif_family = AF_CIF,
+		.slot = ctx_.target_sid,
+		.port = ctx_.target_port,
+	};
+	socklen_t addr_len = sizeof(port_addr);
+
+	int ret = recvfrom(sock, response_buf, response_buf_size, 0, (struct sockaddr *)&port_addr,
+			   &addr_len);
+
+	if (ret > 0) {
+		LOG_INF("Received data from slot %d port %d:", port_addr.slot, port_addr.port);
+		LOG_HEXDUMP_INF(response_buf, ret, "Received data:");
+		return true;
+	}
+
+	return false;
+}
+
 static int main_master(void)
 {
-
 	LOG_INF("Running in master mode");
-	/**
-	 * Step 1: create a CIF socket
-	 */
-	int sock = socket(AF_CIF, SOCK_RAW, CIF_RAW_MASTER);
-	int ret;
 
+	/* Step 1: create a CIF socket */
+	int sock = socket(AF_CIF, SOCK_RAW, CIF_RAW_MASTER);
 	if (sock < 0) {
 		LOG_ERR("Failed to create CIF socket, errno %d", errno);
 		return -1;
 	}
-	/**
-	 * Step 2: bind the CIF socket
-	 */
+
+	/* Step 2: bind the CIF socket */
 	struct sockaddr_cif local = {
 		.cif_family = AF_CIF,
 		.bus = ctx_.target_bus == bus_low ? CIF_BUS_SLOW : CIF_BUS_FAST,
@@ -256,16 +461,14 @@ static int main_master(void)
 		.port = -1, /* not used */
 	};
 
-	ret = bind(sock, (struct sockaddr *)&local, sizeof(local));
+	int ret = bind(sock, (struct sockaddr *)&local, sizeof(local));
 	if (ret < 0) {
 		LOG_ERR("Failed to bind CIF socket, errno %d", errno);
 		close(sock);
 		return -1;
 	}
 
-	/**
-	 * Step 3: set the CIF socket options
-	 */
+	/* Step 3: set the CIF socket options */
 	const struct cif_raw_master_config config = {
 		.poll_time = MCB_POLL_TIME,
 		.cycle_time = SYNC_CYCLE_TIME,
@@ -280,13 +483,11 @@ static int main_master(void)
 
 	ctx_.state = STATE_IDLE;
 
-	bool res;
 	uint32_t cnt = 1;
-	uint32_t flags = 0;
 	static uint8_t in_buf[512];
+	static uint8_t response_buf[64];
 
 	while (1) {
-
 		/* Terminate condition */
 		if (k_sem_take(&ctx_.terminate_sem, K_NO_WAIT) == 0) {
 			zsock_close(sock);
@@ -295,100 +496,37 @@ static int main_master(void)
 
 		switch (ctx_.state) {
 		case STATE_IDLE:
-			parse_cmd();
-			/* Give up CPU and hand over */
-			k_usleep(SYNC_CYCLE_TIME);
+			handle_idle_state();
 			break;
+
 		case STATE_DISCOVER:
-			res = dev_discovery(sock, ctx_.target_sid);
-
-			LOG_INF("Slot %d %s", ctx_.target_sid, res ? "exist" : "not exist");
-			ctx_.state = STATE_IDLE;
+			handle_discover_state(sock);
 			break;
+
 		case STATE_CONFIG:
-			flags = CIF_PORT_FLG_STRONG_ORDER | CIF_PORT_FLG_ONE_SHOT;
-
-			bool res = dev_general_init(
-				sock, ctx_.target_sid, PORT_ID_CFG,
-				ctx_.target_opt == normal ? flags : flags | CIF_PORT_FLG_PREEMPT,
-				ASYNC_DEFAULT_BANDWIDTH);
-
-			if (res) {
-				static const char config_data[] = "cfg:123";
-
-				res = dev_general_cfg(sock, ctx_.target_sid, PORT_ID_CFG,
-						      config_data, sizeof(config_data));
-				LOG_INF("Slot %d configuration %s", ctx_.target_sid,
-					res ? "done" : "not done");
-				dev_general_deinit(sock, ctx_.target_sid, PORT_ID_CFG);
-			}
-
-			ctx_.state = STATE_IDLE;
+			handle_config_state(sock);
 			break;
 
 		case STATE_IO_START:
-			res = dev_general_init(sock, ctx_.target_sid, ctx_.target_port,
-					       ctx_.target_opt == preempt ? CIF_PORT_FLG_PREEMPT
-									  : 0,
-					       ctx_.target_pps);
-			cnt = ctx_.target_cnt + 1;
-			if (res) {
-				struct sockaddr_cif remote = {
-					.cif_family = AF_CIF,
-					.slot = ctx_.target_sid,
-					.port = ctx_.target_port,
-				};
-				ctx_.curr.cif_family = remote.cif_family;
-				ctx_.curr.slot = remote.slot;
-				ctx_.curr.port = remote.port;
-				ctx_.curr_len = sizeof(ctx_.curr);
-				ctx_.stat_ok = 0;
-				ctx_.stat_failed = 0;
-				ctx_.systick_begin = sys_clock_tick_get();
-				ret = sendto(sock, "io:0", 4, 0, (struct sockaddr *)&remote,
-					     sizeof(remote));
-				if (ret < 0) {
-					LOG_ERR("Failed to send data, errno %d", errno);
-					ctx_.state = STATE_IDLE;
-				}
-			} else {
-				LOG_ERR("Failed to establish connection to slot%d",
-					ctx_.target_sid);
-				ctx_.state = STATE_IDLE;
-			}
-			ctx_.state = STATE_IO;
+			handle_io_start_state(sock, &cnt);
 			break;
+
 		case STATE_IO:
-			if (--cnt > 0) {
-				k_usleep(SYNC_CYCLE_TIME);
-				ret = recvfrom(sock, in_buf, sizeof(in_buf), 0,
-					       (struct sockaddr *)&ctx_.curr, &ctx_.curr_len);
-				if (ret < 0) {
-					LOG_ERR("Failed to receive data, errno %d", errno);
-					ctx_.stat_failed++;
-				} else {
-					LOG_HEXDUMP_DBG(in_buf, ret, "Received data from slot");
-					ctx_.stat_ok++;
-				}
-
-				ret = sendto(sock, "io:0", 4, 0, (struct sockaddr *)&ctx_.curr,
-					     ctx_.curr_len);
-				if (ret < 0) {
-					LOG_ERR("Failed to send data, errno %d", errno);
-					ctx_.stat_failed++;
-				}
-			} else {
-				ctx_.systick_end = sys_clock_tick_get();
-				ctx_.state = STATE_IDLE;
-				dev_general_deinit(sock, ctx_.target_sid, ctx_.target_port);
-
-				LOG_INF("IO tested, package passed: %d err: %d, percentage: %3d%%",
-					ctx_.stat_ok, ctx_.stat_failed,
-					ctx_.stat_ok * 100 / (ctx_.stat_ok + ctx_.stat_failed));
-				LOG_INF("Duration: %lldms",
-					(ctx_.systick_end - ctx_.systick_begin));
-			}
+			handle_io_state(sock, &cnt, in_buf, sizeof(in_buf));
 			break;
+
+		case STATE_OPEN:
+			handle_open_state(sock, response_buf, sizeof(response_buf));
+			break;
+
+		case STATE_CLOSE:
+			handle_close_state(sock);
+			break;
+		}
+
+		/* Check for response on opened ports */
+		if (ctx_.state == STATE_IDLE) {
+			check_for_idle_responses(sock, response_buf, sizeof(response_buf));
 		}
 
 		if (handle_extra_errors(sock)) {

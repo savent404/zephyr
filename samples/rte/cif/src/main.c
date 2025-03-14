@@ -55,13 +55,12 @@ static int cif_cmd(const struct shell *sh, size_t argc, char **argv)
 		_cmd_config = CMD_CONFIG,
 		_cmd_io = CMD_IO,
 		_cmd_switch = CMD_SWITCH,
+		_cmd_open = CMD_OPEN,
+		_cmd_close = CMD_CLOSE,
 	} cmd = _cmd_none;
 	const char *subcmd = argv[1];
 	static const char *const subcmd_list[] = {
-		"discovery",
-		"config",
-		"io",
-		"switch",
+		"discovery", "config", "io", "switch", "open", "close",
 	};
 
 	for (int i = 0; i < ARRAY_SIZE(subcmd_list); i++) {
@@ -172,6 +171,52 @@ static int cif_cmd(const struct shell *sh, size_t argc, char **argv)
 		unconditional_switch(is_master ? role_master : role_slave);
 		break;
 	}
+	case _cmd_open: {
+		if (ctx_.target_role != role_master) {
+			shell_print(sh, "Only master can open ports");
+			return -EINVAL;
+		}
+		if (argc < 4) {
+			shell_print(sh, "Invalid arguments number");
+			return -EINVAL;
+		}
+		ctx_.cmd = CMD_OPEN;
+		ctx_.target_sid = atoi(argv[2]);
+		ctx_.target_port = atoi(argv[3]);
+
+		/* Handle initial data */
+		if (argc >= 5) {
+			strncpy((char *)ctx_.initial_data, argv[4], sizeof(ctx_.initial_data) - 1);
+			ctx_.initial_data_len = strlen(argv[4]);
+		} else {
+			/* Default initial data */
+			strcpy((char *)ctx_.initial_data, "init");
+			ctx_.initial_data_len = 4;
+		}
+
+		/* Handle check response option */
+		if (argc >= 6 && !strcmp(argv[5], "check")) {
+			ctx_.check_response = true;
+		} else {
+			ctx_.check_response = false;
+		}
+
+		handled = true;
+	} break;
+	case _cmd_close: {
+		if (ctx_.target_role != role_master) {
+			shell_print(sh, "Only master can close ports");
+			return -EINVAL;
+		}
+		if (argc != 4) {
+			shell_print(sh, "Invalid arguments number");
+			return -EINVAL;
+		}
+		ctx_.cmd = CMD_CLOSE;
+		ctx_.target_sid = atoi(argv[2]);
+		ctx_.target_port = atoi(argv[3]);
+		handled = true;
+	} break;
 	case _cmd_none:
 	default:
 		break;
@@ -179,11 +224,13 @@ static int cif_cmd(const struct shell *sh, size_t argc, char **argv)
 
 	if (!handled) {
 		shell_print(sh, "Unknown subcmd or invalid arguments number");
-		shell_print(sh, "cmd: discovery, config, io");
+		shell_print(sh, "cmd: discovery, config, io, open, close");
 		shell_print(sh, "\tdiscovery <slot>");
 		shell_print(sh, "\tconfig <slot>");
 		shell_print(sh, "\tio <slot> [port] [cnt] [pps]");
 		shell_print(sh, "\tswitch <slave|master> [preempt]");
+		shell_print(sh, "\topen <slot> <port> [initial_data] [check]");
+		shell_print(sh, "\tclose <slot> <port>");
 		return 0;
 	}
 

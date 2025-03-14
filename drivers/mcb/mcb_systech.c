@@ -46,7 +46,7 @@ static inline void mcb_write(uint32_t value, uint32_t addr)
 {
 	mcb_write_unsafe(value, addr);
 	if (mcb_read(addr) != value) {
-		LOG_WRN("Write %08x to %08x failed, read %08x", value, addr, mcb_read(addr));
+		LOG_DBG("Write %08x to %08x failed, read %08x", value, addr, mcb_read(addr));
 	}
 }
 
