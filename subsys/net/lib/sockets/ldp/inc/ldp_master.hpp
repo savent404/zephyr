@@ -900,7 +900,11 @@ template <typename T_mempool, typename T_cache> struct ldp_master: public ldp_ba
 	static inline uint32_t LDP_POLL_TIMEOUT = 1000; /* 1ms */
 #endif
       public:
+#if CONFIG_LDP_MAX_HARQ
+	static inline constexpr unsigned LDP_MAX_HARQ = CONFIG_LDP_MAX_HARQ;
+#else
 	static inline constexpr unsigned LDP_MAX_HARQ = 10;
+#endif
 	static inline constexpr unsigned LDP_MAX_TX_BUF = LDP_MAX_HARQ;
 	static inline constexpr unsigned LDP_MAX_RX_BUF = LDP_MAX_HARQ;
 

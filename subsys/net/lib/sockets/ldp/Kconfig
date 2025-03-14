@@ -13,3 +13,13 @@ config LDP
 	help
 	  This option enables LDP support
 	  and is the basis for higher level protocols (e.g. LDP protocols).
+
+	config LDP_MAX_HARQ
+		int "Maximum LDP HARQ depth"
+		depends on LDP
+		default 4
+		range 1 16
+		help
+		  This option specifies the maximum depth of the LDP HARQ FIFO buffer.
+		  A larger value allows for more packets to be queued for retransmission
+		  but consumes more memory.
