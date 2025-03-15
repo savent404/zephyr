@@ -209,10 +209,13 @@ template <typename T_cache> struct ldp_slave: public ldp_basic {
 
 			rx_len = mcb_->get_rx_len(port);
 			rx_buf = mcb_->get_rx_buf(port);
-			if (!mcb_->has_rx(port) || rx_len <= 4) {
+			if (!mcb_->has_rx(port)) {
 				return -LDP_ERR_AGAIN;
 			}
 			mcb_->clr_rx(port);
+			if (rx_len <= 4) {
+				return -LDP_ERR_AGAIN;
+			}
 			ldp_a_header rx_hdr(*reinterpret_cast<volatile uint32_t *>(rx_buf));
 			ldp_a_header tx_hdr(
 				*reinterpret_cast<volatile uint32_t *>(mcb_->get_tx_buf(port)));
