@@ -370,6 +370,13 @@ static int main_master(void)
 					LOG_HEXDUMP_DBG(in_buf, ret, "Received data from slot");
 					ctx_.stat_ok++;
 				}
+
+				ret = sendto(sock, "io:0", 4, 0, (struct sockaddr *)&ctx_.curr,
+					     ctx_.curr_len);
+				if (ret < 0) {
+					LOG_ERR("Failed to send data, errno %d", errno);
+					ctx_.stat_failed++;
+				}
 			} else {
 				ctx_.systick_end = sys_clock_tick_get();
 				ctx_.state = STATE_IDLE;
