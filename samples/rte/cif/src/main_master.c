@@ -307,7 +307,7 @@ static bool handle_io_start_state(int sock, uint32_t *cnt)
 
 	if (ret < 0) {
 		LOG_ERR("Failed to send data, errno %d", errno);
-		ctx_.state = STATE_IDLE;
+		ctx_.state = STATE_CLOSE;
 		return false;
 	}
 
@@ -336,9 +336,7 @@ static bool handle_io_state(int sock, uint32_t *cnt, uint8_t *in_buf, size_t in_
 		}
 	} else {
 		ctx_.systick_end = sys_clock_tick_get();
-		ctx_.state = STATE_IDLE;
-		dev_general_deinit(sock, ctx_.target_sid, ctx_.target_port);
-
+		ctx_.state = STATE_CLOSE;
 		LOG_INF("IO tested, package passed: %d err: %d, percentage: %3d%%", ctx_.stat_ok,
 			ctx_.stat_failed, ctx_.stat_ok * 100 / (ctx_.stat_ok + ctx_.stat_failed));
 		LOG_INF("Duration: %lldms", (ctx_.systick_end - ctx_.systick_begin));
@@ -348,6 +346,7 @@ static bool handle_io_state(int sock, uint32_t *cnt, uint8_t *in_buf, size_t in_
 
 static bool handle_open_state(int sock, uint8_t *response_buf, size_t response_buf_size)
 {
+	int ret;
 	/* Open port and initialize with data */
 	bool res = dev_general_init(sock, ctx_.target_sid, ctx_.target_port,
 				    ctx_.target_opt == preempt ? CIF_PORT_FLG_PREEMPT : 0,
@@ -365,14 +364,16 @@ static bool handle_open_state(int sock, uint8_t *response_buf, size_t response_b
 		.port = ctx_.target_port,
 	};
 
-	/* Send initial data */
-	int ret = sendto(sock, ctx_.initial_data, ctx_.initial_data_len, 0,
-			 (struct sockaddr *)&remote, sizeof(remote));
+	if (ctx_.initial_data_len) {
+		/* Send initial data */
+		ret = sendto(sock, ctx_.initial_data, ctx_.initial_data_len, 0,
+				 (struct sockaddr *)&remote, sizeof(remote));
 
-	if (ret < 0) {
-		LOG_ERR("Failed to send initial data, errno %d", errno);
-		ctx_.state = STATE_IDLE;
-		return false;
+		if (ret < 0) {
+			LOG_ERR("Failed to send initial data, errno %d", errno);
+			ctx_.state = STATE_IDLE;
+			return false;
+		}
 	}
 
 	LOG_INF("Port %d on slot %d opened successfully with initial data", ctx_.target_port,
@@ -473,6 +474,8 @@ static int main_master(void)
 		.poll_time = MCB_POLL_TIME,
 		.cycle_time = SYNC_CYCLE_TIME,
 		.sync_timeout = SYNC_TIMEOUT_TIME,
+		.dr = CIF_DR_MPU_P,
+		.dt = CIF_DT_MPU_P,
 	};
 	ret = setsockopt(sock, SOL_CIF_RAW, CIF_OPT_MASTER_CONFIG, &config, sizeof(config));
 	if (ret < 0) {

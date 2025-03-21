@@ -62,6 +62,17 @@ typedef void (*mcb_reset_t)(const struct device *dev, uint8_t role);
 typedef void (*mcb_poll_time_t)(const struct device *dev, uint32_t timeout);
 
 /**
+ * @brief Set DR/DT for MCB
+ *
+ * @param dev MCB device instance
+ * @param dr device role
+ * @param dt device type
+ *
+ * @see mcb_set_role
+ */
+typedef void (*mcb_set_role_t)(const struct device *dev, uint8_t dr, uint8_t dt);
+
+/**
  * @brief Set preempt flag for MCB
  *
  * @note only works for slave role (the master will ignore this api)
@@ -227,6 +238,7 @@ typedef void (*mcb_get_mcb_info_t)(const struct device *dev, struct mcb_info *pt
 __subsystem struct mcb_driver_api {
 	mcb_reset_t reset;
 	mcb_poll_time_t poll_time;
+	mcb_set_role_t set_role;
 	mcb_preempt_t preempt;
 	mcb_config_port_t config_port;
 	mcb_get_status_t get_status;
@@ -286,6 +298,28 @@ static inline void z_impl_mcb_poll_time(const struct device *dev, uint32_t timeo
 	}
 
 	api->poll_time(dev, timeout);
+}
+
+/**
+ * @brief Set DR/DT for MCB
+ *
+ * This function will set the DR/DT for MCB.
+ *
+ * @param dev MCB device instance
+ * @param dr device role
+ * @param dt device type
+ */
+__syscall void mcb_set_role(const struct device *dev, uint8_t dr, uint8_t dt);
+
+static inline void z_impl_mcb_set_role(const struct device *dev, uint8_t dr, uint8_t dt)
+{
+	const struct mcb_driver_api *api = (const struct mcb_driver_api *)dev->api;
+
+	if (api->set_role == NULL) {
+		return;
+	}
+
+	api->set_role(dev, dr, dt);
 }
 
 /**

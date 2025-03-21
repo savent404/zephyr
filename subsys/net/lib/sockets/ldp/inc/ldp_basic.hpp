@@ -56,10 +56,6 @@ struct ldp_slave_async_config: ldp_config {
 	unsigned max_recv_len; /* max receive length */
 };
 
-struct ldp_mcb_config {
-	uint32_t poll_time; /* poll time in microseconds */
-};
-
 struct ldp_basic {
 	using conn = int32_t;
 	virtual ~ldp_basic()

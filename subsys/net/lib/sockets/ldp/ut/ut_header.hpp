@@ -102,7 +102,6 @@ struct mock_mcb: public systech::cif::mcb_if {
 	{
 	}
 	MOCK_METHOD(void, reset, (uint8_t), (override));
-	MOCK_METHOD(void, set_poll_time, (uint16_t timeout), (override));
 	MOCK_METHOD(void, config_port, (uint8_t port, bool enable, bool w_allow, uint16_t max_rx),
 		    (override));
 	virtual uint8_t *get_rx_buf(uint8_t port) override
@@ -231,10 +230,6 @@ struct simu_mcb: public systech::cif::mcb_if {
 	void fault_inject(mcb_if::mcb_error err)
 	{
 		status_[sid_] |= err;
-	}
-
-	virtual void set_poll_time(uint16_t timeout) override
-	{
 	}
 
 	virtual void config_port(uint8_t port, bool enable, bool w_allow, uint16_t max_rx) override

@@ -55,13 +55,6 @@ struct mcb_if {
 	virtual void reset(uint8_t role) = 0;
 
 	/**
-	 * @brief Set poll time for MCB
-	 *
-	 * @param timeout timeout in ms
-	 */
-	virtual void set_poll_time(uint16_t timeout) = 0;
-
-	/**
 	 * @brief Config port
 	 *
 	 * @param port port number

@@ -40,6 +40,29 @@ extern "C" {
 #define SOL_CIF_BASE 200
 #define SOL_CIF_RAW  (SOL_CIF_BASE)
 
+/* DR/DT for MCB */
+#define CIF_DR_Unknown 0x00
+#define CIF_DR_MPU_B   0x01
+#define CIF_DR_EXT_B   0x02
+#define CIF_DR_IO      0x03
+#define CIF_DR_ETH     0x04
+#define CIF_DR_MPU_P   0x81
+#define CIF_DR_EXT_P   0x82
+
+#define CIF_DT_Unknown 0x00
+#define CIF_DT_MPU_P   0x01
+#define CIF_DT_MPU_B   0x02
+#define CIF_DT_IO_AI   0x10
+#define CIF_DT_IO_AO   0x11
+#define CIF_DT_IO_DI   0x12
+#define CIF_DT_IO_DO   0x13
+#define CIF_DT_ETH     0x20
+#define CIF_DT_CAN     0x21
+#define CIF_DT_EXT_P   0x30
+#define CIF_DT_EXT_B   0x31
+
+#define CIF_IS_DR_MASTER(dr) ((dr) & 0x80)
+
 enum {
 	CIF_OPT_MASTER_CONFIG = 1,
 	CIF_OPT_SLAVE_CONFIG = 2,
@@ -52,10 +75,14 @@ struct cif_raw_master_config {
 	uint32_t poll_time;    /* in microseconds */
 	uint32_t cycle_time;   /* in microseconds */
 	uint32_t sync_timeout; /* in microseconds */
+	uint8_t dr;
+	uint8_t dt;
 };
 
 struct cif_raw_slave_config {
 	unsigned int want_preempt;
+	uint8_t dr;
+	uint8_t dt;
 };
 
 struct cif_raw_port_config {

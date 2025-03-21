@@ -29,11 +29,6 @@ struct mcb_zephyr: public mcb_if {
 		mcb_reset(dev_, r);
 	}
 
-	void set_poll_time(uint16_t timeout) override
-	{
-		mcb_poll_time(dev_, timeout);
-	}
-
 	void config_port(uint8_t port, bool enable, bool w_allow, uint16_t max_rx) override
 	{
 		mcb_config_port(dev_, port, enable, w_allow, max_rx);

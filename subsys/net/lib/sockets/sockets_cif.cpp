@@ -466,14 +466,10 @@ static int cif_sock_setsockopt(struct net_context *ctx, int level, int optname, 
 			NET_DBG("Invalid master config");
 			return -EINVAL;
 		}
-		ldp_mcb_config cfg{opt->poll_time};
-		ret = reinterpret_cast<zephyr::ldp_master_impl *>(usr_data->ldp)
-			      ->set_mcb_config(cfg);
-		if (ret >= 0) {
-			memcpy(&usr_data->master_cfg, optval, sizeof(cif_raw_master_config));
-		} else {
-			ret = cif_ldp_error_to_errno(ret);
-		}
+		mcb_poll_time(usr_data->dev, opt->poll_time);
+		mcb_set_role(usr_data->dev, opt->dr, opt->dt);
+		usr_data->master_cfg.cycle_time = opt->cycle_time;
+		usr_data->master_cfg.sync_timeout = opt->sync_timeout;
 	} break;
 	case CIF_OPT_SLAVE_CONFIG: {
 		auto opt = reinterpret_cast<const cif_raw_slave_config *>(optval);
@@ -482,7 +478,13 @@ static int cif_sock_setsockopt(struct net_context *ctx, int level, int optname, 
 			NET_DBG("Invalid slave config");
 			return -EINVAL;
 		}
+		if (CIF_IS_DR_MASTER(opt->dr)) {
+			NET_WARN("Invalid Slave DR %02x", opt->dr);
+			return -EINVAL;
+		}
 		mcb_preempt(usr_data->dev, opt->want_preempt);
+		mcb_poll_time(usr_data->dev, 0);
+		mcb_set_role(usr_data->dev, opt->dr, opt->dt);
 	} break;
 	case CIF_OPT_PORT: {
 		if (optlen != sizeof(cif_raw_port_config)) {

@@ -80,7 +80,6 @@ void mcb_systech_reset(const struct device *dev, uint8_t role)
 	mcb_write(0, reg_base + MCB_REG_PORT_MASK0);
 	mcb_write(0, reg_base + MCB_REG_PORT_RDY_MASK0);
 
-	/* FIXME: Set DT and DR via DeviceTree or user configuration */
 	switch (role) {
 	case _MCB_ROLE_MASTER:
 		val = (DR_MPU_P << r_MCB_CTRL2_DR_pos) | (DT_MPU_P << r_MCB_CTRL2_DT_pos) |
@@ -108,8 +107,24 @@ void mcb_systech_poll_time(const struct device *dev, uint32_t timeout)
 	timeout = timeout / 10; /* Register POLL_TIME is in 10ns unit */
 	data->pool_time = timeout;
 	val = mcb_read(reg_base + MCB_REG_CTRL2);
-	/* FIXME: Set PT via DeviceTree or user configuration */
-	LOG_DBG("Set poll time to %dns, reg: %x", timeout * 10, val);
+	val &= ~(r_MCB_CTRL2_PT_mask << r_MCB_CTRL2_PT_pos);
+	val |= (timeout & r_MCB_CTRL2_PT_mask) << r_MCB_CTRL2_PT_pos;
+	LOG_INF("Set poll time to %dns, reg: %x", timeout * 10, val);
+	mcb_write(val, reg_base + MCB_REG_CTRL2);
+}
+
+void mcb_systech_set_role(const struct device *dev, uint8_t dr, uint8_t dt)
+{
+	uint32_t reg_base = DEVICE_MMIO_NAMED_GET(dev, reg);
+	uint32_t val;
+
+	val = mcb_read(reg_base + MCB_REG_CTRL2);
+	val &= ~(r_MCB_CTRL2_DR_mask << r_MCB_CTRL2_DR_pos);
+	val &= ~(r_MCB_CTRL2_DT_mask << r_MCB_CTRL2_DT_pos);
+	val |= (dr & r_MCB_CTRL2_DR_mask) << r_MCB_CTRL2_DR_pos;
+	val |= (dt & r_MCB_CTRL2_DT_mask) << r_MCB_CTRL2_DT_pos;
+	LOG_INF("Set DR/DT to %d/%d, reg: %08x", dr, dt, val);
+	mcb_write(val, reg_base + MCB_REG_CTRL2);
 }
 
 void mcb_systech_preempt(const struct device *dev, bool preempt)
@@ -434,6 +449,7 @@ static void mcb_systech_get_mcb_info(const struct device *dev, struct mcb_info *
 static const struct mcb_driver_api mcb_systech_api = {
 	.reset = mcb_systech_reset,
 	.poll_time = mcb_systech_poll_time,
+	.set_role = mcb_systech_set_role,
 	.preempt = mcb_systech_preempt,
 	.config_port = mcb_systech_config_port,
 	.get_status = mcb_systech_get_status,

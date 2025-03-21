@@ -77,15 +77,6 @@ template <typename T_mempool, typename T_cache> struct ldp_master: public ldp_ba
 		}
 	}
 
-	int set_mcb_config(const ldp_mcb_config &cfg)
-	{
-		if (!cfg.poll_time) {
-			return -LDP_ERR_INVALID;
-		}
-		mcb_->set_poll_time(cfg.poll_time);
-		return 0;
-	}
-
 	virtual conn create(bool is_async, const ldp_config *config)
 	{
 		conn id;

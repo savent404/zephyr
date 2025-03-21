@@ -135,6 +135,8 @@ static int slave_task(void)
 	 */
 	struct cif_raw_slave_config opt = {
 		.want_preempt = ctx_.target_opt == preempt ? 1 : 0,
+		.dr = CIF_DR_MPU_B,
+		.dt = CIF_DT_MPU_B,
 	};
 	ret = setsockopt(sock, SOL_CIF_RAW, CIF_OPT_SLAVE_CONFIG, &opt, sizeof(opt));
 	if (ret < 0) {
