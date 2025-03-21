@@ -113,20 +113,6 @@ void mcb_systech_poll_time(const struct device *dev, uint32_t timeout)
 	mcb_write(val, reg_base + MCB_REG_CTRL2);
 }
 
-void mcb_systech_set_role(const struct device *dev, uint8_t dr, uint8_t dt)
-{
-	uint32_t reg_base = DEVICE_MMIO_NAMED_GET(dev, reg);
-	uint32_t val;
-
-	val = mcb_read(reg_base + MCB_REG_CTRL2);
-	val &= ~(r_MCB_CTRL2_DR_mask << r_MCB_CTRL2_DR_pos);
-	val &= ~(r_MCB_CTRL2_DT_mask << r_MCB_CTRL2_DT_pos);
-	val |= (dr & r_MCB_CTRL2_DR_mask) << r_MCB_CTRL2_DR_pos;
-	val |= (dt & r_MCB_CTRL2_DT_mask) << r_MCB_CTRL2_DT_pos;
-	LOG_INF("Set DR/DT to %d/%d, reg: %08x", dr, dt, val);
-	mcb_write(val, reg_base + MCB_REG_CTRL2);
-}
-
 void mcb_systech_preempt(const struct device *dev, bool preempt)
 {
 	uint32_t reg_base = DEVICE_MMIO_NAMED_GET(dev, reg);
@@ -136,28 +122,6 @@ void mcb_systech_preempt(const struct device *dev, bool preempt)
 	val |= (preempt ? R_Ack_set : R_Ack_echo) << 2;
 	LOG_INF("Set preempt to %d, reg: %08x", preempt, val);
 	mcb_write(val, reg_base + MCB_REG_CTRL1);
-}
-
-static inline void _config_port_general(const struct device *dev, uint8_t port, bool enable,
-					bool write, uint32_t max_rx_len)
-{
-	uint32_t reg_base = DEVICE_MMIO_NAMED_GET(dev, reg);
-	uint32_t val;
-	uint32_t port_idx = port / 32;
-	uint32_t port_bit = BIT(port % 32);
-	/* setup none-critical parts */
-	mcb_write(max_rx_len, reg_base + MCB_REG_PORT_RX_MAX(port));
-
-	/* clear port ready mask */
-	val = mcb_read(reg_base + MCB_REG_PORT_RDY_MASK0 + port_idx * 4);
-	val &= ~port_bit;
-	mcb_write(val, reg_base + MCB_REG_PORT_RDY_MASK0 + port_idx * 4);
-
-	/* reset write mask */
-	val = mcb_read(reg_base + MCB_REG_PORT_W_MASK0 + port_idx * 4);
-	val &= ~port_bit;
-	val |= write ? port_bit : 0;
-	mcb_write(val, reg_base + MCB_REG_PORT_W_MASK0 + port_idx * 4);
 }
 
 void mcb_systech_config_port(const struct device *dev, uint8_t port, bool enable, bool write,
@@ -173,21 +137,31 @@ void mcb_systech_config_port(const struct device *dev, uint8_t port, bool enable
 		return;
 	}
 
+	/* setup none-critical parts */
+	mcb_write(max_rx_len, reg_base + MCB_REG_PORT_RX_MAX(port));
+
+	/* clear port ready mask */
+	val = mcb_read(reg_base + MCB_REG_PORT_RDY_MASK0 + port_idx * 4);
+	val &= ~port_bit;
+	mcb_write(val, reg_base + MCB_REG_PORT_RDY_MASK0 + port_idx * 4);
+
+	/* reset write mask */
+	val = mcb_read(reg_base + MCB_REG_PORT_W_MASK0 + port_idx * 4);
+	val &= ~port_bit;
+	val |= write ? port_bit : 0;
+	mcb_write(val, reg_base + MCB_REG_PORT_W_MASK0 + port_idx * 4);
+
+	/* enable/disable port */
+	val = mcb_read(reg_base + MCB_REG_PORT_MASK0 + port_idx * 4);
 	if (enable) {
-		_config_port_general(dev, port, enable, write, max_rx_len);
-
-		/* enable port */
-		val = mcb_read(reg_base + MCB_REG_PORT_MASK0 + port_idx * 4);
 		val |= port_bit;
-		mcb_write(val, reg_base + MCB_REG_PORT_MASK0 + port_idx * 4);
 	} else {
-		/* disable port */
-		val = mcb_read(reg_base + MCB_REG_PORT_MASK0 + port_idx * 4);
 		val &= ~port_bit;
-		mcb_write(val, reg_base + MCB_REG_PORT_MASK0 + port_idx * 4);
-
-		_config_port_general(dev, port, enable, write, max_rx_len);
 	}
+	mcb_write(val, reg_base + MCB_REG_PORT_MASK0 + port_idx * 4);
+
+	LOG_INF("port(%d) config: %s-%s-%d", port, enable ? "Y" : "N", write ? "W" : "R",
+		max_rx_len);
 }
 
 void mcb_systech_tx(const struct device *dev, uint8_t sid, uint8_t port, bool preempt)
@@ -444,6 +418,35 @@ static void mcb_systech_get_mcb_info(const struct device *dev, struct mcb_info *
 #endif
 	info->packet_per_second = cfg->pps;
 	info->poll_time = cfg->poll_time;
+}
+
+void mcb_systech_set_role(const struct device *dev, uint8_t dr, uint8_t dt)
+{
+	uint32_t reg_base = DEVICE_MMIO_NAMED_GET(dev, reg);
+	uint32_t val;
+	uint32_t *rx_buf;
+	uint8_t msg[8];
+
+	val = mcb_read(reg_base + MCB_REG_CTRL2);
+	val &= ~(r_MCB_CTRL2_DR_mask << r_MCB_CTRL2_DR_pos);
+	val &= ~(r_MCB_CTRL2_DT_mask << r_MCB_CTRL2_DT_pos);
+	val |= (dr & r_MCB_CTRL2_DR_mask) << r_MCB_CTRL2_DR_pos;
+	val |= (dt & r_MCB_CTRL2_DT_mask) << r_MCB_CTRL2_DT_pos;
+	LOG_INF("Set DR/DT to %d/%d, reg: %08x", dr, dt, val);
+	mcb_write(val, reg_base + MCB_REG_CTRL2);
+
+	LOG_DBG("Auto update discovery port...");
+	rx_buf = mcb_systech_get_tx_buf(dev, 0);
+	val = *rx_buf; /* DR[7:0], DT[15:8] */
+	val &= 0xFFFF0000;
+	val |= (dr & 0xFF) | ((dt & 0xFF) << 8);
+	*rx_buf = val;
+	*(uint32_t *)msg = rx_buf[0];
+	*(uint32_t *)(msg + 4) = rx_buf[1];
+	LOG_HEXDUMP_INF(msg, 8, "Update discovery port buffer");
+	mcb_systech_set_tx_len(dev, 0, 8);
+	mcb_systech_config_port(dev, 0, true, false, 0);
+	LOG_DBG("Auto update discovery port...DONE");
 }
 
 static const struct mcb_driver_api mcb_systech_api = {
