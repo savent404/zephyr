@@ -38,7 +38,7 @@ static bool dev_port_open(int cif_sock, uint8_t port, uint8_t *initial_tx, uint1
 {
 	struct cif_raw_port_config port_cfg = {
 		.port = port,
-		.flags = CIF_PORT_FLG_ENABLE,
+		.flags = CIF_PORT_FLG_ENABLE | CIF_PORT_FLG_ALLOW_WRITE,
 		.slave_max_recv_len = max_rx_len,
 	};
 
