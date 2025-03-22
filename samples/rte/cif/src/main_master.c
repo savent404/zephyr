@@ -484,6 +484,20 @@ static int main_master(void)
 		return -1;
 	}
 
+	/* Step 4: Detect the device information */
+	struct cif_info info;
+	socklen_t cif_info_len = sizeof(info);
+
+	ret = getsockopt(sock, SOL_CIF_RAW, CIF_OPT_INFO, &info, &cif_info_len);
+	if (ret < 0) {
+		LOG_ERR("Failed to get CIF socket info, errno %d", errno);
+		close(sock);
+		return -1;
+	}
+	LOG_INF("CIF socket info: slot %d, hw version: %d", info.slot, info.hw_version);
+	LOG_INF("CIF socket info: i_err[0]: %d, i_err[1]: %d", info.i_err[0],
+		info.i_err[1]);
+
 	ctx_.state = STATE_IDLE;
 
 	uint32_t cnt = 1;

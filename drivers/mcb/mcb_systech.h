@@ -77,3 +77,7 @@
 #define b_MCB_STATUS1_RDY         BIT(7)
 #define r_MCB_STATUS1_RxPort_pos  8
 #define r_MCB_STATUS1_RxPort_mask (BIT(8) - 1)
+
+/* For MCB_DEVICE_INFO0 */
+#define b_MCB_SLOT_ID_MASK (BIT(8) - 1)
+#define b_MCB_SLOT_ID_POS  0

@@ -56,6 +56,7 @@ struct mcb_systech_data {
 	DEVICE_MMIO_NAMED_RAM(tx_buf);
 	uint32_t bandwidth;
 	uint32_t pool_time;
+	uint8_t self_sid;
 };
 
 struct mcb_systech_config {
@@ -68,6 +69,7 @@ struct mcb_systech_config {
 
 void mcb_systech_reset(const struct device *dev, uint8_t role)
 {
+	struct mcb_systech_data *data = dev->data;
 	uint32_t reg_base = DEVICE_MMIO_NAMED_GET(dev, reg);
 	uint32_t val;
 
@@ -96,6 +98,12 @@ void mcb_systech_reset(const struct device *dev, uint8_t role)
 
 	/* Enable RxEN as default */
 	mcb_write(b_MCB_CTRL1_RxEN, reg_base + MCB_REG_CTRL1);
+
+	struct mcb_info info = {};
+
+	mcb_get_mcb_info(dev, &info);
+	data->self_sid = (uint8_t)(info.slot_id);
+	LOG_DBG("Reset MCB, role %d, sid %d", role, data->self_sid);
 }
 
 void mcb_systech_poll_time(const struct device *dev, uint32_t timeout)
@@ -166,6 +174,7 @@ void mcb_systech_config_port(const struct device *dev, uint8_t port, bool enable
 
 void mcb_systech_tx(const struct device *dev, uint8_t sid, uint8_t port, bool preempt)
 {
+	struct mcb_systech_data *data = dev->data;
 	uint32_t reg_base = DEVICE_MMIO_NAMED_GET(dev, reg);
 	uint32_t val, wanted;
 
@@ -182,6 +191,7 @@ void mcb_systech_tx(const struct device *dev, uint8_t sid, uint8_t port, bool pr
 	}
 
 	val = (sid & r_MCB_CTRL1_D_SID_mask) << r_MCB_CTRL1_D_SID_pos;
+	val |= (data->self_sid & r_MCB_CTRL1_S_SID_mask) << r_MCB_CTRL1_S_SID_pos;
 	val |= (port & r_MCB_CTRL1_PORT_mask) << r_MCB_CTRL1_PORT_pos;
 	val |= b_MCB_CTRL1_TxEN | b_MCB_CTRL1_RxEN;
 	val |= (preempt ? R_Ack_set : R_Ack_echo) << 2;
@@ -410,12 +420,17 @@ int mcb_systech_rx_is_ready(const struct device *dev, uint8_t port)
 static void mcb_systech_get_mcb_info(const struct device *dev, struct mcb_info *info)
 {
 	const struct mcb_systech_config *cfg = DEV_CFG(dev);
+	uint32_t reg_base = DEVICE_MMIO_NAMED_GET(dev, reg);
+	uint32_t dev_info[3];
 
 	memset(info, 0, sizeof(struct mcb_info));
-#if CONFIG_MCB_SYSTECH_HW_WORKAROUND
-	info->hw_version = 0x0100;
-	info->slot_id = 0xFF;
-#endif
+
+	dev_info[0] = mcb_read(reg_base + MCB_REG_DEVICE_INF0);
+	dev_info[1] = mcb_read(reg_base + MCB_REG_DEVICE_INF1);
+	dev_info[2] = mcb_read(reg_base + MCB_REG_DEVICE_INF2);
+
+	info->slot_id = (dev_info[0] & b_MCB_SLOT_ID_MASK) >> b_MCB_SLOT_ID_POS;
+	info->hw_version = (dev_info[1]);
 	info->packet_per_second = cfg->pps;
 	info->poll_time = cfg->poll_time;
 }

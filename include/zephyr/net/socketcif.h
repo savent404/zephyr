@@ -68,6 +68,7 @@ enum {
 	CIF_OPT_SLAVE_CONFIG = 2,
 	CIF_OPT_PORT,
 	CIF_OPT_ERROR,
+	CIF_OPT_INFO,
 	CIF_OPT_MAX,
 };
 
@@ -130,6 +131,11 @@ struct cif_error_filter {
 #define CIF_ERR_PREV_RX_DROP_INVALID   BIT(26) /* Drop packet due to invalid */
 #define CIF_ERR_MASK                   ((BIT_MASK(15) << 12))
 	uint32_t error_mask;
+};
+
+struct cif_info {
+	uint8_t slot;
+	uint32_t hw_version;
 };
 
 /** @endcond */

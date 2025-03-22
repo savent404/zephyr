@@ -145,8 +145,20 @@ static int slave_task(void)
 		return -1;
 	}
 
+	/* Step 4: Detect the device information */
+	struct cif_info info;
+	socklen_t cif_info_len = sizeof(info);
+
+	ret = getsockopt(sock, SOL_CIF_RAW, CIF_OPT_INFO, &info, &cif_info_len);
+	if (ret < 0) {
+		LOG_ERR("Failed to get CIF socket info, errno %d", errno);
+		close(sock);
+		return -1;
+	}
+	LOG_INF("CIF socket info: slot %d, hw version: %d", info.slot, info.hw_version);
+
 	/**
-	 * Step 4: open config&io ports.
+	 * Step 5: open config&io ports.
 	 */
 	if (!dev_port_open(sock, PORT_ID_CFG, REG_BUF_REG(config), REG_BUF_LEN(config),
 			   REG_BUF_LEN(config))) {

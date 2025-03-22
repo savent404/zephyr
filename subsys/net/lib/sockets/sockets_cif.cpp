@@ -440,6 +440,21 @@ static int cif_sock_getsockopt(struct net_context *ctx, int level, int optname, 
 		filter->error_mask = errors & CIF_ERR_MASK;
 		return matched_cnt ? 0 : -ENOENT;
 	}
+	case CIF_OPT_INFO: {
+		auto info = (struct cif_info *)(optval);
+		struct mcb_info mcb_info = {};
+
+		if (*optlen != sizeof(*info)) {
+			NET_DBG("Invalid info");
+			return -EINVAL;
+		}
+
+		mcb_get_mcb_info(usr_data->dev, &mcb_info);
+
+		info->slot = (uint8_t)mcb_info.slot_id;
+		info->hw_version = mcb_info.hw_version;
+		break;
+	}
 	default: {
 		return -ENOTSUP;
 	}
