@@ -206,10 +206,19 @@ static int handle_extra_errors(int sock)
 			zsock_close(sock);
 			slave_start();
 			return 1;
-		} else if (err_mask.error_mask & CIF_ERR_R_ERROR) {
-			LOG_WRN("R_ERROR detected");
-		} else if (err_mask.error_mask & CIF_ERR_I_ERROR) {
-			LOG_WRN("I_ERROR detected");
+		} else if (err_mask.error_mask & (CIF_ERR_R_ERROR | CIF_ERR_I_ERROR)) {
+			struct cif_info info;
+			int rc;
+
+			LOG_WRN("I_ERROR/R_ERROR detected");
+			err_len = sizeof(info);
+			rc = getsockopt(sock, SOL_CIF_RAW, CIF_OPT_INFO, &info, &err_len);
+			if (rc < 0) {
+				LOG_ERR("Failed to get CIF socket info, errno %d", errno);
+			} else {
+				LOG_INF("CIF socket info: i_err[0]: %d, i_err[1]: %d",
+					info.i_err[0], info.i_err[1]);
+			}
 		} else if (err_mask.error_mask & CIF_ERR_MAY_LOST) {
 			LOG_WRN("MAY_LOST error detected");
 		} else if (err_mask.error_mask & CIF_ERR_PREV_T_ERROR) {
@@ -367,7 +376,7 @@ static bool handle_open_state(int sock, uint8_t *response_buf, size_t response_b
 	if (ctx_.initial_data_len) {
 		/* Send initial data */
 		ret = sendto(sock, ctx_.initial_data, ctx_.initial_data_len, 0,
-				 (struct sockaddr *)&remote, sizeof(remote));
+			     (struct sockaddr *)&remote, sizeof(remote));
 
 		if (ret < 0) {
 			LOG_ERR("Failed to send initial data, errno %d", errno);

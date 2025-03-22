@@ -430,6 +430,8 @@ static void mcb_systech_get_mcb_info(const struct device *dev, struct mcb_info *
 	dev_info[2] = mcb_read(reg_base + MCB_REG_DEVICE_INF2);
 
 	info->slot_id = (dev_info[0] & b_MCB_SLOT_ID_MASK) >> b_MCB_SLOT_ID_POS;
+	info->i_err[0] = mcb_read(reg_base + MCB_REG_I_A_COUNT);
+	info->i_err[1] = mcb_read(reg_base + MCB_REG_I_B_COUNT);
 	info->hw_version = (dev_info[1]);
 	info->packet_per_second = cfg->pps;
 	info->poll_time = cfg->poll_time;

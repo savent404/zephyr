@@ -136,6 +136,7 @@ struct cif_error_filter {
 struct cif_info {
 	uint8_t slot;
 	uint32_t hw_version;
+	uint32_t i_err[2];
 };
 
 /** @endcond */

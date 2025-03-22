@@ -453,6 +453,8 @@ static int cif_sock_getsockopt(struct net_context *ctx, int level, int optname, 
 
 		info->slot = (uint8_t)mcb_info.slot_id;
 		info->hw_version = mcb_info.hw_version;
+		info->i_err[0] = mcb_info.i_err[0];
+		info->i_err[1] = mcb_info.i_err[1];
 		break;
 	}
 	default: {
