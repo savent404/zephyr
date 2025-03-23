@@ -1,0 +1,33 @@
+# Copyright (c) 2025 SYSFly Co.
+# SPDX-License-Identifier: Apache-2.0
+
+menuconfig UBOOT
+	bool "U-boot utilities"
+	help
+	  Enable support for U-boot utilities.
+
+if UBOOT
+
+module = UBOOT
+module-str = UBOOT
+source "subsys/logging/Kconfig.template.log_config"
+
+config UBOOT_ENV
+	bool "U-boot environment"
+	default y
+	depends on FLASH
+	select CRC
+	select FLASH_MAP
+	select STREAM_FLASH
+	select GNU_C_EXTENSIONS
+	help
+	  Enable support for managing U-boot environment.
+
+if UBOOT_ENV
+config UBOOT_ENV_REDUNDANT
+	bool "Redundant env support"
+	help
+	  Enable support for redundant U-boot environment.
+endif # UBOOT_ENV
+
+endif # UBOOT
