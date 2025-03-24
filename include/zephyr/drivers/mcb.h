@@ -35,7 +35,7 @@ extern "C" {
 struct mcb_info {
 	unsigned int hw_version;        /* hw version of mcb */
 	unsigned int slot_id;           /* hw slot identify number */
-	unsigned int i_err[2];         /* invalid frame errors, channel A and B */
+	unsigned int i_err[2];          /* invalid frame errors, channel A and B */
 	unsigned int packet_per_second; /* max packets per second */
 	unsigned int poll_time;         /* poll time in microseconds */
 };

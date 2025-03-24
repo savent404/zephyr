@@ -504,8 +504,7 @@ static int main_master(void)
 		return -1;
 	}
 	LOG_INF("CIF socket info: slot %d, hw version: %d", info.slot, info.hw_version);
-	LOG_INF("CIF socket info: i_err[0]: %d, i_err[1]: %d", info.i_err[0],
-		info.i_err[1]);
+	LOG_INF("CIF socket info: i_err[0]: %d, i_err[1]: %d", info.i_err[0], info.i_err[1]);
 
 	ctx_.state = STATE_IDLE;
 

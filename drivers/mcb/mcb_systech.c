@@ -44,9 +44,26 @@ static inline uint32_t mcb_read(uint32_t addr)
 
 static inline void mcb_write(uint32_t value, uint32_t addr)
 {
+#if CONFIG_MCB_SYSTECH_HW_WORKAROUND
+#define MCB_WRITE_MAX_RETRY 5
+#else
+#define MCB_WRITE_MAX_RETRY 1
+#endif
+
+	uint32_t read_retry = MCB_WRITE_MAX_RETRY;
+	uint32_t val;
+
 	mcb_write_unsafe(value, addr);
-	if (mcb_read(addr) != value) {
-		LOG_WRN("Write %08x to %08x failed, read %08x", value, addr, mcb_read(addr));
+
+	do {
+		val = mcb_read(addr);
+	} while (val != value && --read_retry);
+
+	if (val != value) {
+		LOG_WRN("Write %08x to %08x failed, read %08x", value, addr, val);
+	} else if (read_retry + 1 < MCB_WRITE_MAX_RETRY) {
+		LOG_WRN("Write %08x to %08x, read retry %d", value, addr,
+			MCB_WRITE_MAX_RETRY - read_retry - 1);
 	}
 }
 
