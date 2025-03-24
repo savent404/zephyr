@@ -8,13 +8,13 @@ find_package(Git QUIET)
 #   git_describe(<dir> <output>)
 #
 # Helper function to get a short GIT desciption associated with a directory.
-# OUTPUT is set to the output of `git describe --abbrev=12 --always` as run
+# OUTPUT is set to the output of `git describe --abbrev=12 --always --tags` as run
 # from DIR.
 #
 function(git_describe DIR OUTPUT)
   if(GIT_FOUND)
     execute_process(
-      COMMAND ${GIT_EXECUTABLE} describe --abbrev=12 --always
+      COMMAND ${GIT_EXECUTABLE} describe --abbrev=12 --always --tags
       WORKING_DIRECTORY                ${DIR}
       OUTPUT_VARIABLE                  DESCRIPTION
       OUTPUT_STRIP_TRAILING_WHITESPACE
