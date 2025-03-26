@@ -1,0 +1,5 @@
+board:
+  name: rbs2530_sc2
+  vendor: fmsh
+  socs:
+  - name: fmql20
