@@ -63,9 +63,9 @@ static bool dev_port_open(int cif_sock, uint8_t port, uint8_t *initial_tx, uint1
 	return true;
 }
 
-static void deal_ethernet_data(int sock, uint8_t port, uint8_t *addr, uint16_t len)
+static void deal_ethernet_data(int sock, uint8_t port)
 {
-	static uint8_t rx_buf[64];
+	static uint8_t rx_buf[CIF_ASYNC_MTU];
 	int ret;
 	struct sockaddr_cif port_addr = {
 		.cif_family = AF_CIF,
@@ -73,32 +73,20 @@ static void deal_ethernet_data(int sock, uint8_t port, uint8_t *addr, uint16_t l
 	};
 	socklen_t sl = sizeof(port_addr);
 
-	if (len < 8) {
-		LOG_ERR("Invalid data length %d", len);
-		return;
-	}
-
-	/* Update the tx buffer */
-	addr[0] = 'e';
-	addr[1] = 't';
-	addr[2] = 'h';
-	addr[3] = '0' + port - 0x60;
-	addr[4] = ':';
-	addr[len - 1]++;
-
-	ret = sendto(sock, addr, len, 0, (struct sockaddr *)&port_addr, sl);
-	if (ret < 0 && errno != EAGAIN && errno != ENXIO) {
-		LOG_ERR("Failed to send data back, errno %d", errno);
-	}
-
 	ret = recvfrom(sock, rx_buf, sizeof(rx_buf), 0, (struct sockaddr *)&port_addr, &sl);
 	if (ret < 0 && errno != EAGAIN && errno != ENXIO) {
 		LOG_ERR("Failed to receive data, errno %d", errno);
 	} else if (ret > 0) {
 		LOG_INF("Received data from port %d", port);
 		LOG_HEXDUMP_INF(rx_buf, ret, "Data:");
+
+		ret = sendto(sock, rx_buf, ret, 0, (struct sockaddr *)&port_addr, sl);
+		if (ret < 0 && errno != EAGAIN && errno != ENXIO) {
+			LOG_ERR("Failed to send data back, errno %d", errno);
+		}
 	}
 }
+
 static int slave_task(void)
 {
 	LOG_INF("Running in slave mode");
@@ -172,25 +160,25 @@ static int slave_task(void)
 		return -1;
 	}
 	if (!dev_port_open(sock, PORT_ID_ETH0, REG_BUF_REG(eth0), REG_BUF_LEN(eth0),
-			   REG_BUF_LEN(eth0))) {
+			   CIF_ASYNC_MTU)) {
 		LOG_ERR("Failed to open eth0 port");
 		close(sock);
 		return -1;
 	}
 	if (!dev_port_open(sock, PORT_ID_ETH1, REG_BUF_REG(eth1), REG_BUF_LEN(eth1),
-			   REG_BUF_LEN(eth1))) {
+			   CIF_ASYNC_MTU)) {
 		LOG_ERR("Failed to open eth1 port");
 		close(sock);
 		return -1;
 	}
 	if (!dev_port_open(sock, PORT_ID_ETH2, REG_BUF_REG(eth2), REG_BUF_LEN(eth2),
-			   REG_BUF_LEN(eth2))) {
+			   CIF_ASYNC_MTU)) {
 		LOG_ERR("Failed to open eth2 port");
 		close(sock);
 		return -1;
 	}
 	if (!dev_port_open(sock, PORT_ID_ETH3, REG_BUF_REG(eth3), REG_BUF_LEN(eth3),
-			   REG_BUF_LEN(eth3))) {
+			   CIF_ASYNC_MTU)) {
 		LOG_ERR("Failed to open eth3 port");
 		close(sock);
 		return -1;
@@ -247,11 +235,7 @@ static int slave_task(void)
 			/* Do something with the input data (this is only for demo, the actual
 			 * application don't need to do this)
 			 */
-			if (REG_BUF_MODIFY(io)[0] != 'i' || REG_BUF_MODIFY(io)[1] != 'o') {
-				LOG_INF("Invalid io data");
-			} else {
-				LOG_INF("Valid io data, slave start to do the dirty work");
-			}
+			memcpy(REG_BUF_REG(io), REG_BUF_MODIFY(io), REG_BUF_LEN(io));
 		}
 
 		/* Prepare the output data */
@@ -262,10 +246,10 @@ static int slave_task(void)
 			LOG_INF("Failed to send io data, errno %d", errno);
 		}
 
-		deal_ethernet_data(sock, PORT_ID_ETH0, REG_BUF_MODIFY(eth0), REG_BUF_LEN(eth0));
-		deal_ethernet_data(sock, PORT_ID_ETH1, REG_BUF_MODIFY(eth1), REG_BUF_LEN(eth1));
-		deal_ethernet_data(sock, PORT_ID_ETH2, REG_BUF_MODIFY(eth2), REG_BUF_LEN(eth2));
-		deal_ethernet_data(sock, PORT_ID_ETH3, REG_BUF_MODIFY(eth3), REG_BUF_LEN(eth3));
+		deal_ethernet_data(sock, PORT_ID_ETH0);
+		deal_ethernet_data(sock, PORT_ID_ETH1);
+		deal_ethernet_data(sock, PORT_ID_ETH2);
+		deal_ethernet_data(sock, PORT_ID_ETH3);
 
 		k_usleep(10);
 

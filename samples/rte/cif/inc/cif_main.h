@@ -14,12 +14,12 @@
 
 #define MAX_DEV 2
 
-#define MCB_POLL_TIME           (50 * 1000) /* 50us */
-#define SYNC_CYCLE_TIME         2000        /* 2ms */
-#define SYNC_TIMEOUT_TIME       10000       /* 10ms (5 times of SYNC_CYCLE_TIME) */
-#define ASYNC_INTERVAL_TIME     10000       /* 10ms */
-#define ASYNC_TIMEOUT_TIME      100000      /* 100ms */
-#define ASYNC_DEFAULT_BANDWIDTH 0           /* no limitation */
+#define MCB_POLL_TIME           (655 * 1000) /* 655us */
+#define SYNC_CYCLE_TIME         2000         /* 2ms */
+#define SYNC_TIMEOUT_TIME       10000        /* 10ms (5 times of SYNC_CYCLE_TIME) */
+#define ASYNC_INTERVAL_TIME     10000        /* 10ms */
+#define ASYNC_TIMEOUT_TIME      100000       /* 100ms */
+#define ASYNC_DEFAULT_BANDWIDTH 0            /* no limitation */
 
 #if CONFIG_MCB_SYSTECH_HW_WORKAROUND
 #define PORT_ID_DISC 0x00
@@ -48,7 +48,7 @@
 struct context {
 	int target_sid;
 	int target_port;
-	uint32_t target_cnt;
+	uint32_t target_duration; /* unit: ms */
 	uint32_t target_pps;
 	enum {
 		role_master,

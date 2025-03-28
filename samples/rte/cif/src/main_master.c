@@ -287,12 +287,13 @@ static bool handle_config_state(int sock)
 	return true;
 }
 
-static bool handle_io_start_state(int sock, uint32_t *cnt)
+static bool handle_io_start_state(int sock, uint32_t *timeout)
 {
 	bool res = dev_general_init(sock, ctx_.target_sid, ctx_.target_port,
 				    ctx_.target_opt == preempt ? CIF_PORT_FLG_PREEMPT : 0,
 				    ctx_.target_pps);
-	*cnt = ctx_.target_cnt + 1;
+
+	*timeout = k_uptime_get_32() + ctx_.target_duration;
 	if (!res) {
 		LOG_ERR("Failed to establish connection to slot%d", ctx_.target_sid);
 		ctx_.state = STATE_IDLE;
@@ -324,13 +325,15 @@ static bool handle_io_start_state(int sock, uint32_t *cnt)
 	return true;
 }
 
-static bool handle_io_state(int sock, uint32_t *cnt, uint8_t *in_buf, size_t in_buf_size)
+static bool handle_io_state(int sock, uint32_t *timeout, uint8_t *in_buf, size_t in_buf_size,
+			    const uint8_t *out_buf, size_t out_buf_size)
 {
-	if (--(*cnt) > 0) {
-		k_usleep(SYNC_CYCLE_TIME);
+	bool is_timeout = k_uptime_get_32() > *timeout;
+
+	if (!is_timeout) {
 		int ret = recvfrom(sock, in_buf, in_buf_size, 0, (struct sockaddr *)&ctx_.curr,
 				   &ctx_.curr_len);
-		if (ret < 0) {
+		if (ret < 0 && errno != EAGAIN) {
 			LOG_ERR("Failed to receive data, errno %d", errno);
 			ctx_.stat_failed++;
 		} else {
@@ -338,14 +341,21 @@ static bool handle_io_state(int sock, uint32_t *cnt, uint8_t *in_buf, size_t in_
 			ctx_.stat_ok++;
 		}
 
-		ret = sendto(sock, "io:0", 4, 0, (struct sockaddr *)&ctx_.curr, ctx_.curr_len);
+		ret = sendto(sock, out_buf, out_buf_size, 0, (struct sockaddr *)&ctx_.curr,
+			     ctx_.curr_len);
 		if (ret < 0) {
 			LOG_ERR("Failed to send data, errno %d", errno);
 			ctx_.stat_failed++;
 		}
 	} else {
 		ctx_.systick_end = sys_clock_tick_get();
-		ctx_.state = STATE_CLOSE;
+		bool res = dev_general_deinit(sock, ctx_.target_sid, ctx_.target_port);
+
+		if (!res) {
+			LOG_ERR("Failed to close port %d on slot %d", ctx_.target_port,
+				ctx_.target_sid);
+		}
+		ctx_.state = STATE_IDLE;
 		LOG_INF("IO tested, package passed: %d err: %d, percentage: %3d%%", ctx_.stat_ok,
 			ctx_.stat_failed, ctx_.stat_ok * 100 / (ctx_.stat_ok + ctx_.stat_failed));
 		LOG_INF("Duration: %lldms", (ctx_.systick_end - ctx_.systick_begin));
@@ -378,7 +388,7 @@ static bool handle_open_state(int sock, uint8_t *response_buf, size_t response_b
 		ret = sendto(sock, ctx_.initial_data, ctx_.initial_data_len, 0,
 			     (struct sockaddr *)&remote, sizeof(remote));
 
-		if (ret < 0) {
+		if (ret < 0 && errno != EAGAIN) {
 			LOG_ERR("Failed to send initial data, errno %d", errno);
 			ctx_.state = STATE_IDLE;
 			return false;
@@ -429,6 +439,28 @@ static bool handle_close_state(int sock)
 
 	ctx_.state = STATE_IDLE;
 	return true;
+}
+
+static void handle_io_buf(uint8_t *in_buf, uint8_t *out_buf, size_t *out_buf_len)
+{
+	if (CIF_IS_ASYNC_PORT(ctx_.target_port)) {
+		out_buf[0] = 'a';
+		out_buf[1] = 's';
+		out_buf[2] = 'y';
+		out_buf[3] = 'n';
+		out_buf[4] = 'c';
+		out_buf[5] = ':';
+		out_buf[6]++;
+		*out_buf_len = ctx_.initial_data_len;
+	} else {
+		out_buf[0] = 's';
+		out_buf[1] = 'y';
+		out_buf[2] = 'n';
+		out_buf[3] = 'c';
+		out_buf[4] = ':';
+		out_buf[5]++;
+		*out_buf_len = ctx_.initial_data_len;
+	}
 }
 
 static bool check_for_idle_responses(int sock, uint8_t *response_buf, size_t response_buf_size)
@@ -508,9 +540,11 @@ static int main_master(void)
 
 	ctx_.state = STATE_IDLE;
 
-	uint32_t cnt = 1;
-	static uint8_t in_buf[512];
+	static uint8_t in_buf[CIF_MTU];
+	static uint8_t out_buf[CIF_MTU];
 	static uint8_t response_buf[64];
+	size_t out_buf_len;
+	uint32_t timeout = 0;
 
 	while (1) {
 		/* Terminate condition */
@@ -533,11 +567,13 @@ static int main_master(void)
 			break;
 
 		case STATE_IO_START:
-			handle_io_start_state(sock, &cnt);
+			handle_io_start_state(sock, &timeout);
 			break;
 
 		case STATE_IO:
-			handle_io_state(sock, &cnt, in_buf, sizeof(in_buf));
+			handle_io_buf(in_buf, out_buf, &out_buf_len);
+			handle_io_state(sock, &timeout, in_buf, sizeof(in_buf), out_buf,
+					out_buf_len);
 			break;
 
 		case STATE_OPEN:
