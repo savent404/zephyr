@@ -144,6 +144,7 @@ struct cif_info {
 /* SocketCIF MTU size */
 /** CIF frame MTU */
 #define CIF_MTU (0x800)
+#define CIF_ASYNC_MTU (CIF_MTU - 4)
 
 /* SocketCIF address bus */
 enum {

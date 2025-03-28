@@ -10,7 +10,7 @@ config MCB_SYSTECH
 
 config MCB_SYSTECH_BUFFER_MAX_LENGTH
 		int "length of tx&rx buffer"
-		default 2000
+		default 2048
 		depends on MCB_SYSTECH
 		help
 			Limit of the max buffer length.
