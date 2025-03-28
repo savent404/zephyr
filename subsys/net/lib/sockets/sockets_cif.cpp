@@ -40,7 +40,7 @@ struct cif_master_data {
 	/* wq background thread */
 	k_tid_t wq_tid;
 	k_thread wq_thread;
-	k_thread_stack_t wq_stack[9216];
+	k_thread_stack_t wq_stack[2048];
 	k_mutex x_lock_;
 };
 
@@ -743,6 +743,7 @@ static void wq_background_entry(void *arg1, void *arg2, void *arg3)
 	auto wq = reinterpret_cast<cif_master_data::ldp_wq *>(arg1);
 
 	while (true) {
+		k_yield();
 		if (wq->empty()) {
 			k_sleep(K_MSEC(10));
 		} else {
@@ -760,7 +761,7 @@ static int ldp_init(void)
 	cif_data.wq_tid = k_thread_create(
 		&cif_data.wq_thread, cif_data.wq_stack, K_THREAD_STACK_SIZEOF(cif_data.wq_stack),
 		wq_background_entry, &cif_data.wq, nullptr, nullptr,
-		K_PRIO_PREEMPT(CONFIG_MAIN_THREAD_PRIORITY + 1), 0, K_NO_WAIT);
+		K_PRIO_COOP(1), 0, K_NO_WAIT);
 	k_thread_name_set(&cif_data.wq_thread, "cif_wq");
 	return 0;
 }
