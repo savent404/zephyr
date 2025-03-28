@@ -35,11 +35,11 @@ static inline uint32_t mcb_read(uint32_t addr)
 {
 	uint32_t val;
 
+#if CONFIG_MCB_SYSTECH_HW_WORKAROUND
+	k_busy_wait(1);
+#endif
 	val = sys_read32(addr);
 	LOG_DBG("Read %08x from %08x", val, addr);
-#if CONFIG_MCB_SYSTECH_HW_WORKAROUND
-	k_busy_wait(100);
-#endif
 	return val;
 }
 
