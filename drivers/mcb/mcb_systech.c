@@ -25,49 +25,6 @@ LOG_MODULE_REGISTER(mcb_systech, LOG_LEVEL);
 #define DEV_CFG(_dev)  ((const struct mcb_systech_config *const)(_dev)->config)
 #define DEV_DATA(_dev) ((struct mcb_systech_data *const)(_dev)->data)
 
-static inline void mcb_write_unsafe(uint32_t value, uint32_t addr)
-{
-	sys_write32(value, addr);
-	LOG_DBG("Write %08x to %08x", value, addr);
-}
-
-static inline uint32_t mcb_read(uint32_t addr)
-{
-	uint32_t val;
-
-#if CONFIG_MCB_SYSTECH_HW_WORKAROUND
-	k_busy_wait(1);
-#endif
-	val = sys_read32(addr);
-	LOG_DBG("Read %08x from %08x", val, addr);
-	return val;
-}
-
-static inline void mcb_write(uint32_t value, uint32_t addr)
-{
-#if CONFIG_MCB_SYSTECH_HW_WORKAROUND
-#define MCB_WRITE_MAX_RETRY 5
-#else
-#define MCB_WRITE_MAX_RETRY 1
-#endif
-
-	uint32_t read_retry = MCB_WRITE_MAX_RETRY;
-	uint32_t val;
-
-	mcb_write_unsafe(value, addr);
-
-	do {
-		val = mcb_read(addr);
-	} while (val != value && --read_retry);
-
-	if (val != value) {
-		LOG_WRN("Write %08x to %08x failed, read %08x", value, addr, val);
-	} else if (read_retry + 1 < MCB_WRITE_MAX_RETRY) {
-		LOG_WRN("Write %08x to %08x, read retry %d", value, addr,
-			MCB_WRITE_MAX_RETRY - read_retry - 1);
-	}
-}
-
 struct mcb_systech_data {
 	DEVICE_MMIO_NAMED_RAM(reg);
 	DEVICE_MMIO_NAMED_RAM(rx_buf);
@@ -83,7 +40,52 @@ struct mcb_systech_config {
 	DEVICE_MMIO_NAMED_ROM(tx_buf);
 	uint32_t pps;
 	uint32_t poll_time;
+	bool slow_mode;
 };
+
+static inline void mcb_write_unsafe(uint32_t value, uint32_t addr)
+{
+	sys_write32(value, addr);
+	LOG_DBG("Write %08x to %08x", value, addr);
+}
+
+static inline uint32_t mcb_read(const struct device *dev, uint32_t addr)
+{
+	const struct mcb_systech_config *cfg = DEV_CFG(dev);
+	uint32_t val;
+
+	if (cfg->slow_mode) {
+		k_busy_wait(1);
+	}
+	val = sys_read32(addr);
+	LOG_DBG("Read %08x from %08x", val, addr);
+	return val;
+}
+
+static inline void mcb_write(const struct device *dev, uint32_t value, uint32_t addr)
+{
+#if CONFIG_MCB_SYSTECH_HW_WORKAROUND
+#define MCB_WRITE_MAX_RETRY 5
+#else
+#define MCB_WRITE_MAX_RETRY 1
+#endif
+
+	uint32_t read_retry = MCB_WRITE_MAX_RETRY;
+	uint32_t val;
+
+	mcb_write_unsafe(value, addr);
+
+	do {
+		val = mcb_read(dev, addr);
+	} while (val != value && --read_retry);
+
+	if (val != value) {
+		LOG_WRN("Write %08x to %08x failed, read %08x", value, addr, val);
+	} else if (read_retry + 1 < MCB_WRITE_MAX_RETRY) {
+		LOG_WRN("Write %08x to %08x, read retry %d", value, addr,
+			MCB_WRITE_MAX_RETRY - read_retry - 1);
+	}
+}
 
 void mcb_systech_reset(const struct device *dev, uint8_t role)
 {
@@ -92,13 +94,13 @@ void mcb_systech_reset(const struct device *dev, uint8_t role)
 	uint32_t val;
 
 	/* Clear CTRL/STATUS register */
-	mcb_write(0, reg_base + MCB_REG_CTRL1);
-	mcb_write(0, reg_base + MCB_REG_CTRL2);
-	mcb_write(0, reg_base + MCB_REG_STATUS1);
-	mcb_write(0, reg_base + MCB_REG_I_A_COUNT);
-	mcb_write(0, reg_base + MCB_REG_I_B_COUNT);
-	mcb_write(0, reg_base + MCB_REG_PORT_MASK0);
-	mcb_write(0, reg_base + MCB_REG_PORT_RDY_MASK0);
+	mcb_write(dev, 0, reg_base + MCB_REG_CTRL1);
+	mcb_write(dev, 0, reg_base + MCB_REG_CTRL2);
+	mcb_write(dev, 0, reg_base + MCB_REG_STATUS1);
+	mcb_write(dev, 0, reg_base + MCB_REG_I_A_COUNT);
+	mcb_write(dev, 0, reg_base + MCB_REG_I_B_COUNT);
+	mcb_write(dev, 0, reg_base + MCB_REG_PORT_MASK0);
+	mcb_write(dev, 0, reg_base + MCB_REG_PORT_RDY_MASK0);
 
 	switch (role) {
 	case _MCB_ROLE_MASTER:
@@ -112,10 +114,10 @@ void mcb_systech_reset(const struct device *dev, uint8_t role)
 		LOG_DBG("Set MCB to slave mode, reg: %08x", val);
 		break;
 	}
-	mcb_write(val, reg_base + MCB_REG_CTRL2);
+	mcb_write(dev, val, reg_base + MCB_REG_CTRL2);
 
 	/* Enable RxEN as default */
-	mcb_write(b_MCB_CTRL1_RxEN, reg_base + MCB_REG_CTRL1);
+	mcb_write(dev, b_MCB_CTRL1_RxEN, reg_base + MCB_REG_CTRL1);
 
 	struct mcb_info info = {};
 
@@ -132,11 +134,11 @@ void mcb_systech_poll_time(const struct device *dev, uint32_t timeout)
 
 	timeout = timeout / 10; /* Register POLL_TIME is in 10ns unit */
 	data->pool_time = timeout;
-	val = mcb_read(reg_base + MCB_REG_CTRL2);
+	val = mcb_read(dev, reg_base + MCB_REG_CTRL2);
 	val &= ~(r_MCB_CTRL2_PT_mask << r_MCB_CTRL2_PT_pos);
 	val |= (timeout & r_MCB_CTRL2_PT_mask) << r_MCB_CTRL2_PT_pos;
 	LOG_INF("Set poll time to %dns, reg: %x", timeout * 10, val);
-	mcb_write(val, reg_base + MCB_REG_CTRL2);
+	mcb_write(dev, val, reg_base + MCB_REG_CTRL2);
 }
 
 void mcb_systech_preempt(const struct device *dev, bool preempt)
@@ -144,10 +146,10 @@ void mcb_systech_preempt(const struct device *dev, bool preempt)
 	uint32_t reg_base = DEVICE_MMIO_NAMED_GET(dev, reg);
 	uint32_t val;
 
-	val = mcb_read(reg_base + MCB_REG_CTRL1);
+	val = mcb_read(dev, reg_base + MCB_REG_CTRL1);
 	val |= (preempt ? R_Ack_set : R_Ack_echo) << 2;
 	LOG_INF("Set preempt to %d, reg: %08x", preempt, val);
-	mcb_write(val, reg_base + MCB_REG_CTRL1);
+	mcb_write(dev, val, reg_base + MCB_REG_CTRL1);
 }
 
 void mcb_systech_config_port(const struct device *dev, uint8_t port, bool enable, bool write,
@@ -164,27 +166,27 @@ void mcb_systech_config_port(const struct device *dev, uint8_t port, bool enable
 	}
 
 	/* setup none-critical parts */
-	mcb_write(max_rx_len, reg_base + MCB_REG_PORT_RX_MAX(port));
+	mcb_write(dev, max_rx_len, reg_base + MCB_REG_PORT_RX_MAX(port));
 
 	/* clear port ready mask */
-	val = mcb_read(reg_base + MCB_REG_PORT_RDY_MASK0 + port_idx * 4);
+	val = mcb_read(dev, reg_base + MCB_REG_PORT_RDY_MASK0 + port_idx * 4);
 	val &= ~port_bit;
-	mcb_write(val, reg_base + MCB_REG_PORT_RDY_MASK0 + port_idx * 4);
+	mcb_write(dev, val, reg_base + MCB_REG_PORT_RDY_MASK0 + port_idx * 4);
 
 	/* reset write mask */
-	val = mcb_read(reg_base + MCB_REG_PORT_W_MASK0 + port_idx * 4);
+	val = mcb_read(dev, reg_base + MCB_REG_PORT_W_MASK0 + port_idx * 4);
 	val &= ~port_bit;
 	val |= write ? port_bit : 0;
-	mcb_write(val, reg_base + MCB_REG_PORT_W_MASK0 + port_idx * 4);
+	mcb_write(dev, val, reg_base + MCB_REG_PORT_W_MASK0 + port_idx * 4);
 
 	/* enable/disable port */
-	val = mcb_read(reg_base + MCB_REG_PORT_MASK0 + port_idx * 4);
+	val = mcb_read(dev, reg_base + MCB_REG_PORT_MASK0 + port_idx * 4);
 	if (enable) {
 		val |= port_bit;
 	} else {
 		val &= ~port_bit;
 	}
-	mcb_write(val, reg_base + MCB_REG_PORT_MASK0 + port_idx * 4);
+	mcb_write(dev, val, reg_base + MCB_REG_PORT_MASK0 + port_idx * 4);
 
 	LOG_INF("port(%d) config: %s-%s-%d", port, enable ? "Y" : "N", write ? "W" : "R",
 		max_rx_len);
@@ -213,10 +215,10 @@ void mcb_systech_tx(const struct device *dev, uint8_t sid, uint8_t port, bool pr
 	val |= (port & r_MCB_CTRL1_PORT_mask) << r_MCB_CTRL1_PORT_pos;
 	val |= b_MCB_CTRL1_TxEN | b_MCB_CTRL1_RxEN;
 	val |= (preempt ? R_Ack_set : R_Ack_echo) << 2;
-	mcb_write(val, reg_base + MCB_REG_CTRL1);
+	mcb_write(dev, val, reg_base + MCB_REG_CTRL1);
 
 	wanted = val;
-	val = mcb_read(reg_base + MCB_REG_CTRL1);
+	val = mcb_read(dev, reg_base + MCB_REG_CTRL1);
 	if (val != wanted) {
 		LOG_WRN("tx reg mismatch, reg: %08x, wanted: %08x", val, wanted);
 	}
@@ -233,7 +235,7 @@ void mcb_systech_get_status(const struct device *dev, uint32_t *s)
 	uint32_t val, status = 0, reg;
 
 	reg = MCB_REG_STATUS1;
-	val = mcb_read(reg_base + reg);
+	val = mcb_read(dev, reg_base + reg);
 
 	LOG_DBG("Read status register val = 0x%08x", val);
 
@@ -286,9 +288,9 @@ void mcb_systech_clr_status(const struct device *dev, uint32_t bits)
 
 	mcb_write_unsafe(~val, reg_base + MCB_REG_STATUS1);
 	/* Make sure status register is cleared */
-	if (mcb_read(reg_base + MCB_REG_STATUS1) & val) {
+	if (mcb_read(dev, reg_base + MCB_REG_STATUS1) & val) {
 		LOG_WRN_ONCE("Failed to clear status register, val = 0x%x, reg = 0x%x", val,
-			     mcb_read(reg_base + MCB_REG_STATUS1));
+			     mcb_read(dev, reg_base + MCB_REG_STATUS1));
 	}
 }
 
@@ -325,7 +327,7 @@ uint16_t mcb_systech_get_rx_len(const struct device *dev, uint8_t port)
 		LOG_ERR("Invalid port number");
 		return 0;
 	}
-	val = mcb_read(reg_base + MCB_REG_PORT_RX_LEN(port));
+	val = mcb_read(dev, reg_base + MCB_REG_PORT_RX_LEN(port));
 	return val;
 }
 
@@ -338,7 +340,7 @@ uint16_t mcb_systech_get_tx_len(const struct device *dev, uint8_t port)
 		LOG_ERR("Invalid port number");
 		return 0;
 	}
-	val = mcb_read(reg_base + MCB_REG_PORT_TX_LEN(port));
+	val = mcb_read(dev, reg_base + MCB_REG_PORT_TX_LEN(port));
 	return val;
 }
 
@@ -363,7 +365,7 @@ void mcb_systech_set_tx_len(const struct device *dev, uint8_t port, uint16_t len
 	if (mcb_systech_get_tx_len(dev, port) == len) {
 		return;
 	}
-	mcb_write(len, reg_base + MCB_REG_PORT_TX_LEN(port));
+	mcb_write(dev, len, reg_base + MCB_REG_PORT_TX_LEN(port));
 
 #if CONFIG_MCB_SYSTECH_HW_WORKAROUND
 	uint32_t retry = 10;
@@ -371,7 +373,7 @@ void mcb_systech_set_tx_len(const struct device *dev, uint8_t port, uint16_t len
 	while (mcb_systech_get_tx_len(dev, port) != len && --retry) {
 		LOG_WRN("MCB: TX len not set correctly, retry %d...", retry);
 		if (--retry) {
-			mcb_write(len, reg_base + MCB_REG_PORT_TX_LEN(port));
+			mcb_write(dev, len, reg_base + MCB_REG_PORT_TX_LEN(port));
 			k_busy_wait(1);
 		} else {
 			LOG_ERR("set_tx_len error can't be recovery, panic!");
@@ -390,9 +392,9 @@ void mcb_systech_rx_clr(const struct device *dev, uint8_t port)
 	/* As the specific of MCB, clear status flag is to write 0 to the bit */
 	val = b_MCB_STATUS1_RDY;
 	mcb_write_unsafe(~val, reg_base + MCB_REG_STATUS1);
-	if (mcb_read(reg_base + MCB_REG_STATUS1) & val) {
+	if (mcb_read(dev, reg_base + MCB_REG_STATUS1) & val) {
 		LOG_WRN_ONCE("Failed to clear rx ready, val = 0x%x, reg = 0x%x", val,
-			     mcb_read(reg_base + MCB_REG_STATUS1));
+			     mcb_read(dev, reg_base + MCB_REG_STATUS1));
 	}
 
 	if (port >= MCB_MAX_PORT) {
@@ -402,9 +404,9 @@ void mcb_systech_rx_clr(const struct device *dev, uint8_t port)
 	val = BIT(port % 32);
 	reg = MCB_REG_PORT_RDY_MASK0 + (port / 32) * 4;
 	mcb_write_unsafe(~val, reg_base + reg);
-	if (mcb_read(reg_base + reg) & val) {
+	if (mcb_read(dev, reg_base + reg) & val) {
 		LOG_WRN_ONCE("Failed to clear port ready mask, val = 0x%x, reg = 0x%x", val,
-			     mcb_read(reg_base + reg));
+			     mcb_read(dev, reg_base + reg));
 	}
 }
 
@@ -420,7 +422,7 @@ int mcb_systech_rx_is_ready(const struct device *dev, uint8_t port)
 
 	/* FIXME: check status1.rdy bit also. */
 	reg = MCB_REG_PORT_RDY_MASK0 + (port / 32) * 4;
-	val = mcb_read(reg_base + reg);
+	val = mcb_read(dev, reg_base + reg);
 	if (val & BIT((port % 32))) {
 		LOG_INF("Port %d is ready, mask=%08x", port, val);
 		if (mcb_get_rx_len(dev, port)) {
@@ -443,13 +445,13 @@ static void mcb_systech_get_mcb_info(const struct device *dev, struct mcb_info *
 
 	memset(info, 0, sizeof(struct mcb_info));
 
-	dev_info[0] = mcb_read(reg_base + MCB_REG_DEVICE_INF0);
-	dev_info[1] = mcb_read(reg_base + MCB_REG_DEVICE_INF1);
-	dev_info[2] = mcb_read(reg_base + MCB_REG_DEVICE_INF2);
+	dev_info[0] = mcb_read(dev, reg_base + MCB_REG_DEVICE_INF0);
+	dev_info[1] = mcb_read(dev, reg_base + MCB_REG_DEVICE_INF1);
+	dev_info[2] = mcb_read(dev, reg_base + MCB_REG_DEVICE_INF2);
 
 	info->slot_id = (dev_info[0] & b_MCB_SLOT_ID_MASK) >> b_MCB_SLOT_ID_POS;
-	info->i_err[0] = mcb_read(reg_base + MCB_REG_I_A_COUNT);
-	info->i_err[1] = mcb_read(reg_base + MCB_REG_I_B_COUNT);
+	info->i_err[0] = mcb_read(dev, reg_base + MCB_REG_I_A_COUNT);
+	info->i_err[1] = mcb_read(dev, reg_base + MCB_REG_I_B_COUNT);
 	info->hw_version = (dev_info[1]);
 	info->packet_per_second = cfg->pps;
 	info->poll_time = cfg->poll_time;
@@ -462,13 +464,13 @@ void mcb_systech_set_role(const struct device *dev, uint8_t dr, uint8_t dt)
 	uint32_t *rx_buf;
 	uint8_t msg[8];
 
-	val = mcb_read(reg_base + MCB_REG_CTRL2);
+	val = mcb_read(dev, reg_base + MCB_REG_CTRL2);
 	val &= ~(r_MCB_CTRL2_DR_mask << r_MCB_CTRL2_DR_pos);
 	val &= ~(r_MCB_CTRL2_DT_mask << r_MCB_CTRL2_DT_pos);
 	val |= (dr & r_MCB_CTRL2_DR_mask) << r_MCB_CTRL2_DR_pos;
 	val |= (dt & r_MCB_CTRL2_DT_mask) << r_MCB_CTRL2_DT_pos;
 	LOG_INF("Set DR/DT to %d/%d, reg: %08x", dr, dt, val);
-	mcb_write(val, reg_base + MCB_REG_CTRL2);
+	mcb_write(dev, val, reg_base + MCB_REG_CTRL2);
 
 	LOG_DBG("Auto update discovery port...");
 	rx_buf = mcb_systech_get_tx_buf(dev, 0);
@@ -521,6 +523,7 @@ static int mcb_systech_init(const struct device *dev)
 		DEVICE_MMIO_NAMED_ROM_INIT(tx_buf, DT_DRV_INST(n)),                                \
 		.pps = DT_INST_PROP(n, pps),                                                       \
 		.poll_time = DT_INST_PROP(n, poll),                                                \
+		.slow_mode = DT_INST_PROP(n, slow),                                                \
 	};                                                                                         \
 	DEVICE_DT_INST_DEFINE(n, &mcb_systech_init, NULL, &mcb_systech_data_##n,                   \
 			      &mcb_systech_config_##n, POST_KERNEL, CONFIG_MCB_INIT_PRIORITY,      \

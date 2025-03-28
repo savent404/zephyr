@@ -44,6 +44,7 @@
 		status = "disabled";
 		poll = <50>;
 		pps = <100000>;
+		slow = <1>;
 	};
 
 	mcb1: mcb@43c20000 {
