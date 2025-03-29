@@ -14,4 +14,8 @@ config MP_MAX_NUM_CPUS
 config ARM_AARCH32_MMU
 	default y
 
+# Platform peripheral init priority is 40 as default
+config SYSCON_INIT_PRIORITY
+	default 40
+
 endif # SOC_SERIES_FMSH_FMQL
