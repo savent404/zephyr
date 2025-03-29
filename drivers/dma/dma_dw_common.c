@@ -308,7 +308,9 @@ int dw_dma_config(const struct device *dev, uint32_t channel,
 			 */
 			chan_data->cfg_hi |= DW_CFGH_DST(cfg->dma_slot);
 #if CONFIG_DMA_DW
-			chan_data->cfg_lo |= DW_CFGL_SRC_SW_HS;
+			if (cfg->source_handshake) {
+				chan_data->cfg_lo |= DW_CFGL_SRC_SW_HS;
+			}
 #endif
 			break;
 		case PERIPHERAL_TO_MEMORY:
@@ -330,7 +332,9 @@ int dw_dma_config(const struct device *dev, uint32_t channel,
 			 */
 			chan_data->cfg_hi |= DW_CFGH_SRC(cfg->dma_slot);
 #if CONFIG_DMA_DW
-			chan_data->cfg_lo |= DW_CFGL_DST_SW_HS;
+			if (cfg->dest_handshake) {
+				chan_data->cfg_lo |= DW_CFGL_DST_SW_HS;
+			}
 #endif
 			break;
 		default:
