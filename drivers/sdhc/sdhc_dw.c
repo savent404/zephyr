@@ -6,11 +6,17 @@
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/drivers/sdhc.h>
 #include <zephyr/drivers/clock_control.h>
+#if defined(CONFIG_SDHC_DW_DMA)
+#include <zephyr/drivers/dma.h>
+#endif
+#include <zephyr/cache.h>
 #include <zephyr/logging/log.h>
 #include <zephyr/sys/barrier.h>
 #include <zephyr/drivers/sdhc.h>
 #include <zephyr/sd/sd_spec.h>
 #include <zephyr/sd/sd.h>
+#include <zephyr/spinlock.h>
+#include <zephyr/sys/sem.h>
 #include "sdhc_dw.h"
 
 #ifndef CMD_SWITCH_FUNC
@@ -25,6 +31,20 @@ struct sdhc_dw_data {
 	DEVICE_MMIO_RAM;
 	uint32_t prev_opcode;
 	uint32_t host_freq;
+
+#if defined(CONFIG_SDHC_DW_DMA)
+	/* NOTE: This buffer must be mapped directly
+	 * since virt/phys address is the same
+	 */
+	uint32_t *dma_buf;
+	uint32_t dma_buf_len;
+
+	struct dma_config dma_rx_cfg;
+	struct dma_config dma_tx_cfg;
+	struct dma_block_config dma_blk_cfg;
+	struct k_sem dma_sync;
+	struct k_spinlock dma_lock;
+#endif
 };
 
 struct sdhc_dw_config {
@@ -33,9 +53,14 @@ struct sdhc_dw_config {
 		uint32_t port;
 	};
 	const struct device *clk_dev;
+#if defined(CONFIG_SDHC_DW_DMA)
+	const struct device *dma_dev;
+	uint32_t dma_channel;
+#endif
 	clock_control_subsys_t clk_subsys;
 	uint32_t data_addr;
 	uint32_t fifo_depth;
+	uint32_t dma_burst;
 	int non_removable;
 	struct gpio_dt_spec cd_gpio;
 };
@@ -180,9 +205,9 @@ static bool _is_long_response(uint32_t z_resp_type)
 	return res;
 }
 
-static int sdhc_dw_set_fifo_threshold(const struct device *dev, uint32_t threshold)
+static int sdhc_dw_set_fifo_threshold(const struct device *dev, uint32_t threshold, uint32_t burst)
 {
-	dw_writel(dev, SDMMC_FIFOTH, SDMMC_SET_FIFOTH(0, threshold, threshold));
+	dw_writel(dev, SDMMC_FIFOTH, SDMMC_SET_FIFOTH(burst, threshold, threshold));
 	return 0;
 }
 
@@ -349,6 +374,202 @@ static int sdhc_dw_write_poll(const struct device *dev, const uint32_t *addr, ui
 			     10000);
 }
 
+#if defined(CONFIG_SDHC_DW_DMA)
+
+static inline bool _dw_using_dma(const struct device *dev)
+{
+	const struct sdhc_dw_config *config = dev->config;
+
+	return config->dma_dev != NULL;
+}
+
+static void sdhc_dma_callback(const struct device *dev, void *user_data, uint32_t channel,
+			      int status)
+{
+	struct device *sdhc_dev = (struct device *)user_data;
+	struct sdhc_dw_data *data = sdhc_dev->data;
+
+	k_sem_give(&data->dma_sync);
+
+	LOG_DBG("DMA transfer complete");
+}
+
+static int sdhc_dw_write_dma(const struct device *dev, const uint32_t *addr, uint32_t len)
+{
+	const struct sdhc_dw_config *config = dev->config;
+	struct sdhc_dw_data *data = dev->data;
+	uint32_t peripheral_addr = DEVICE_MMIO_ROM_PTR(dev)->phys_addr + config->data_addr;
+	uint32_t memory_addr = (uint32_t)data->dma_buf;
+	struct dma_config *dma_cfg = &data->dma_tx_cfg;
+	struct dma_block_config *blk_cfg = &data->dma_blk_cfg;
+	uint32_t reg_status;
+	int rc = 0;
+
+	if ((unsigned int)addr & 3 || len & 3) {
+		LOG_WRN("Unaligned address or length");
+		return -EINVAL;
+	}
+
+	if (len > data->dma_buf_len) {
+		LOG_WRN("Data length exceeds DMA buffer size");
+		return -EINVAL;
+	}
+
+	K_SPINLOCK(&data->dma_lock) {
+		/* load data into dma buffer */
+		memcpy(data->dma_buf, addr, len);
+
+		/* prepare dma transfer */
+		dma_cfg->channel_direction = MEMORY_TO_PERIPHERAL;
+		dma_cfg->complete_callback_en = 1;
+		dma_cfg->error_callback_dis = 0;
+		dma_cfg->source_handshake = 0;
+		dma_cfg->dest_handshake = 0;
+		dma_cfg->cyclic = 0;
+		dma_cfg->source_data_size = 4;
+		dma_cfg->dest_data_size = 4;
+		dma_cfg->source_burst_length = 4;
+		dma_cfg->dest_burst_length = 4;
+		dma_cfg->block_count = 1;
+		dma_cfg->head_block = blk_cfg;
+		dma_cfg->user_data = (void *)dev;
+		dma_cfg->dma_callback = sdhc_dma_callback;
+
+		blk_cfg->source_address = memory_addr;
+		blk_cfg->dest_address = peripheral_addr;
+		blk_cfg->block_size = len / 4;
+
+		rc = dma_config(config->dma_dev, config->dma_channel, dma_cfg);
+		if (rc) {
+			LOG_ERR("Failed to configure DMA channel");
+			K_SPINLOCK_BREAK;
+		}
+
+		/* flush dcache before dma transfer */
+		sys_cache_data_flush_range(data->dma_buf, len);
+
+		/* dma transfer */
+		LOG_DBG("Starting DMA TX transfer");
+		rc = dma_start(config->dma_dev, config->dma_channel);
+		if (rc) {
+			LOG_ERR("Failed to start DMA transfer");
+			K_SPINLOCK_BREAK;
+		}
+
+		/* start dma transfer */
+		rc = k_sem_take(&data->dma_sync, K_MSEC(1000));
+		if (rc) {
+			LOG_ERR("DMA transfer timeout");
+			K_SPINLOCK_BREAK;
+		}
+	}
+
+	dma_stop(config->dma_dev, config->dma_channel);
+	if (rc) {
+		return rc;
+	}
+
+	return dw_readl_poll(dev, SDMMC_RINTSTS, reg_status, (reg_status & SDMMC_INT_DATA_OVER), 10,
+			     10000);
+}
+
+static int sdhc_dw_read_dma(const struct device *dev, uint32_t *addr, uint32_t len)
+{
+	const struct sdhc_dw_config *config = dev->config;
+	struct sdhc_dw_data *data = dev->data;
+	uint32_t peripheral_addr = DEVICE_MMIO_ROM_PTR(dev)->phys_addr + config->data_addr;
+	uint32_t memory_addr = (uint32_t)data->dma_buf;
+	struct dma_config *dma_cfg = &data->dma_rx_cfg;
+	struct dma_block_config *blk_cfg = &data->dma_blk_cfg;
+	uint32_t reg_status;
+	int rc = 0;
+
+	if ((unsigned int)addr & 3 || len & 3) {
+		LOG_WRN("Unaligned address or length");
+		return -EINVAL;
+	}
+
+	if (len > data->dma_buf_len) {
+		LOG_WRN("Data length exceeds DMA buffer size");
+		return -EINVAL;
+	}
+
+	K_SPINLOCK(&data->dma_lock) {
+
+		/* prepare dma transfer */
+		dma_cfg->channel_direction = PERIPHERAL_TO_MEMORY;
+		dma_cfg->complete_callback_en = 1;
+		dma_cfg->error_callback_dis = 0;
+		dma_cfg->source_handshake = 0;
+		dma_cfg->dest_handshake = 0;
+		dma_cfg->cyclic = 0;
+		dma_cfg->source_data_size = 4;
+		dma_cfg->dest_data_size = 4;
+		dma_cfg->source_burst_length = 4;
+		dma_cfg->dest_burst_length = 4;
+		dma_cfg->block_count = 1;
+		dma_cfg->head_block = blk_cfg;
+		dma_cfg->user_data = (void *)dev;
+		dma_cfg->dma_callback = sdhc_dma_callback;
+
+		blk_cfg->source_address = peripheral_addr;
+		blk_cfg->dest_address = memory_addr;
+		blk_cfg->block_size = len / 4;
+
+		rc = dma_config(config->dma_dev, config->dma_channel, dma_cfg);
+		if (rc) {
+			LOG_ERR("Failed to configure DMA channel");
+			K_SPINLOCK_BREAK;
+		}
+
+		/* dma transfer */
+		LOG_DBG("Starting DMA RX transfer");
+		rc = dma_start(config->dma_dev, config->dma_channel);
+		if (rc) {
+			LOG_ERR("Failed to start DMA transfer");
+			K_SPINLOCK_BREAK;
+		}
+
+		/* start dma transfer */
+		rc = k_sem_take(&data->dma_sync, K_MSEC(1000));
+		if (rc) {
+			LOG_ERR("DMA transfer timeout");
+			K_SPINLOCK_BREAK;
+		}
+
+		/* invalidate dcache after dma transfer */
+		sys_cache_data_invd_range(data->dma_buf, len);
+
+		/* copy data from dma buffer */
+		memcpy(addr, data->dma_buf, len);
+	}
+	dma_stop(config->dma_dev, config->dma_channel);
+
+	return dw_readl_poll(dev, SDMMC_RINTSTS, reg_status, (reg_status & SDMMC_INT_DATA_OVER), 10,
+			     10000);
+}
+#endif /* CONFIG_SDHC_DW_DMA */
+
+static int sdhc_dw_write(const struct device *dev, const uint32_t *addr, uint32_t len)
+{
+#if defined(CONFIG_SDHC_DW_DMA)
+	if (_dw_using_dma(dev)) {
+		return sdhc_dw_write_dma(dev, addr, len);
+	}
+#endif
+	return sdhc_dw_write_poll(dev, addr, len);
+}
+
+static int sdhc_dw_read(const struct device *dev, uint32_t *addr, uint32_t len)
+{
+#if defined(CONFIG_SDHC_DW_DMA)
+	if (_dw_using_dma(dev)) {
+		return sdhc_dw_read_dma(dev, addr, len);
+	}
+#endif
+	return sdhc_dw_read_poll(dev, addr, len);
+}
+
 static int sdhc_dw_request(const struct device *dev, struct sdhc_command *cmd,
 			   struct sdhc_data *data)
 {
@@ -418,12 +639,12 @@ static int sdhc_dw_request(const struct device *dev, struct sdhc_command *cmd,
 
 	if (dir != none) {
 		if (dir == rd) {
-			if (sdhc_dw_read_poll(dev, data->data, data->blocks * data->block_size)) {
+			if (sdhc_dw_read(dev, data->data, data->blocks * data->block_size)) {
 				LOG_WRN_ONCE("Read data timeout");
 				return -ETIMEDOUT;
 			}
 		} else {
-			if (sdhc_dw_write_poll(dev, data->data, data->blocks * data->block_size)) {
+			if (sdhc_dw_write(dev, data->data, data->blocks * data->block_size)) {
 				LOG_WRN_ONCE("Write data timeout");
 				return -ETIMEDOUT;
 			}
@@ -460,7 +681,16 @@ static int sdhc_dw_set_io(const struct device *dev, struct sdhc_io *io)
 		return -EIO;
 	}
 
-	sdhc_dw_set_fifo_threshold(dev, config->fifo_depth);
+	sdhc_dw_set_fifo_threshold(dev, config->fifo_depth, config->dma_burst);
+
+#if defined(CONFIG_SDHC_DW_DMA)
+	if (_dw_using_dma(dev)) {
+		uint32_t temp;
+
+		temp = dw_readl(dev, SDMMC_CTRL) | SDMMC_CTRL_DMA_ENABLE;
+		dw_writel(dev, SDMMC_CTRL, temp);
+	}
+#endif
 
 	return 0;
 }
@@ -551,21 +781,40 @@ static int sdhc_dw_init(const struct device *dev)
 		LOG_ERR("CD GPIO not available");
 		return -EINVAL;
 	}
+
+#if defined(CONFIG_SDHC_DW_DMA)
+	k_sem_init(&data->dma_sync, 0, 1);
+#endif
+
 	return 0;
 }
 
 #define SDHC_DW_INIT(n)                                                                            \
+	IF_ENABLED(CONFIG_SDHC_DW_DMA, (static uint32_t __aligned(64) _dw_dma_buf_##n[0x2000];))   \
 	static const struct sdhc_dw_config sdhc_dw_config_##n = {                                  \
 		COND_CODE_1(DT_INST_PROP_OR(n, io_mapped, 0), (.port = DT_INST_REG_ADDR(n), ),     \
 			    (DEVICE_MMIO_ROM_INIT(DT_DRV_INST(n)), ))                              \
 			.clk_dev = DEVICE_DT_GET(DT_INST_CLOCKS_CTLR(n)),                          \
-		.clk_subsys = (clock_control_subsys_t)DT_INST_PHA(n, clocks, clkid),               \
+		IF_ENABLED(                                                                        \
+			CONFIG_SDHC_DW_DMA,                                                        \
+			(.dma_dev = COND_CODE_1(                                                   \
+				 DT_INST_NODE_HAS_PROP(n, dmas),                                   \
+				 (DEVICE_DT_GET_OR_NULL(DT_INST_DMAS_CTLR_BY_IDX(n, 0))), (NULL)), \
+			 .dma_channel =                                                            \
+				 COND_CODE_1(DT_INST_NODE_HAS_PROP(n, dmas),                       \
+					     (DT_INST_DMAS_CELL_BY_IDX(n, 0, channel)), (0)), ))   \
+			.clk_subsys = (clock_control_subsys_t)DT_INST_PHA(n, clocks, clkid),       \
 		.data_addr = DT_INST_PROP(n, data_addr),                                           \
 		.fifo_depth = DT_INST_PROP(n, fifo_depth),                                         \
+		.dma_burst = DT_INST_PROP(n, dma_burst),                                           \
 		.non_removable = DT_INST_PROP(n, non_removable),                                   \
 		.cd_gpio = GPIO_DT_SPEC_GET_BY_IDX_OR(DT_DRV_INST(n), cd_gpios, 0, {0}),           \
 	};                                                                                         \
-	static struct sdhc_dw_data sdhc_dw_data_##n = {};                                          \
+	static struct sdhc_dw_data sdhc_dw_data_##n = {IF_ENABLED(                                 \
+		CONFIG_SDHC_DW_DMA,                                                                \
+		(.dma_buf = COND_CODE_1(CONFIG_SDHC_DW_DMA, (&_dw_dma_buf_##n[0]), (NULL)),        \
+		 .dma_buf_len =                                                                    \
+			 COND_CODE_1(CONFIG_SDHC_DW_DMA, (sizeof(_dw_dma_buf_##n)), (0)), ))};     \
 	DEVICE_DT_INST_DEFINE(n, sdhc_dw_init, NULL, &sdhc_dw_data_##n, &sdhc_dw_config_##n,       \
 			      POST_KERNEL, CONFIG_SDHC_INIT_PRIORITY, &sdhc_dw_api);
 

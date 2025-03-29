@@ -19,6 +19,13 @@ properties:
     type: int
     default: 16
 
+  dma-burst:
+    type: int
+    default: 2
+    description: |
+      DMA burst size used for data transfers. This value determines
+      the number of data words transferred in a single DMA burst.
+
   card-detect-delay:
     type: int
     default: 200

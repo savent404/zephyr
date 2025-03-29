@@ -9,6 +9,10 @@
 	};
 };
 
+&dma0 {
+	status = "okay";
+};
+
 &mmc0 {
 	status = "okay";
 	non-removable;

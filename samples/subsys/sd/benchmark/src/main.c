@@ -106,7 +106,7 @@ static int sdhc_test_inst(const struct device *dev)
 	struct sd_card card = {0};
 	uint32_t blocks_128M = 2 * 1024 * 128;
 	uint32_t blocks_1M = 2 * 1024;
-	uint32_t chunk_128K = 2 * 128;
+	uint32_t chunk_4k = 2 * 8;
 
 	card.bus_width = SDHC_BUS_WIDTH4BIT;
 
@@ -141,12 +141,12 @@ static int sdhc_test_inst(const struct device *dev)
 	case CARD_SDMMC:
 		printk("Card type: SDMMC\n");
 		write_validate(&card, 0, blocks_1M, sdmmc_read_blocks, sdmmc_write_blocks);
-		benchmark(&card, 0, blocks_128M, chunk_128K, sdmmc_read_blocks, sdmmc_write_blocks);
+		benchmark(&card, 0, blocks_128M, chunk_4k, sdmmc_read_blocks, sdmmc_write_blocks);
 		break;
 	case CARD_MMC:
 		printk("Card type: MMC\n");
 		write_validate(&card, 0, blocks_1M, mmc_read_blocks, mmc_write_blocks);
-		benchmark(&card, 0, blocks_128M, chunk_128K, mmc_read_blocks, mmc_write_blocks);
+		benchmark(&card, 0, blocks_128M, chunk_4k, mmc_read_blocks, mmc_write_blocks);
 		break;
 	default:
 		printk("Card type: Unknown\n");
@@ -171,9 +171,12 @@ static int benchmark(struct sd_card *card, uint32_t start_block, uint32_t num_bl
 
 	for (unsigned int chunk = 0; chunk * block_chunk < num_blocks; chunk++) {
 		uint32_t start = k_cycle_get_32();
+		int rc;
 
-		if (read_(card, data, start_block + chunk * block_chunk, block_chunk)) {
-			printk("Failed to read block\n");
+		rc = read_(card, data, start_block + chunk * block_chunk, block_chunk);
+		if (rc) {
+			printk("Failed to read block %d, rc %d\n",
+			       start_block + chunk * block_chunk, rc);
 			goto err;
 		}
 		uint32_t end = k_cycle_get_32();

@@ -11,8 +11,8 @@ config SDHC_DW
 
 config SDHC_DW_DMA
 	bool "DW using DMA"
-	default n
-	depends on SDHC_DW
+	default y
+	depends on SDHC_DW && DMA
 	help
 	  Enable DMA support for snps,dw-mshc.
 
