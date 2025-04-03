@@ -1,6 +1,7 @@
 /*
  * Copyright (c) 2021 Weidmueller Interface GmbH & Co. KG
- * Copyright (c) 2024 SYSTech Co.
+ * Copyright (c) 2024 SYSFly Co.
+ * Copyright (c) 2025 SYSFly Co.
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -14,10 +15,6 @@
 #include <cmsis_core.h>
 #include <zephyr/arch/arm/mmu/arm_mmu.h>
 #include "soc.h"
-
-/* System Level Control Registers (SLCR) */
-#define SLCR_UNLOCK     0x0008
-#define SLCR_UNLOCK_KEY 0xdf0d
 
 #define M_DEVICE_UNALIGNED (MT_NORMAL | MPERM_R | MPERM_W | MATTR_SHARED)
 #define M_DEVICE           (MT_DEVICE | MPERM_R | MPERM_W | MATTR_SHARED)
@@ -156,10 +153,10 @@ void soc_reset_hook(void)
 #endif
 	__set_SCTLR(sctlr);
 
-#ifdef CONFIG_MMU
 	/* Enable SMP */
 	__set_ACTLR(__get_ACTLR() | ACTLR_SMP_Msk);
 
+#if CONFIG_MMU
 	/* invalidate dcache all, invalidate mmu tlb */
 	arch_dcache_invd_all();
 

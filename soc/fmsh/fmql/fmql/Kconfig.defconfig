@@ -7,9 +7,8 @@
 if SOC_SERIES_FMSH_FMQL
 
 # Zephyr does not support SMP on aarch32 yet, so we default to 1 CPU core
-# TODO: disable SMP for debug purposes.
 config MP_MAX_NUM_CPUS
-	default 1
+	default 4
 
 config ARM_AARCH32_MMU
 	default y

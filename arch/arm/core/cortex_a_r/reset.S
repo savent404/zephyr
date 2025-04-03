@@ -206,6 +206,27 @@ EL1_Reset_Handler:
      * This code uses voting locks, like arch/arm64/core/reset.S, to determine primary CPU.
      */
 
+#if defined(SMP_BOOT_DELAY)
+    /*
+     * Assume the bootloader(u-boot) only setup the primary core, and the reset of cores are
+     * not allowed to vote.
+     * Using MPID to determine the logic order is not necessary, so we are just re-using the
+     * voting lock to identify its logic core id, and assume the MPID is at the same.
+     */
+
+    /* Get MPID(fake) and logic id */
+    ldr r1, [r0, #BOOT_PARAM_VOTING_OFFSET]
+    mov r2, r1
+
+    /* increment the logic id */
+    add r3, r1, #1
+    str r3, [r0, #BOOT_PARAM_VOTING_OFFSET]
+
+    /* assume the first core is the major core */
+    mov r3, #0
+    str r3, [r0, #BOOT_PARAM_MPID_OFFSET]
+
+#else
     /*
      * Get the "logic" id defined by cpu_node_list statically for voting lock self-identify.
      * It is worth noting that this is NOT the final logic id (arch_curr_cpu()->id)
@@ -240,6 +261,7 @@ EL1_Reset_Handler:
     add r5, r5, #1
     cmp r5, #CONFIG_MP_MAX_NUM_CPUS
     bne 2b
+#endif /* CONFIG_SMP_BOOT_DELAY */
 
     /* check if current core won */
     dmb
