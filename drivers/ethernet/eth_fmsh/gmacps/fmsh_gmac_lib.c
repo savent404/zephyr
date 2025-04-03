@@ -327,7 +327,9 @@ u8 FGmac_Ps_DmaInit(FGmacPs_Instance_T *pGmac, FGmacPs_RxDescriptor_T *pRxDs, u8
  *
  * **************************************************************************
  */
-u8 FGmac_Ps_MacInit(FGmacPs_Instance_T *pGmac)
+#define INIT_MDIO_ADDRESS_1 1
+#define INIT_MDIO_ADDRESS_2 3
+u8 FGmac_Ps_MacInit(FGmacPs_Instance_T *pGmac, int m2m)
 {
 	FGmacPs_MacPortMap_T *pGmac_PortMap = pGmac->base_address;
 	FGmacPs_PhyConfig_T *pPhyConfig = pGmac->phy_cfg;
@@ -356,16 +358,17 @@ u8 FGmac_Ps_MacInit(FGmacPs_Instance_T *pGmac)
 	if (pGmac->base_address == (void *)FPAR_GMACPS_0_BASEADDR) {
 		int mdio = pPhyConfig->mdio_address;
 
-		pPhyConfig->mdio_address = 1;
+		pPhyConfig->mdio_address = INIT_MDIO_ADDRESS_1;
 		pPhyConfig->phy_op_init(pGmac);
 		pPhyConfig->phy_op_cfg(pGmac);
 		pPhyConfig->phy_op_reset(pGmac);
 
-		pPhyConfig->mdio_address = 3;
-		pPhyConfig->phy_op_init(pGmac);
-		pPhyConfig->phy_op_cfg(pGmac);
-		pPhyConfig->phy_op_reset(pGmac);
-
+		if (m2m == 0) {
+			pPhyConfig->mdio_address = INIT_MDIO_ADDRESS_2;
+			pPhyConfig->phy_op_init(pGmac);
+			pPhyConfig->phy_op_cfg(pGmac);
+			pPhyConfig->phy_op_reset(pGmac);
+		}
 		pPhyConfig->mdio_address = mdio;
 	}
 	/*

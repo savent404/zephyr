@@ -108,16 +108,22 @@ static int eth_fmsh_send(const struct device *dev, struct net_pkt *pkt)
 	return 0;
 }
 
-static void eth_fmsh_phy_update(void *arg1, void *arg2, void *arg3)
+static void eth_fmsh_gmac_link_state_update(void *arg1, void *arg2, void *arg3)
 {
 	const struct device *dev = arg1;
 	struct eth_fmsh_data *ctx = dev->data;
 	const struct eth_fmsh_config *config = dev->config;
+	const char *phy_mode = ctx->gmac_inst->phy_cfg->phy_mode;
+	bool has_phy = (phy_mode != NULL) && (strcmp(phy_mode, "none") != 0);
 
 	while (1) {
 		k_sleep(K_MSEC(1000));
-		FGmacPs_GmacLink_Updata(ctx->gmac_inst);
-		FGmacPs_GetRxErrCount(ctx->gmac_inst);
+
+		if (has_phy) {
+			FGmacPs_GmacLink_Updata(ctx->gmac_inst);
+			FGmacPs_GetRxErrCount(ctx->gmac_inst);
+		}
+
 		if (config->instance_id == 0) {
 			FGmacPS_Gmii2rgmii_Update_Speed(
 				ctx->gmac_inst, ctx->gmac_inst->phy_cfg->gmii2rgmii_mdio_addr1);
@@ -455,8 +461,8 @@ static void eth_fmsh_iface_init(struct net_if *iface)
 
 	snprintf(thread_name, sizeof(thread_name), "eth_fmsh_phy_update%d", config->instance_id);
 	k_thread_create(&data->phy_update_thread, data->phy_update_thread_stack,
-			FMSH_ETH_PYH_STACK_SIZE, eth_fmsh_phy_update, (void *)dev, NULL, NULL,
-			K_IDLE_PRIO + config->instance_id, 0, K_SECONDS(1));
+			FMSH_ETH_PYH_STACK_SIZE, eth_fmsh_gmac_link_state_update, (void *)dev, NULL,
+			NULL, K_IDLE_PRIO + config->instance_id, 0, K_SECONDS(1));
 	k_thread_name_set(&data->phy_update_thread, thread_name);
 
 	FMSH_DEBUG("Interface init done.");
@@ -531,6 +537,33 @@ void FGmacPs_GmacTxCallback(FGmacPs_Instance_T *pGmac, int32_t ecode)
 	FMSH_DEBUG("Tx callback");
 }
 
+/* 检查网络接口 PHY 模式的回调函数 */
+static void is_mac2mac(struct net_if *iface, void *user_data)
+{
+	const struct device *dev = net_if_get_device(iface);
+	const struct eth_fmsh_data *data = dev->data;
+	int *m2m = (int *)user_data;
+
+	if (data && data->gmac_inst && data->gmac_inst->phy_cfg &&
+	    data->gmac_inst->phy_cfg->phy_mode) {
+
+		if (strcmp(data->gmac_inst->phy_cfg->phy_mode, "none") == 0) {
+			*m2m = 1;
+			return;
+		}
+	}
+}
+
+/* 检查是否存在 phy_mode 为 none 的接口 */
+static int eth_fmsh_m2m_exists(void)
+{
+	int m2m = 0;
+
+	net_if_foreach(is_mac2mac, &m2m);
+
+	return m2m;
+}
+
 /* 设备初始化函数 */
 static int eth_fmsh_init(const struct device *dev)
 {
@@ -544,6 +577,12 @@ static int eth_fmsh_init(const struct device *dev)
 
 	data->gmac_inst->pFrmBuffer = data->packet_buffer;
 
+	/* 检查并处理 phy_mode 为 none 的情况 */
+	int m2m = eth_fmsh_m2m_exists();
+
+	if (m2m) {
+		LOG_INF("Detected a GMAC interface without PHY");
+	}
 	FGmac_Ps_phy_Init(data->gmac_inst->phy_cfg);
 	ret = FGmac_Ps_DeviceReset(data->gmac_inst);
 	if (ret != 0) {
@@ -571,7 +610,7 @@ static int eth_fmsh_init(const struct device *dev)
 		FMSH_ERROR("TxOsf init failed");
 		return -EIO;
 	}
-	ret = FGmac_Ps_MacInit(data->gmac_inst);
+	ret = FGmac_Ps_MacInit(data->gmac_inst, m2m);
 	if (ret != 0) {
 		FMSH_ERROR("Mac init failed");
 		return -EIO;
@@ -627,20 +666,20 @@ static const struct ethernet_api eth_fmsh_api = {
 	static FGmacPs_Config_T s_GMAC_Config_##n = {                                              \
 		.DeviceId = n,                                                                     \
 		.BaseAddress = DT_INST_REG_ADDR(n),                                                \
-		.Speed = FPAR_GMACPS_0_SPEED,                                                      \
+		.Speed = DT_INST_PROP_OR(n, fixed_speed, 2),                                       \
 		.InterFaceType = FPAR_GMACPS_0_INTERFACE,                                          \
 	};                                                                                         \
                                                                                                    \
 	static FGmacPs_PhyConfig_T s_GMAC_PhyCfg_##n = {                                           \
 		.phy_device = PHY_YT8521,                                                          \
-		.speed = FPAR_GMACPS_0_SPEED,                                                      \
-		.auto_detect_ad_en = 1,                                                            \
+		.speed = DT_INST_PROP_OR(n, fixed_speed, 2),                                       \
+		.auto_detect_ad_en = DT_INST_PROP_OR(n, auto_negotiation, 1),                      \
 		.mdio_address = DT_INST_PROP(n, mdio_addr),                                        \
 		.gmii2rgmii_mdio_addr1 = DT_INST_PROP(n, gmii2rgmii_addr1),                        \
 		.gmii2rgmii_mdio_addr2 = DT_INST_PROP(n, gmii2rgmii_addr2),                        \
 		.phy_mode = DT_INST_PROP(n, phy_mode),                                             \
 		.phy_delay = DT_INST_PROP(n, phy_delay),                                           \
-		.auto_nag_en = 1,                                                                  \
+		.auto_nag_en = DT_INST_PROP_OR(n, auto_negotiation, 1),                            \
 		.interface = FPAR_GMACPS_0_INTERFACE,                                              \
 	};                                                                                         \
                                                                                                    \

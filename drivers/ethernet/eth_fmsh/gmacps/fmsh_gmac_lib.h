@@ -39,7 +39,7 @@
 #define GMAC_RBUFFER_UNIT_SIZE    1600 /* size for each Rx buffer;must be a multiple of 4,8 or 16 */
 #define GMAC_TBUFFER_UNIT_SIZE    1600
 #define GMAC_CSR_CLK              5
-#define GMAC_POLL_MAX 512
+#define GMAC_POLL_MAX             512
 
 /* return code */
 #define GMAC_RETURN_CODE_OK              0
@@ -377,7 +377,7 @@ u8 FGmac_Ps_InitTxDes(FGmacPs_Instance_T *pGmac);
 u8 FGmac_Ps_DmaInit(FGmacPs_Instance_T *pGmac, FGmacPs_RxDescriptor_T *g_GMAC_RxDs,
 		    u8 *g_GMAC_RxBuffer, FGmacPs_TxDescriptor_T *g_GMAC_TxDs, u8 *g_GMAC_TxBuffer);
 
-u8 FGmac_Ps_MacInit(FGmacPs_Instance_T *pGmac);
+u8 FGmac_Ps_MacInit(FGmacPs_Instance_T *pGmac, int m2m);
 
 void *FGmac_Ps_RcvPollEFrame(FGmacPs_Instance_T *pGmac, u32 *pRcvSize);
 u8 FGmac_Ps_Send(FGmacPs_Instance_T *pGmac, u8 *pBuffer, u32 size, u8 DisCRC, u8 DisPAD);

@@ -1,0 +1,17 @@
+/**
+ * Copyright (c) 2025 SYSFly Co.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+#include <common/mem.h>
+
+&mmc0 {
+	status = "okay";
+	non-removable;
+
+	usr {
+		compatible = "zephyr,mmc-disk";
+		status = "okay";
+		bus-width = <4>;
+	};
+};

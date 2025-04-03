@@ -45,12 +45,30 @@ properties:
     enum:
       - "fiber"
       - "utp"
+      - "none"
     description: "PHY interface mode selection"
 
   phy-delay:
     type: int
     required: true
     description: "PHY delay configuration value (hex)"
+
+  fixed-speed:
+    type: int
+    default: 2
+    enum:
+      - 0
+      - 1
+      - 2
+    description: "Link speed selection: 0=10Mbps, 1=100Mbps, 2=1000Mbps"
+
+  auto-negotiation:
+    type: int
+    default: 1
+    enum:
+      - 0
+      - 1
+    description: "Enable auto-negotiation, defaults to true if not specified"
 
   local-ip-address:
     type: string
