@@ -219,10 +219,10 @@ EL1_Reset_Handler:
     strb r5, [r4, r2]
     ldr r3, [r0, #BOOT_PARAM_MPID_OFFSET]
     cmn r3, #1
+    mov r7, #0 /* The following two branch needs r7 to be 0 */
     beq 1f
 
     /* some core already won, release */
-    mov r7, #0
     strb r7, [r4, r2]
     b _secondary_core
 
