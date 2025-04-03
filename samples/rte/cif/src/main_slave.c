@@ -21,8 +21,8 @@ struct reg_buf {
 
 REG_BUF_REG_DEF(config, 64) = {'c', 'f', 'g', ':', '0', '0', '0', '0'};
 REG_BUF_DEF(config, 64);
-REG_BUF_REG_DEF(io, 8) = {'i', 'o', ':', '0', '0', '0', '0', '0'};
-REG_BUF_DEF(io, 8);
+REG_BUF_REG_DEF(io, 128) = {'i', 'o', ':', '0', '0', '0', '0', '0'};
+REG_BUF_DEF(io, 128);
 REG_BUF_REG_DEF(eth0, 32) = {'e', 't', 'h', '0', ':', '0', '0', '0'};
 REG_BUF_DEF(eth0, 32);
 REG_BUF_REG_DEF(eth1, 32) = {'e', 't', 'h', '1', ':', '0', '0', '0'};
