@@ -15,7 +15,7 @@
 	gmii2rgmii-addr1 = <0x8>;
 	gmii2rgmii-addr2 = <0x9>;
 	phy-mode = "fiber";  /* fiber or utp */
-	phy-delay = <0x3C0C>;
+	phy-delay = <0x1000>;
 	local-ip-address = "192.168.10.16";
 	local-netmask = "255.255.255.0";
 	local-gateway = "192.168.10.1";
