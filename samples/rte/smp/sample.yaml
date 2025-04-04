@@ -1,0 +1,11 @@
+sample:
+  description: SMP sample
+  name: SMP sample
+common:
+  tags: app
+tests:
+  sample.rbs2530.rte.smp:
+    tags: app
+    platform_allow:
+      - rbs2530_cpu
+      - rbs2530_ec
