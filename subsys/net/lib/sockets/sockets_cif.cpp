@@ -748,10 +748,9 @@ static void wq_background_entry(void *arg1, void *arg2, void *arg3)
 		if (wq->empty()) {
 			k_sleep(K_MSEC(10));
 		} else {
-			k_mutex_lock(&cif_data.x_lock_, K_FOREVER);
+			/* FIXME: schedule() could be conflict with socket API */
 			wq->schedule();
-			k_mutex_unlock(&cif_data.x_lock_);
-			NET_DBG("WQ scheduled");
+						NET_DBG("WQ scheduled");
 		}
 	}
 }
@@ -761,8 +760,7 @@ static int ldp_init(void)
 	k_mutex_init(&cif_data.x_lock_);
 	cif_data.wq_tid = k_thread_create(
 		&cif_data.wq_thread, cif_data.wq_stack, K_THREAD_STACK_SIZEOF(cif_data.wq_stack),
-		wq_background_entry, &cif_data.wq, nullptr, nullptr,
-		K_PRIO_COOP(1), 0, K_NO_WAIT);
+		wq_background_entry, &cif_data.wq, nullptr, nullptr, K_PRIO_COOP(1), 0, K_NO_WAIT);
 	k_thread_name_set(&cif_data.wq_thread, "cif_wq");
 	return 0;
 }

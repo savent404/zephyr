@@ -94,13 +94,14 @@ void ldp_wq::schedule()
 	 */
 	free_time = ((free_time + enclosed_cycle - 1) / enclosed_cycle) * enclosed_cycle;
 
-	if (free_time < prev_fn_cost_) {
+	if (free_time >= prev_fn_cost_) {
+		k_usleep(free_time - prev_fn_cost_);
+	} else {
 		/* FIXME: bus cycle takes too long,
 		 * but we still need give CPU some time...
 		 */
-		prev_fn_cost_ = 0;
+		k_yield();
 	}
-	k_usleep(free_time - prev_fn_cost_);
 
 	{
 		curr_cycle = k_cycle_get_32();

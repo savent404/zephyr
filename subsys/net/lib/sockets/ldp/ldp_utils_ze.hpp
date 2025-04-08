@@ -101,7 +101,7 @@ struct ldp_wq: public work_queue_if {
 	ze_mutex x_lock_;
 	ze_sem work_sem_;
 	uint32_t prev_fn_cost_ = 0;
-	static inline const uint32_t enclosed_cycle = 1000; /* 1ms */
+	static inline const uint32_t enclosed_cycle = 100; /* 100us */
 };
 
 } // namespace systech::cif::zephyr
