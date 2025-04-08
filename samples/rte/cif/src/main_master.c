@@ -311,7 +311,7 @@ static bool handle_io_start_state(int sock, uint32_t *timeout)
 	ctx_.curr_len = sizeof(ctx_.curr);
 	ctx_.stat_ok = 0;
 	ctx_.stat_failed = 0;
-	ctx_.systick_begin = sys_clock_tick_get();
+	ctx_.systick_begin = k_uptime_get_32();
 
 	int ret = sendto(sock, "io:0", 4, 0, (struct sockaddr *)&remote, sizeof(remote));
 
@@ -331,25 +331,31 @@ static bool handle_io_state(int sock, uint32_t *timeout, uint8_t *in_buf, size_t
 	bool is_timeout = k_uptime_get_32() > *timeout;
 
 	if (!is_timeout) {
-		int ret = recvfrom(sock, in_buf, in_buf_size, 0, (struct sockaddr *)&ctx_.curr,
-				   &ctx_.curr_len);
-		if (ret < 0 && errno != EAGAIN) {
-			LOG_ERR("Failed to receive data, errno %d", errno);
-			ctx_.stat_failed++;
-		} else {
-			LOG_HEXDUMP_DBG(in_buf, ret, "Received data from slot");
-			ctx_.stat_ok++;
-		}
+		int ret;
+
+		/* spin to avoid RX FIFO full */
+		do {
+			ret = recvfrom(sock, in_buf, in_buf_size, 0, (struct sockaddr *)&ctx_.curr,
+				       &ctx_.curr_len);
+			if (ret < 0 && errno != EAGAIN) {
+				LOG_ERR("Failed to receive data, errno %d", errno);
+				ctx_.stat_failed++;
+			} else if (ret > 0) {
+				LOG_HEXDUMP_DBG(in_buf, ret, "Received data from slot");
+				ctx_.stat_ok++;
+			}
+		} while (ret > 0);
 
 		ret = sendto(sock, out_buf, out_buf_size, 0, (struct sockaddr *)&ctx_.curr,
 			     ctx_.curr_len);
-		if (ret < 0) {
+		if (ret < 0 && errno != EAGAIN) {
 			LOG_ERR("Failed to send data, errno %d", errno);
 			ctx_.stat_failed++;
 		}
 	} else {
-		ctx_.systick_end = sys_clock_tick_get();
+		ctx_.systick_end = k_uptime_get_32();
 		bool res = dev_general_deinit(sock, ctx_.target_sid, ctx_.target_port);
+		int32_t duration = ctx_.systick_end - ctx_.systick_begin;
 
 		if (!res) {
 			LOG_ERR("Failed to close port %d on slot %d", ctx_.target_port,
@@ -358,7 +364,7 @@ static bool handle_io_state(int sock, uint32_t *timeout, uint8_t *in_buf, size_t
 		ctx_.state = STATE_IDLE;
 		LOG_INF("IO tested, package passed: %d err: %d, percentage: %3d%%", ctx_.stat_ok,
 			ctx_.stat_failed, ctx_.stat_ok * 100 / (ctx_.stat_ok + ctx_.stat_failed));
-		LOG_INF("Duration: %lldms", (ctx_.systick_end - ctx_.systick_begin));
+		LOG_INF("Duration: %dms", duration);
 	}
 	return true;
 }
@@ -574,6 +580,13 @@ static int main_master(void)
 			handle_io_buf(in_buf, out_buf, &out_buf_len);
 			handle_io_state(sock, &timeout, in_buf, sizeof(in_buf), out_buf,
 					out_buf_len);
+
+			/* If the port is sync, wait for the next cycle,
+			 * otherwise, no more sleeping to improve performance.
+			 */
+			if (CIF_IS_SYNC_PORT(ctx_.target_port)) {
+				k_usleep(SYNC_CYCLE_TIME);
+			}
 			break;
 
 		case STATE_OPEN:

@@ -57,10 +57,11 @@ static int cif_cmd(const struct shell *sh, size_t argc, char **argv)
 		_cmd_switch = CMD_SWITCH,
 		_cmd_open = CMD_OPEN,
 		_cmd_close = CMD_CLOSE,
+		_cmd_perf = CMD_PERF,
 	} cmd = _cmd_none;
 	const char *subcmd = argv[1];
 	static const char *const subcmd_list[] = {
-		"discovery", "config", "io", "switch", "open", "close",
+		"discovery", "config", "io", "switch", "open", "close", "perf",
 	};
 
 	for (int i = 0; i < ARRAY_SIZE(subcmd_list); i++) {
@@ -160,6 +161,7 @@ static int cif_cmd(const struct shell *sh, size_t argc, char **argv)
 
 		ctx_.target_opt = normal;
 		ctx_.target_bus = bus_low;
+		ctx_.perf_mode = false;
 		for (int i = 3; i < argc; i++) {
 			if (!strcmp(argv[i], "preempt")) {
 				ctx_.target_opt = preempt;
@@ -224,6 +226,21 @@ static int cif_cmd(const struct shell *sh, size_t argc, char **argv)
 		ctx_.target_port = atoi(argv[3]);
 		handled = true;
 	} break;
+	case _cmd_perf: {
+		if (argc != 3) {
+			shell_print(sh, "Invalid arguments number");
+			return -EINVAL;
+		}
+		if (!strcmp(argv[2], "on")) {
+			ctx_.perf_mode = true;
+		} else if (!strcmp(argv[2], "off")) {
+			ctx_.perf_mode = false;
+		} else {
+			shell_print(sh, "Invalid arguments");
+			return -EINVAL;
+		}
+		handled = true;
+	} break;
 	case _cmd_none:
 	default:
 		break;
@@ -238,6 +255,7 @@ static int cif_cmd(const struct shell *sh, size_t argc, char **argv)
 		shell_print(sh, "\tswitch <slave|master> [preempt]");
 		shell_print(sh, "\topen <slot> <port> [initial_data] [check]");
 		shell_print(sh, "\tclose <slot> <port>");
+		shell_print(sh, "\tperf on|off");
 		return 0;
 	}
 

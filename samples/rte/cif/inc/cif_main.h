@@ -70,6 +70,7 @@ struct context {
 #define CMD_SWITCH    4
 #define CMD_OPEN      5
 #define CMD_CLOSE     6
+#define CMD_PERF      7
 	uint32_t cmd;
 
 #define STATE_IDLE     0
@@ -96,6 +97,8 @@ struct context {
 	uint8_t initial_data[64];
 	size_t initial_data_len;
 	bool check_response;
+
+	bool perf_mode;
 };
 
 int slave_start(void);

@@ -63,7 +63,7 @@ static bool dev_port_open(int cif_sock, uint8_t port, uint8_t *initial_tx, uint1
 	return true;
 }
 
-static void deal_ethernet_data(int sock, uint8_t port)
+static int deal_ethernet_data(int sock, uint8_t port)
 {
 	static uint8_t rx_buf[CIF_ASYNC_MTU];
 	int ret;
@@ -72,19 +72,46 @@ static void deal_ethernet_data(int sock, uint8_t port)
 		.port = port,
 	};
 	socklen_t sl = sizeof(port_addr);
+	bool something2do = false;
 
-	ret = recvfrom(sock, rx_buf, sizeof(rx_buf), 0, (struct sockaddr *)&port_addr, &sl);
-	if (ret < 0 && errno != EAGAIN && errno != ENXIO) {
-		LOG_ERR("Failed to receive data, errno %d", errno);
-	} else if (ret > 0) {
-		LOG_INF("Received data from port %d", port);
-		LOG_HEXDUMP_INF(rx_buf, ret, "Data:");
+	if (!ctx_.perf_mode) {
+		/* don't care about the performance, using echo to validate loopback */
+		ret = recvfrom(sock, rx_buf, sizeof(rx_buf), 0, (struct sockaddr *)&port_addr, &sl);
+		if (ret < 0 && errno != EAGAIN) {
+			LOG_ERR("Failed to receive data, errno %d", errno);
+		} else if (ret > 0) {
+			LOG_INF("Received data from port %d", port);
+			LOG_HEXDUMP_INF(rx_buf, ret, "Data:");
 
-		ret = sendto(sock, rx_buf, ret, 0, (struct sockaddr *)&port_addr, sl);
-		if (ret < 0 && errno != EAGAIN && errno != ENXIO) {
+			ret = sendto(sock, rx_buf, ret, 0, (struct sockaddr *)&port_addr, sl);
+			if (ret < 0 && errno != EAGAIN) {
+				LOG_ERR("Failed to send data back, errno %d", errno);
+			}
+
+			something2do = true;
+		}
+	} else {
+		/* performance mode, send any data to the port */
+		ret = recvfrom(sock, rx_buf, sizeof(rx_buf), 0, (struct sockaddr *)&port_addr, &sl);
+
+		if (ret < 0 && errno != EAGAIN) {
+			LOG_ERR("Failed to receive data, errno %d", errno);
+		} else if (ret > 0) {
+			LOG_INF("Received data from port %d", port);
+			LOG_HEXDUMP_INF(rx_buf, ret, "Data:");
+			something2do = true;
+		}
+
+		ret = sendto(sock, rx_buf, 1500, 0, (struct sockaddr *)&port_addr, sl);
+		if (ret < 0 && errno != EAGAIN) {
 			LOG_ERR("Failed to send data back, errno %d", errno);
+		} else if (ret > 0) {
+			LOG_INF("Sent data back to port %d", port);
+			something2do = true;
 		}
 	}
+
+	return something2do ? 1 : 0;
 }
 
 static int slave_task(void)
@@ -220,7 +247,7 @@ static int slave_task(void)
 				     (struct sockaddr *)&port_cfg, sizeof(port_cfg));
 			if (ret >= 0) {
 				LOG_INF("Sent config data back");
-			} else if (errno == EAGAIN || ENXIO) {
+			} else if (errno == EAGAIN) {
 				/* Nothing to do */
 			} else {
 				LOG_ERR("Failed to send config data, errno %d", errno);
@@ -246,12 +273,16 @@ static int slave_task(void)
 			LOG_INF("Failed to send io data, errno %d", errno);
 		}
 
-		deal_ethernet_data(sock, PORT_ID_ETH0);
-		deal_ethernet_data(sock, PORT_ID_ETH1);
-		deal_ethernet_data(sock, PORT_ID_ETH2);
-		deal_ethernet_data(sock, PORT_ID_ETH3);
+		int no_job = 0;
 
-		k_usleep(10);
+		no_job += deal_ethernet_data(sock, PORT_ID_ETH0);
+		no_job += deal_ethernet_data(sock, PORT_ID_ETH1);
+		no_job += deal_ethernet_data(sock, PORT_ID_ETH2);
+		no_job += deal_ethernet_data(sock, PORT_ID_ETH3);
+
+		if (no_job == 0) {
+			k_usleep(10);
+		}
 
 		/* NOTE: terminate condition */
 		if (k_sem_take(&terminate_sem, K_NO_WAIT) == 0) {

@@ -18,7 +18,7 @@ config LDP
 		int "Maximum LDP HARQ depth"
 		depends on LDP
 		default 4
-		range 1 16
+		range 1 128
 		help
 		  This option specifies the maximum depth of the LDP HARQ FIFO buffer.
 		  A larger value allows for more packets to be queued for retransmission
