@@ -343,7 +343,7 @@ static ssize_t cif_sock_sendto(struct net_context *ctx, const void *buf, size_t 
 	int ret = (*usr_data->ldp).send(conn, reinterpret_cast<const uint8_t *>(buf), len);
 
 	if (ret < 0) {
-		cif_ldp_error_to_errno(ret);
+		ret = cif_ldp_error_to_errno(ret);
 	}
 	return ret;
 }
@@ -750,7 +750,7 @@ static void wq_background_entry(void *arg1, void *arg2, void *arg3)
 		} else {
 			/* FIXME: schedule() could be conflict with socket API */
 			wq->schedule();
-						NET_DBG("WQ scheduled");
+			NET_DBG("WQ scheduled");
 		}
 	}
 }
