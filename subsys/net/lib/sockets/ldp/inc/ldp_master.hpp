@@ -503,6 +503,13 @@ template <typename T_mempool, typename T_cache> struct ldp_master: public ldp_ba
 		return ci->rx_len;
 	}
 
+	void set_sync_cycle(uint32_t cycle)
+	{
+		cycle_time_ = cycle;
+
+		work_queue_->reset(sync_wq_id_, cycle_time_);
+	}
+
 	void sync_handler()
 	{
 		for (auto &ci : sync_conns_) {

@@ -257,6 +257,10 @@ template <typename T_cache> struct ldp_slave: public ldp_basic {
 	{
 	}
 
+	virtual void set_sync_cycle(uint32_t)
+	{
+	}
+
       protected:
 	struct conn_info {
 		conn id;

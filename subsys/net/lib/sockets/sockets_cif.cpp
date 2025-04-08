@@ -487,6 +487,7 @@ static int cif_sock_setsockopt(struct net_context *ctx, int level, int optname, 
 		mcb_set_role(usr_data->dev, opt->dr, opt->dt);
 		usr_data->master_cfg.cycle_time = opt->cycle_time;
 		usr_data->master_cfg.sync_timeout = opt->sync_timeout;
+		(*usr_data->ldp).set_sync_cycle(usr_data->master_cfg.cycle_time);
 	} break;
 	case CIF_OPT_SLAVE_CONFIG: {
 		auto opt = reinterpret_cast<const cif_raw_slave_config *>(optval);
