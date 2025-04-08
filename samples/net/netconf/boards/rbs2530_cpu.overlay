@@ -1,0 +1,7 @@
+&ethernet0 {
+	status = "okay";
+};
+
+&ethernet1 {
+	status = "disabled";
+};

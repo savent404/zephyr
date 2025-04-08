@@ -337,6 +337,11 @@ static enum ethernet_hw_caps eth_fmsh_get_capabilities(const struct device *dev)
 static int eth_fmsh_set_config(const struct device *dev, enum ethernet_config_type type,
 			       const struct ethernet_config *config)
 {
+	struct eth_fmsh_data *data = dev->data;
+	FGmacPs_Instance_T *pGmac = data->gmac_inst;
+	const uint8_t *mac_addr = config->mac_address.addr;
+	int ret;
+
 	switch (type) {
 	case ETHERNET_CONFIG_TYPE_AUTO_NEG:
 		/* 配置自动协商 */
@@ -348,7 +353,17 @@ static int eth_fmsh_set_config(const struct device *dev, enum ethernet_config_ty
 		/* 配置双工模式 */
 		break;
 	case ETHERNET_CONFIG_TYPE_MAC_ADDRESS:
-		/* 配置MAC地址 */
+		memcpy(pGmac->mac_address, mac_addr, 6);
+		net_if_set_link_addr(data->iface, pGmac->mac_address, 6, NET_LINK_ETHERNET);
+		ret = FGmac_Ps_SetupMacAddr(pGmac, 0, pGmac->mac_address, 1, 0, 0);
+		if (ret != 0) {
+			FMSH_ERROR("Failed to set MAC address: %02x:%02x:%02x:%02x:%02x:%02x",
+				   mac_addr[0], mac_addr[1], mac_addr[2], mac_addr[3], mac_addr[4],
+				   mac_addr[5]);
+			return -EIO;
+		}
+		FMSH_DEBUG("MAC address set to: %02x:%02x:%02x:%02x:%02x:%02x", mac_addr[0],
+			   mac_addr[1], mac_addr[2], mac_addr[3], mac_addr[4], mac_addr[5]);
 		break;
 	default:
 		return -ENOTSUP;
@@ -369,6 +384,7 @@ static int eth_fmsh_get_config(const struct device *dev, enum ethernet_config_ty
 		break;
 	case ETHERNET_CONFIG_TYPE_MAC_ADDRESS:
 		/* 获取MAC地址 */
+		memcpy(config->mac_address.addr, ctx->net_config.mac_address, 6);
 		break;
 	case ETHERNET_CONFIG_TYPE_LINK:
 		/* 获取链接配置 */
@@ -416,6 +432,7 @@ static void eth_fmsh_iface_init(struct net_if *iface)
 	const struct device *dev = net_if_get_device(iface);
 	struct eth_fmsh_data *data = dev->data;
 	const struct eth_fmsh_config *config = dev->config;
+	struct net_config *net_config = &data->net_config;
 
 	data->iface = iface;
 
@@ -425,25 +442,26 @@ static void eth_fmsh_iface_init(struct net_if *iface)
 	net_eth_carrier_on(data->iface);
 
 	/* 设置MAC地址 */
-	net_if_set_link_addr(data->iface, (uint8_t *)config->mac_address, 6, NET_LINK_ETHERNET);
+	net_config->mac_address = data->gmac_inst->mac_address;
+	net_if_set_link_addr(data->iface, net_config->mac_address, 6, NET_LINK_ETHERNET);
 	LOG_INF("GMAC%d: MAC address: %02x:%02x:%02x:%02x:%02x:%02x", config->instance_id,
-		config->mac_address[0], config->mac_address[1], config->mac_address[2],
-		config->mac_address[3], config->mac_address[4], config->mac_address[5]);
+		net_config->mac_address[0], net_config->mac_address[1], net_config->mac_address[2],
+		net_config->mac_address[3], net_config->mac_address[4], net_config->mac_address[5]);
 
 	/*  配置IP地址、子网掩码和网关  */
 	struct in_addr addr, netmask, gw;
 	struct net_if_addr *ifaddr;
 
 	/*  设置IP地址  */
-	net_addr_pton(AF_INET, config->ip_address, &addr);
+	net_addr_pton(AF_INET, net_config->ip_address, &addr);
 	ifaddr = net_if_ipv4_addr_add(iface, &addr, NET_ADDR_MANUAL, 0);
 
 	/*  设置子网掩码  */
-	net_addr_pton(AF_INET, config->netmask, &netmask);
+	net_addr_pton(AF_INET, net_config->netmask, &netmask);
 	net_if_ipv4_set_netmask_by_addr(iface, (const struct in_addr *)ifaddr, &netmask);
 
 	/*  设置网关  */
-	net_addr_pton(AF_INET, config->gateway, &gw);
+	net_addr_pton(AF_INET, net_config->gateway, &gw);
 	net_if_ipv4_set_gw(iface, &gw);
 
 	data->napi_budget = 256;
@@ -709,6 +727,12 @@ static const struct ethernet_api eth_fmsh_api = {
 		.tx_buffer = dw_tx_##n,                                                            \
 		.rx_buffer = dw_rx_##n,                                                            \
 		.packet_buffer = pack_buf_##n,                                                     \
+		.net_config =                                                                      \
+			{                                                                          \
+				.ip_address = DT_INST_PROP(n, local_ip_address),                   \
+				.netmask = DT_INST_PROP(n, local_netmask),                         \
+				.gateway = DT_INST_PROP(n, local_gateway),                         \
+			},                                                                         \
 	};                                                                                         \
                                                                                                    \
 	static void eth_fmsh_irq_init_##n(void)                                                    \
@@ -723,10 +747,6 @@ static const struct ethernet_api eth_fmsh_api = {
 		.irq_num = DT_INST_IRQN(n),                                                        \
 		.irq_priority = DT_INST_IRQ(n, priority),                                          \
 		.instance_id = n,                                                                  \
-		.mac_address = DT_INST_PROP(n, local_mac_address),                                 \
-		.ip_address = DT_INST_PROP(n, local_ip_address),                                   \
-		.netmask = DT_INST_PROP(n, local_netmask),                                         \
-		.gateway = DT_INST_PROP(n, local_gateway),                                         \
 		.irq_config_fn = eth_fmsh_irq_init_##n,                                            \
 	};                                                                                         \
                                                                                                    \
