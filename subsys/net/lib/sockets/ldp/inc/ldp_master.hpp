@@ -29,7 +29,7 @@ namespace cif
  *
  * @tparam T_mempool abstract memory pool
  * @tparam T_cache   abstract cache interface
- */
+  */
 template <typename T_mempool, typename T_cache, typename T_mutex, typename T_rwlock> struct ldp_master: public ldp_basic {
 
 	using bc_mode = bc::bc_mode;
@@ -585,9 +585,9 @@ template <typename T_mempool, typename T_cache, typename T_mutex, typename T_rwl
 					port_rejected = false;
 					printk("LDP_MASTER: poll timeout, sid=%d, port=%d\n",
 					       ci->sid, ci->port);
-				} else {
-					k_busy_wait(1);
+					k_panic();
 				}
+				k_usleep(100);
 #endif
 			} while (!data_ready && !data_timeout && !port_rejected);
 
@@ -748,9 +748,10 @@ template <typename T_mempool, typename T_cache, typename T_mutex, typename T_rwl
 					data_timeout = true;
 					printk("LDP_MASTER: poll timeout, sid=%d, port=%d\n",
 					       ci->sid, ci->port);
-				} else {
-					k_busy_wait(1);
+					k_panic();
 				}
+
+				k_usleep(100);
 #endif
 			} while (!data_ready && !data_timeout && !p_error);
 
