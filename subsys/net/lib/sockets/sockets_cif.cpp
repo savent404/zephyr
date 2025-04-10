@@ -748,7 +748,6 @@ static void wq_background_entry(void *arg1, void *arg2, void *arg3)
 		if (wq->empty()) {
 			k_sleep(K_MSEC(10));
 		} else {
-			/* FIXME: schedule() could be conflict with socket API */
 			wq->schedule();
 			NET_DBG("WQ scheduled");
 		}

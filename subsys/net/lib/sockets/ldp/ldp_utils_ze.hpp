@@ -12,6 +12,7 @@
 
 #include <zephyr/kernel.h>
 #include <zephyr/sys/barrier.h>
+#include <zephyr/posix/pthread.h>
 #include <list>
 
 #include "ldp/inc/ldp_utils.hpp"
@@ -71,6 +72,32 @@ struct ze_mutex {
 	void unlock()
 	{
 		k_mutex_unlock(&x_lock_);
+	}
+};
+
+struct ze_rwlock {
+	pthread_rwlock_t x_lock_;
+
+	ze_rwlock()
+	{
+		pthread_rwlock_init(&x_lock_, nullptr);
+	}
+
+	void lock_shared()
+	{
+		pthread_rwlock_rdlock(&x_lock_);
+	}
+	void unlock_shared()
+	{
+		pthread_rwlock_unlock(&x_lock_);
+	}
+	void lock()
+	{
+		pthread_rwlock_wrlock(&x_lock_);
+	}
+	void unlock()
+	{
+		pthread_rwlock_unlock(&x_lock_);
 	}
 };
 

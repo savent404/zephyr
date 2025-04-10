@@ -10,6 +10,7 @@ config LDP
 	select MCB
 	select CPP
 	select REQUIRES_FULL_LIBCPP
+	select PTHREAD_IPC
 	help
 	  This option enables LDP support
 	  and is the basis for higher level protocols (e.g. LDP protocols).

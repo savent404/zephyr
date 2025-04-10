@@ -103,7 +103,7 @@ struct mcb_zephyr: public mcb_if {
 	const struct device *dev_;
 };
 
-using ldp_master_impl = ldp_master<ldp_mem_slab, ldp_cache_if>;
+using ldp_master_impl = ldp_master<ldp_mem_slab, ldp_cache_if, ze_mutex, ze_rwlock>;
 using ldp_slave_impl = ldp_slave<ldp_cache_if>;
 using ldp_mcb_impl = mcb_zephyr;
 } // namespace systech::cif::zephyr

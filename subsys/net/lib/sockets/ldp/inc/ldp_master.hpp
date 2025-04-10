@@ -17,6 +17,8 @@
 #include <zephyr/kernel.h>
 #endif
 
+#include <shared_mutex>
+
 namespace systech
 {
 namespace cif
@@ -28,7 +30,7 @@ namespace cif
  * @tparam T_mempool abstract memory pool
  * @tparam T_cache   abstract cache interface
  */
-template <typename T_mempool, typename T_cache> struct ldp_master: public ldp_basic {
+template <typename T_mempool, typename T_cache, typename T_mutex, typename T_rwlock> struct ldp_master: public ldp_basic {
 
 	using bc_mode = bc::bc_mode;
 
@@ -50,6 +52,8 @@ template <typename T_mempool, typename T_cache> struct ldp_master: public ldp_ba
 
 	virtual ~ldp_master()
 	{
+		std::unique_lock lock(conns_lock);
+
 		for (auto &id : wqs_) {
 			work_queue_->cancel(id);
 		}
@@ -85,6 +89,8 @@ template <typename T_mempool, typename T_cache> struct ldp_master: public ldp_ba
 			return -LDP_ERR_INVALID;
 		}
 
+		std::unique_lock lock(conns_lock);
+
 		if (is_async) {
 			id = create_async(
 				reinterpret_cast<const ldp_master_async_config *>(config));
@@ -96,6 +102,8 @@ template <typename T_mempool, typename T_cache> struct ldp_master: public ldp_ba
 
 	virtual int destroy(conn c)
 	{
+		std::unique_lock lock(conns_lock);
+
 		auto sync_it = std::find_if(sync_conns_.begin(), sync_conns_.end(),
 					    [c](const sync_conn_ptr &ci) { return ci->id == c; });
 		auto async_it = std::find_if(async_conns_.begin(), async_conns_.end(),
@@ -141,6 +149,7 @@ template <typename T_mempool, typename T_cache> struct ldp_master: public ldp_ba
 
 	virtual int send(conn c, const uint8_t *buf, uint16_t len)
 	{
+		std::shared_lock lock(conns_lock);
 		auto async_it = std::find_if(async_conns_.begin(), async_conns_.end(),
 					     [c](const async_conn_ptr &ci) { return ci->id == c; });
 		auto sync_it = std::find_if(sync_conns_.begin(), sync_conns_.end(),
@@ -161,6 +170,7 @@ template <typename T_mempool, typename T_cache> struct ldp_master: public ldp_ba
 
 	virtual int recv(conn c, uint8_t *buf, uint16_t len)
 	{
+		std::shared_lock lock(conns_lock);
 		auto async_it = std::find_if(async_conns_.begin(), async_conns_.end(),
 					     [c](const async_conn_ptr &ci) { return ci->id == c; });
 		auto sync_it = std::find_if(sync_conns_.begin(), sync_conns_.end(),
@@ -182,6 +192,7 @@ template <typename T_mempool, typename T_cache> struct ldp_master: public ldp_ba
 
 	virtual uint32_t get_extra_error(conn c)
 	{
+		std::shared_lock lock(conns_lock);
 		auto async_it = std::find_if(async_conns_.begin(), async_conns_.end(),
 					     [c](const async_conn_ptr &ci) { return ci->id == c; });
 		auto sync_it = std::find_if(sync_conns_.begin(), sync_conns_.end(),
@@ -198,6 +209,7 @@ template <typename T_mempool, typename T_cache> struct ldp_master: public ldp_ba
 
 	virtual void clr_extra_error(conn c, uint32_t err_bits)
 	{
+		std::shared_lock lock(conns_lock);
 		auto async_it = std::find_if(async_conns_.begin(), async_conns_.end(),
 					     [c](const async_conn_ptr &ci) { return ci->id == c; });
 		auto sync_it = std::find_if(sync_conns_.begin(), sync_conns_.end(),
@@ -233,6 +245,7 @@ template <typename T_mempool, typename T_cache> struct ldp_master: public ldp_ba
 		uint32_t timeout_allowed; /* timeout allowed in cycle count */
 
 		uint32_t stat_rx_packet; /* run loop counter */
+		T_mutex lock;
 		virtual ~conn_info_base() = default;
 	};
 
@@ -403,6 +416,7 @@ template <typename T_mempool, typename T_cache> struct ldp_master: public ldp_ba
 
 	int send_async(async_conn_info *ci, const uint8_t *buf, uint16_t len)
 	{
+		std::unique_lock lock(ci->lock);
 		async_buf abuf;
 
 		if (ci->tx_bufs.size() >= LDP_MAX_TX_BUF) {
@@ -427,6 +441,7 @@ template <typename T_mempool, typename T_cache> struct ldp_master: public ldp_ba
 
 	int send_sync(sync_conn_info *ci, const uint8_t *buf, uint16_t len)
 	{
+		std::unique_lock lock(ci->lock);
 		uint8_t *tx_buf = reinterpret_cast<uint8_t *>(mempool_if::alloc(len));
 		uint8_t *tx_buf_prev = ci->tx_buf;
 		if (!tx_buf) {
@@ -445,6 +460,7 @@ template <typename T_mempool, typename T_cache> struct ldp_master: public ldp_ba
 
 	int recv_async(async_conn_info *ci, uint8_t *buf, uint16_t len)
 	{
+		std::unique_lock lock(ci->lock);
 		async_buf abuf;
 
 		/* user action triggered, reset hold on if oneshot mode is on */
@@ -482,6 +498,7 @@ template <typename T_mempool, typename T_cache> struct ldp_master: public ldp_ba
 
 	int recv_sync(sync_conn_info *ci, uint8_t *buf, uint16_t len)
 	{
+		std::unique_lock lock(ci->lock);
 		int err = get_immediate_err(ci->last_err);
 		if (err) {
 			return err;
@@ -512,11 +529,14 @@ template <typename T_mempool, typename T_cache> struct ldp_master: public ldp_ba
 
 	void sync_handler()
 	{
+		std::shared_lock bus_lock(conns_lock);
+
 		for (auto &ci : sync_conns_) {
 			uint8_t *rx_buf, *tx_buf;
 			uint16_t rx_len;
 			uint32_t status;
 			bool data_ready, data_timeout, port_rejected;
+			std::unique_lock conn_lock(ci->lock);
 #if CONFIG_MCB_SYSTECH_HW_WORKAROUND
 			uint32_t timeout = LDP_POLL_TIMEOUT;
 #endif
@@ -647,6 +667,8 @@ template <typename T_mempool, typename T_cache> struct ldp_master: public ldp_ba
 
 	void async_handler(async_conn_info *ci)
 	{
+		std::shared_lock bus_lock(conns_lock);
+		std::unique_lock conn_lock(ci->lock);
 		int should_continue = 1;    /* Assume no progress, 1 slot is enough */
 		const int max_continue = 2; /* If we have some progress(tx acked, new rx
 		data), we should give appropriate time to wait for slave response */
@@ -885,6 +907,8 @@ template <typename T_mempool, typename T_cache> struct ldp_master: public ldp_ba
       protected:
 	sync_conn_list sync_conns_;
 	async_conn_list async_conns_;
+	T_rwlock conns_lock;
+
 	int32_t next_id_ = 0;
 	wq_list wqs_;
 	work_queue_if::id sync_wq_id_;
