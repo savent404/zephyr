@@ -29,8 +29,9 @@ namespace cif
  *
  * @tparam T_mempool abstract memory pool
  * @tparam T_cache   abstract cache interface
-  */
-template <typename T_mempool, typename T_cache, typename T_mutex, typename T_rwlock> struct ldp_master: public ldp_basic {
+ */
+template <typename T_mempool, typename T_cache, typename T_mutex, typename T_rwlock>
+struct ldp_master: public ldp_basic {
 
 	using bc_mode = bc::bc_mode;
 
@@ -526,26 +527,171 @@ template <typename T_mempool, typename T_cache, typename T_mutex, typename T_rwl
 
 		work_queue_->reset(sync_wq_id_, cycle_time_);
 	}
+	/**
+	 * @brief Configure MCB port for transmission
+	 *
+	 * @param port Port number
+	 * @param len Transmission length
+	 */
+	void configure_port(int port, uint16_t len)
+	{
+		mcb_->config_port(port, true, true, mcb_if::MCB_MAX_FRAME_LEN);
+		mcb_->set_tx_len(port, len);
+	}
+
+	/**
+	 * @brief Manage timeout for connections
+	 *
+	 * @param ci Connection info pointer (base)
+	 * @param data_received Whether data was received successfully
+	 * @return true if timeout occurred
+	 */
+	bool manage_timeout(conn_info_base *ci, bool data_received)
+	{
+		if (data_received) {
+			// If new data received, reset timeout
+			ci->timeout_cnt = ci->timeout_allowed;
+			ci->last_err &= ~(1 << LDP_ERR_ATIMEOUT);
+			return false;
+		} else {
+			if (ci->timeout_cnt > 1) {
+				ci->timeout_cnt--;
+				return false;
+			} else {
+				ci->timeout_cnt = 0;
+				ci->last_err |= 1 << LDP_ERR_ATIMEOUT;
+				return true;
+			}
+		}
+	}
+
+	/**
+	 * @brief Process bus status and handle errors
+	 *
+	 * @param ci Connection info pointer
+	 * @param status MCB status
+	 */
+	void process_bus_status(conn_info_base *ci, uint32_t status)
+	{
+		bool data_timeout = status & mcb_if::MCB_ERR_T_ERR;
+
+		ci->last_err = handle_error(data_timeout, ci->last_err, LDP_ERR_T_ERROR,
+					    LDP_ERR_PREV_T_ERROR);
+		ci->last_err = handle_error(status & mcb_if::MCB_ERR_R_ERR, ci->last_err,
+					    LDP_ERR_R_ERROR, LDP_ERR_PREV_R_ERROR);
+		ci->last_err = handle_error(status & mcb_if::MCB_ERR_I_ERR, ci->last_err,
+					    LDP_ERR_I_ERROR, LDP_ERR_PREV_I_ERROR);
+		ci->last_err = handle_error(status & mcb_if::MCB_ERR_P_ERR, ci->last_err,
+					    LDP_ERR_P_ERROR, LDP_ERR_PREV_P_ERROR);
+		ci->last_err = handle_error(status & mcb_if::MCB_ERR_PREEMPT, ci->last_err,
+					    LDP_ERR_PREEMPT, LDP_ERR_PREV_PREEMPT);
+
+		mcb_->clr_status(status);
+	}
+
+	/**
+	 * @brief Check if connection should be processed
+	 *
+	 * @param ci Connection info pointer (base)
+	 * @return true if connection should be processed
+	 */
+	bool should_process_connection(conn_info_base *ci)
+	{
+		// Skip if one shot mode and already received or holding on
+		return !(ci->flg_one_shot && (ci->stat_rx_packet || ci->flg_hold_on));
+	}
+
+	/**
+	 * @brief Process received data for synchronous connection
+	 *
+	 * @param ci Sync connection info
+	 * @param rx_buf Received buffer
+	 * @param rx_len Received length
+	 * @return true if data was processed successfully
+	 */
+	bool process_received_data_sync(sync_conn_info *ci, uint8_t *rx_buf, uint16_t rx_len)
+	{
+		if (!rx_len) {
+			return false;
+		}
+
+		// Ensure buffer capacity
+		if (ci->rx_len < rx_len) {
+			if (ci->rx_buf) {
+				mempool_if::free(ci->rx_buf);
+				ci->rx_buf = nullptr;
+			}
+
+			ci->rx_buf = reinterpret_cast<uint8_t *>(mempool_if::alloc(rx_len));
+			if (!ci->rx_buf) {
+				ci->rx_len = 0;
+				ci->last_err |= 1 << LDP_ERR_NOMEM;
+				return false;
+			}
+		}
+
+		cache_if::rmb(); // Make sure buffer is updated
+		ldp_memcpy::memcpy(ci->rx_buf, rx_buf, rx_len);
+		ci->rx_len = rx_len;
+		ci->stat_rx_packet++;
+		ci->flg_new_data = true;
+		return true;
+	}
+
+	/**
+	 * @brief Wait for bus operation completion
+	 *
+	 * @param port Port number
+	 * @param data_ready Reference to data_ready flag
+	 * @param data_timeout Reference to data_timeout flag
+	 * @param port_rejected Reference to port_rejected flag
+	 * @return MCB status value
+	 */
+	uint32_t wait_for_bus_operation(int port, bool &data_ready, bool &data_timeout,
+					bool &port_rejected)
+	{
+		uint32_t status;
+#if CONFIG_MCB_SYSTECH_HW_WORKAROUND
+		uint32_t timeout = LDP_POLL_TIMEOUT;
+#endif
+
+		do {
+			status = mcb_->get_status();
+			data_ready = mcb_->has_rx(port);
+			data_timeout = status & mcb_if::MCB_ERR_T_ERR;
+			port_rejected = status & mcb_if::MCB_ERR_P_ERR;
+#if CONFIG_MCB_SYSTECH_HW_WORKAROUND
+			if (--timeout == 0) {
+				status = mcb_->get_status() | mcb_if::MCB_ERR_T_ERR;
+				data_ready = false;
+				data_timeout = true;
+				port_rejected = false;
+				printk("LDP_MASTER: poll timeout, sid=%d, port=%d\n", 0, port);
+				k_panic();
+			}
+			k_usleep(100);
+#endif
+		} while (!data_ready && !data_timeout && !port_rejected);
+
+#if CONFIG_MCB_SYSTECH_HW_WORKAROUND
+		/* FIXME: HW bug, single transmit will trigger timeout and ready at the same time */
+		if (data_ready && data_timeout) {
+			printk("LDP_MASTER: data_ready and data_timeout at the same time\n");
+			data_timeout = 0;
+		}
+#endif
+
+		return status;
+	}
 
 	void sync_handler()
 	{
 		std::shared_lock bus_lock(conns_lock);
 
 		for (auto &ci : sync_conns_) {
-			uint8_t *rx_buf, *tx_buf;
-			uint16_t rx_len;
-			uint32_t status;
-			bool data_ready, data_timeout, port_rejected;
 			std::unique_lock conn_lock(ci->lock);
-#if CONFIG_MCB_SYSTECH_HW_WORKAROUND
-			uint32_t timeout = LDP_POLL_TIMEOUT;
-#endif
 
-			if (ci->flg_one_shot && (ci->stat_rx_packet || ci->flg_hold_on)) {
-				/* FIXME: This is not a good way to handle one shot connection
-				 * because we must deal it till the connection is destroyed */
-				/* NOTE: This it is one shot mode, we should skip round if transfer
-				 * is done or no user action */
+			if (!should_process_connection(ci.get())) {
 				continue;
 			}
 
@@ -554,115 +700,119 @@ template <typename T_mempool, typename T_cache, typename T_mutex, typename T_rwl
 				continue;
 			}
 
-			/* prepare frame */
-			mcb_->config_port(ci->port, true, true, mcb_if::MCB_MAX_FRAME_LEN);
+			/* Prepare frame */
+			configure_port(ci->port, ci->tx_len);
+
 #if CONFIG_MCB_SYSTECH_HW_WORKAROUND
-			/* force to output, HW can't send frame if len==0 */
-			/* FIXME: HW bug, if tx_len is 0, the function will not work */
+			/* Force to output, HW can't send frame if len==0 */
 			if (ci->tx_len == 0) {
 				ci->tx_len = 4;
 			}
 #endif
-			mcb_->set_tx_len(ci->port, ci->tx_len);
-			tx_buf = mcb_->get_tx_buf(ci->port);
+			uint8_t *tx_buf = mcb_->get_tx_buf(ci->port);
 			if (ci->tx_len) {
 				ldp_memcpy::memcpy(tx_buf, ci->tx_buf, ci->tx_len);
 			}
-			cache_if::wmb(); /* make sure buffer is updated */
+
+			cache_if::wmb(); /* Make sure buffer is updated */
 			mcb_->tx(ci->port, ci->sid, ci->preempt);
 
-			/* wait for response */
-			do {
-				status = mcb_->get_status();
-				data_ready = mcb_->has_rx(ci->port);
-				data_timeout = status & mcb_if::MCB_ERR_T_ERR;
-				port_rejected = status & mcb_if::MCB_ERR_P_ERR;
-#if CONFIG_MCB_SYSTECH_HW_WORKAROUND
-				if (--timeout == 0) {
-					status = mcb_->get_status() | mcb_if::MCB_ERR_T_ERR;
-					data_ready = false;
-					data_timeout = true;
-					port_rejected = false;
-					printk("LDP_MASTER: poll timeout, sid=%d, port=%d\n",
-					       ci->sid, ci->port);
-					k_panic();
-				}
-				k_usleep(100);
-#endif
-			} while (!data_ready && !data_timeout && !port_rejected);
+			/* Wait for response */
+			bool data_ready, data_timeout, port_rejected;
+			uint32_t status = wait_for_bus_operation(ci->port, data_ready, data_timeout,
+								 port_rejected);
 
-#if CONFIG_MCB_SYSTECH_HW_WORKAROUND
-			/* FIXME: HW bug, single transmit will trigger timeout and ready at the same
-			 * time
-			 */
-			if (data_ready && data_timeout) {
-				printk("LDP_MASTER: data_ready and data_timeout at the same "
-				       "time\n");
-				data_timeout = 0;
-			}
-#endif
+			/* Process received data */
+			uint8_t *rx_buf = mcb_->get_rx_buf(ci->port);
+			uint16_t rx_len = mcb_->get_rx_len(ci->port);
 
-			rx_buf = mcb_->get_rx_buf(ci->port);
-			rx_len = mcb_->get_rx_len(ci->port);
-
-			/* handle received frame */
+			bool data_processed = false;
 			if (data_ready && rx_len) {
-				bool buffer_available = true;
-
-				/* if rx buffer is not enough, reallocate */
-				if (ci->rx_len < rx_len) {
-					if (ci->rx_buf) {
-						mempool_if::free(ci->rx_buf);
-						ci->rx_buf = nullptr;
-					}
-					ci->rx_buf = reinterpret_cast<uint8_t *>(
-						mempool_if::alloc(rx_len));
-
-					/* if no memory available, set rx_len to 0 and report error */
-					if (!ci->rx_buf) {
-						ci->rx_len = 0;
-						ci->last_err |= 1 << LDP_ERR_NOMEM;
-						buffer_available = false;
-					}
-				}
-
-				if (buffer_available) {
-					cache_if::rmb(); /* make sure buffer is updated */
-					ldp_memcpy::memcpy(ci->rx_buf, rx_buf, rx_len);
-					ci->rx_len = rx_len;
-					ci->stat_rx_packet++;
-					ci->flg_new_data = true;
-				}
+				data_processed =
+					process_received_data_sync(ci.get(), rx_buf, rx_len);
 				mcb_->clr_rx(ci->port);
-
-				/* If new data received, reset timeout */
-				ci->timeout_cnt = ci->timeout_allowed;
-				ci->last_err &= ~(1 << LDP_ERR_ATIMEOUT);
-			} else {
-				if (ci->timeout_cnt > 1) {
-					ci->timeout_cnt--;
-				} else {
-					ci->timeout_cnt = 0;
-					ci->last_err |= 1 << LDP_ERR_ATIMEOUT;
-				}
 			}
 
-			/* General error handling */
-			ci->last_err = handle_error(data_timeout, ci->last_err, LDP_ERR_T_ERROR,
-						    LDP_ERR_PREV_T_ERROR);
-			ci->last_err = handle_error(status & mcb_if::MCB_ERR_R_ERR, ci->last_err,
-						    LDP_ERR_R_ERROR, LDP_ERR_PREV_R_ERROR);
-			ci->last_err = handle_error(status & mcb_if::MCB_ERR_I_ERR, ci->last_err,
-						    LDP_ERR_I_ERROR, LDP_ERR_PREV_I_ERROR);
-			ci->last_err = handle_error(status & mcb_if::MCB_ERR_P_ERR, ci->last_err,
-						    LDP_ERR_P_ERROR, LDP_ERR_PREV_P_ERROR);
-			ci->last_err = handle_error(status & mcb_if::MCB_ERR_PREEMPT, ci->last_err,
-						    LDP_ERR_PREEMPT, LDP_ERR_PREV_PREEMPT);
-			mcb_->clr_status(status);
+			/* Manage timeout */
+			manage_timeout(ci.get(), data_processed);
+
+			/* Process bus status and errors */
+			process_bus_status(ci.get(), status);
 		}
 
-		/* refresh all available packets */
+		/* Refresh all available packets */
 		bc_->schedule(cycle_time_);
+	}
+
+	/**
+	 * @brief Process received data for asynchronous connection
+	 *
+	 * @param ci Async connection info
+	 * @param rx_buf Received buffer
+	 * @param rx_len Received length
+	 * @param tx_hdr Transmit header
+	 * @return Struct with processing results
+	 */
+	struct AsyncRxResult {
+		bool is_invalid_hdr;
+		bool is_new_rsp;
+		bool is_ordered_rsp;
+		bool is_unordered_rsp;
+		bool is_ack_rsp;
+		bool is_acceptable_rsp;
+		bool is_rx_full;
+		bool is_memalloc_fail;
+		bool is_rx_duplicate;
+		bool data_processed;
+	};
+
+	AsyncRxResult process_received_data_async(async_conn_info *ci, uint8_t *rx_buf,
+						  uint16_t rx_len, volatile ldp_a_header *tx_hdr)
+	{
+		AsyncRxResult result = {};
+		constexpr unsigned hdr_size = sizeof(ldp_a_header);
+		volatile ldp_a_header *rx_hdr = reinterpret_cast<volatile ldp_a_header *>(rx_buf);
+		uint8_t *rx_data = rx_buf + hdr_size;
+
+		// Validate header
+		result.is_invalid_hdr = rx_len < hdr_size || rx_hdr->magic != LDP_MAGIC;
+		bool is_first_rsp = !result.is_invalid_hdr && ci->rxid == -1;
+		result.is_ordered_rsp = !result.is_invalid_hdr && !is_first_rsp &&
+					(rx_hdr->xid == ((ci->rxid + 1) & 0xFF));
+		result.is_new_rsp = !result.is_invalid_hdr && (rx_hdr->xid != ci->rxid);
+		result.is_unordered_rsp = result.is_new_rsp && !result.is_ordered_rsp;
+		result.is_ack_rsp = !result.is_invalid_hdr && (rx_hdr->rxid == tx_hdr->xid);
+		result.is_acceptable_rsp =
+			result.is_new_rsp && (ci->flg_strong_order ? result.is_ordered_rsp : true);
+		result.is_rx_full = ci->rx_bufs.size() >= LDP_MAX_RX_BUF;
+		result.is_rx_duplicate = !result.is_invalid_hdr && (rx_hdr->xid == ci->rxid);
+
+		// Process data if valid
+		if (result.is_acceptable_rsp && !result.is_rx_full) {
+			async_buf rx_abuf;
+			rx_abuf.len = rx_len - hdr_size;
+
+			if (rx_abuf.len) {
+				rx_abuf.buf =
+					reinterpret_cast<uint8_t *>(mempool_if::alloc(rx_abuf.len));
+				if (!rx_abuf.buf) {
+					result.is_memalloc_fail = true;
+				} else {
+					ldp_memcpy::memcpy(rx_abuf.buf, rx_data, rx_abuf.len);
+					ci->rx_bufs.push_back(std::move(rx_abuf));
+					result.data_processed = true;
+				}
+			} else {
+				result.data_processed = true;
+			}
+		}
+
+		if (result.is_new_rsp && !result.is_rx_full) {
+			// Record received transaction ID
+			ci->rxid = rx_hdr->xid;
+		}
+
+		return result;
 	}
 
 	void async_handler(async_conn_info *ci)
@@ -670,8 +820,7 @@ template <typename T_mempool, typename T_cache, typename T_mutex, typename T_rwl
 		std::shared_lock bus_lock(conns_lock);
 		std::unique_lock conn_lock(ci->lock);
 		int should_continue = 1;    /* Assume no progress, 1 slot is enough */
-		const int max_continue = 2; /* If we have some progress(tx acked, new rx
-		data), we should give appropriate time to wait for slave response */
+		const int max_continue = 2; /* If progress made, give more time */
 		bool reset_timeout_flag = false;
 
 		if (!bc_->try_grant(ci->bc, should_continue)) {
@@ -680,145 +829,66 @@ template <typename T_mempool, typename T_cache, typename T_mutex, typename T_rwl
 		}
 
 		while (should_continue--) {
-			uint8_t *tx_buf;
-			uint8_t *tx_data;
-			uint32_t status;
-			async_buf abuf = {nullptr, 0};
-			volatile ldp_a_header *tx_hdr;
-			bool data_ready, data_timeout, p_error;
-			bool is_invalid_hdr = false; /* header is craped */
-			bool is_new_rsp = false;     /* rsp.xid != req.rxid */
-			bool is_ordered_rsp = false; /* rsp.xid = req.rxid+1*/
-			bool is_ack_rsp = false;     /* rsp.rxid = req.xid */
-			bool is_first_rsp = false;   /* first rsp */
-			bool is_unordered_rsp =
-				false; /* new rsp but not ordered(including first rsp)*/
-			bool is_acceptable_rsp = false; /* accept rsp */
-			bool is_rx_full = false;        /* rx buffer is full */
-			bool is_memalloc_fail = false;  /* memory allocation failure */
-			bool is_rx_duplicate = false;   /* duplicate packet */
-			uint8_t *rx_buf = mcb_->get_rx_buf(ci->port);
-			uint16_t rx_len = 0;
-			constexpr unsigned hdr_size = sizeof(ldp_a_header);
-			volatile ldp_a_header *rx_hdr =
-				reinterpret_cast<volatile ldp_a_header *>(rx_buf);
-			uint8_t *rx_data = rx_buf + hdr_size;
-#if CONFIG_MCB_SYSTECH_HW_WORKAROUND
-			uint32_t timeout = LDP_POLL_TIMEOUT;
-#endif
-
-			if (ci->flg_one_shot && (ci->stat_rx_packet || ci->flg_hold_on)) {
-				/* FIXME: This is not a good way to handle one shot connection
-				 * because we must deal it till the connection is destroyed */
-				/* this is for syncing rxid to slave. To notice slave that
-				 * master received the response */
+			if (!should_process_connection(ci)) {
 				break;
 			}
 
-			/* prefetch tx buffer */
+			async_buf abuf = {nullptr, 0};
 			if (!ci->tx_bufs.empty()) {
 				abuf = ci->tx_bufs.front();
 			}
 
-			/* prepare to tx, assume port is reused by other connection. so we need to
-			 * reconfig at every tx */
-			mcb_->config_port(ci->port, true, true, mcb_if::MCB_MAX_FRAME_LEN);
-			mcb_->set_tx_len(ci->port, abuf.len + sizeof(ldp_a_header));
-			tx_buf = mcb_->get_tx_buf(ci->port);
-			tx_data = tx_buf + sizeof(ldp_a_header);
-			tx_hdr = reinterpret_cast<volatile ldp_a_header *>(tx_buf);
+			/* Prepare to transmit */
+			configure_port(ci->port, abuf.len + sizeof(ldp_a_header));
+
+			uint8_t *tx_buf = mcb_->get_tx_buf(ci->port);
+			uint8_t *tx_data = tx_buf + sizeof(ldp_a_header);
+			volatile ldp_a_header *tx_hdr =
+				reinterpret_cast<volatile ldp_a_header *>(tx_buf);
+
+			/* Fill header */
 			tx_hdr->xid = ci->xid;
 			tx_hdr->rxid = ci->rxid;
 			tx_hdr->magic = LDP_MAGIC;
+
+			/* Copy data if any */
 			if (abuf.len) {
 				ldp_memcpy::memcpy(tx_data, abuf.buf, abuf.len);
 			}
-			cache_if::wmb(); /* make sure buffer is updated */
+
+			cache_if::wmb(); /* Make sure buffer is updated */
 			mcb_->tx(ci->port, ci->sid, ci->preempt);
-			/* wait for response */
-			do {
-				status = mcb_->get_status();
-				data_ready = mcb_->has_rx(ci->port);
-				data_timeout = status & mcb_if::MCB_ERR_T_ERR;
-				p_error = status & mcb_if::MCB_ERR_P_ERR;
-#if CONFIG_MCB_SYSTECH_HW_WORKAROUND
-				if (--timeout == 0) {
-					status = mcb_->get_status() | mcb_if::MCB_ERR_T_ERR;
-					data_ready = false;
-					data_timeout = true;
-					printk("LDP_MASTER: poll timeout, sid=%d, port=%d\n",
-					       ci->sid, ci->port);
-					k_panic();
-				}
 
-				k_usleep(100);
-#endif
-			} while (!data_ready && !data_timeout && !p_error);
+			/* Wait for response */
+			bool data_ready, data_timeout, p_error;
+			uint32_t status =
+				wait_for_bus_operation(ci->port, data_ready, data_timeout, p_error);
 
-#if CONFIG_MCB_SYSTECH_HW_WORKAROUND
-			/* FIXME: HW bug, single transmit will trigger timeout and ready at the same
-			 * time
-			 */
-			if (data_ready && data_timeout) {
-				printk("LDP_MASTER: data_ready and data_timeout at the same "
-				       "time\n");
-				data_timeout = 0;
-			}
-#endif
+			AsyncRxResult rx_result = {};
 
-			/* handle received frame */
+			/* Process received data */
 			if (data_ready && !p_error) {
-				rx_len = mcb_->get_rx_len(ci->port);
-				cache_if::rmb(); /* make sure buffer is updated */
-				is_invalid_hdr = rx_len < hdr_size || rx_hdr->magic != LDP_MAGIC;
-				is_first_rsp = !is_invalid_hdr && ci->rxid == -1;
-				is_ordered_rsp = !is_invalid_hdr && !is_first_rsp &&
-						 (rx_hdr->xid == ((ci->rxid + 1) & 0xFF));
-				is_new_rsp = !is_invalid_hdr && (rx_hdr->xid != ci->rxid);
-				is_unordered_rsp = is_new_rsp && !is_ordered_rsp;
-				is_ack_rsp = !is_invalid_hdr && (rx_hdr->rxid == tx_hdr->xid);
-				is_acceptable_rsp = is_new_rsp &&
-						    (ci->flg_strong_order ? is_ordered_rsp : true);
-				is_rx_full = ci->rx_bufs.size() >= LDP_MAX_RX_BUF;
-				is_rx_duplicate = !is_invalid_hdr && (rx_hdr->xid == ci->rxid); /* Check for duplicate packet - same XID as previously received */
+				uint16_t rx_len = mcb_->get_rx_len(ci->port);
+				uint8_t *rx_buf = mcb_->get_rx_buf(ci->port);
+
+				cache_if::rmb(); /* Make sure buffer is updated */
+				rx_result = process_received_data_async(ci, rx_buf, rx_len, tx_hdr);
 
 				mcb_->clr_rx(ci->port);
 			}
 
-			if (is_acceptable_rsp && !is_rx_full) {
-				/* If strong order is set, only accept ordered response */
-				async_buf rx_abuf;
-
-				rx_abuf.len = rx_len - hdr_size;
-				if (rx_abuf.len) {
-					rx_abuf.buf = reinterpret_cast<uint8_t *>(
-						mempool_if::alloc(rx_abuf.len));
-					if (!rx_abuf.buf) {
-						is_memalloc_fail = true;
-					} else {
-						ldp_memcpy::memcpy(rx_abuf.buf, rx_data, rx_abuf.len);
-						ci->rx_bufs.push_back(std::move(rx_abuf));
-					}
-				}
-			}
-
-			if (is_new_rsp && !is_rx_full) {
-				/* new data received (even if its xid is not ordered) */
+			/* Process response and update state */
+			if (rx_result.is_new_rsp || rx_result.is_ack_rsp) {
 				reset_timeout_flag = true;
 
-				/* Grant more resource if needed */
+				/* Grant more resource if progress made */
 				if (bc_->try_grant(ci->bc, max_continue - should_continue)) {
 					should_continue = max_continue;
 				}
-
-				/* ready for ack */
-				ci->rxid = rx_hdr->xid;
 			}
 
-			if (is_ack_rsp) {
-				/* Slave accepted the previous transmit data.
-				 * Drop the tx buffer then.
-				 */
+			if (rx_result.is_ack_rsp) {
+				/* Slave accepted the previous transmit data */
 				if (ci->tx_bufs.size()) {
 					ci->tx_bufs.pop_front();
 				}
@@ -826,60 +896,46 @@ template <typename T_mempool, typename T_cache, typename T_mutex, typename T_rwl
 					mempool_if::free(abuf.buf);
 				}
 				ci->xid++;
-				reset_timeout_flag = true;
 			}
 
-			if (is_new_rsp || is_ack_rsp) {
-				/* If new data received or acked, reset timeout */
-				ci->timeout_cnt = ci->timeout_allowed;
-			}
-			/* General error handling */
-			ci->last_err = handle_error(data_timeout, ci->last_err, LDP_ERR_T_ERROR,
-						    LDP_ERR_PREV_T_ERROR);
-			ci->last_err = handle_error(status & mcb_if::MCB_ERR_R_ERR, ci->last_err,
-						    LDP_ERR_R_ERROR, LDP_ERR_PREV_R_ERROR);
-			ci->last_err = handle_error(status & mcb_if::MCB_ERR_I_ERR, ci->last_err,
-						    LDP_ERR_I_ERROR, LDP_ERR_PREV_I_ERROR);
-			ci->last_err = handle_error(p_error, ci->last_err, LDP_ERR_P_ERROR,
-						    LDP_ERR_PREV_P_ERROR);
-			ci->last_err = handle_error(status & mcb_if::MCB_ERR_PREEMPT, ci->last_err,
-						    LDP_ERR_PREEMPT, LDP_ERR_PREV_PREEMPT);
-			ci->last_err = handle_error(is_invalid_hdr, ci->last_err,
+			/* Handle errors */
+			process_bus_status(ci, status);
+
+			/* Handle additional async-specific errors */
+			ci->last_err = handle_error(rx_result.is_invalid_hdr, ci->last_err,
 						    LDP_ERR_INVALID_ASYNC_PACK,
 						    LDP_ERR_PREV_INVALID_ASYNC_PACK);
-			ci->last_err = handle_error(is_unordered_rsp, ci->last_err,
+			ci->last_err = handle_error(rx_result.is_unordered_rsp, ci->last_err,
 						    LDP_ERR_MAY_LOST, LDP_ERR_PREV_MAY_LOST);
-			if (is_memalloc_fail) {
+			ci->last_err = handle_error(p_error, ci->last_err, LDP_ERR_P_ERROR,
+						    LDP_ERR_PREV_P_ERROR);
+
+			if (rx_result.is_memalloc_fail) {
 				ci->last_err |= 1 << LDP_ERR_PREV_RX_DROP_NOMEM;
 			}
-			if (is_rx_full) {
+			if (rx_result.is_rx_full) {
 				ci->last_err |= 1 << LDP_ERR_PREV_RX_DROP_FIFO_FULL;
 			}
-			if (is_rx_duplicate) {
+			if (rx_result.is_rx_duplicate) {
 				ci->last_err |= 1 << LDP_ERR_PREV_RX_DROP_DUPLICATE;
 			}
-			if (is_invalid_hdr) {
+			if (rx_result.is_invalid_hdr) {
 				ci->last_err |= 1 << LDP_ERR_PREV_RX_DROP_INVALID;
 			}
 
-			if (is_acceptable_rsp) {
+			if (rx_result.is_acceptable_rsp) {
 				ci->stat_rx_packet++;
 			}
-			mcb_->clr_status(status);
 		}
 
-		/* Count if user wants some data from slave */
+		/* Handle timeout for async connections */
 		if (reset_timeout_flag) {
 			ci->flg_wait_for_rx = false;
 			ci->last_err &= ~(1 << LDP_ERR_ATIMEOUT);
 		} else if (ci->flg_wait_for_rx) {
-			if (ci->timeout_cnt > 1) {
-				ci->timeout_cnt--;
-			} else {
-				ci->timeout_cnt = 0;
-				ci->last_err |= 1 << LDP_ERR_ATIMEOUT;
-			}
+			manage_timeout(ci, false);
 		}
+
 		work_queue_->reset(ci->wq_id, ci->cycle);
 	}
 
