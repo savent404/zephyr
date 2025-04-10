@@ -220,27 +220,27 @@ static int handle_extra_errors(int sock)
 					info.i_err[0], info.i_err[1]);
 			}
 		} else if (err_mask.error_mask & CIF_ERR_MAY_LOST) {
-			LOG_WRN("MAY_LOST error detected");
+			LOG_WRN_ONCE("MAY_LOST error detected");
 		} else if (err_mask.error_mask & CIF_ERR_PREV_T_ERROR) {
-			LOG_WRN("PREV_T_ERROR detected");
+			LOG_WRN_ONCE("PREV_T_ERROR detected");
 		} else if (err_mask.error_mask & CIF_ERR_PREV_R_ERROR) {
-			LOG_WRN("PREV_R_ERROR detected");
+			LOG_WRN_ONCE("PREV_R_ERROR detected");
 		} else if (err_mask.error_mask & CIF_ERR_PREV_I_ERROR) {
-			LOG_WRN("PREV_I_ERROR detected");
+			LOG_WRN_ONCE("PREV_I_ERROR detected");
 		} else if (err_mask.error_mask & CIF_ERR_PREV_P_ERROR) {
-			LOG_WRN("PREV_P_ERROR detected");
+			LOG_WRN_ONCE("PREV_P_ERROR detected");
 		} else if (err_mask.error_mask & CIF_ERR_PREV_MAY_LOST) {
-			LOG_WRN("PREV_MAY_LOST detected");
+			LOG_WRN_ONCE("PREV_MAY_LOST detected");
 		} else if (err_mask.error_mask & CIF_ERR_PREV_INVALID_ASYNC_PACK) {
-			LOG_WRN("PREV_INVALID_ASYNC_PACK detected");
+			LOG_WRN_ONCE("PREV_INVALID_ASYNC_PACK detected");
 		} else if (err_mask.error_mask & CIF_ERR_PREV_RX_DROP_NOMEM) {
-			LOG_WRN("PREV_RX_DROP_NOMEM detected");
+			LOG_WRN_ONCE("PREV_RX_DROP_NOMEM detected");
 		} else if (err_mask.error_mask & CIF_ERR_PREV_RX_DROP_FIFO_FULL) {
-			LOG_WRN("PREV_RX_DROP_FIFO_FULL detected");
+			LOG_WRN_ONCE("PREV_RX_DROP_FIFO_FULL detected");
 		} else if (err_mask.error_mask & CIF_ERR_PREV_RX_DROP_DUPLICATE) {
-			LOG_WRN("PREV_RX_DROP_DUPLICATE detected");
+			LOG_WRN_ONCE("PREV_RX_DROP_DUPLICATE detected");
 		} else if (err_mask.error_mask & CIF_ERR_PREV_RX_DROP_INVALID) {
-			LOG_WRN("PREV_RX_DROP_INVALID detected");
+			LOG_WRN_ONCE("PREV_RX_DROP_INVALID detected");
 		} else {
 			LOG_ERR("Unknown error mask 0x%08x detected", err_mask.error_mask);
 		}
