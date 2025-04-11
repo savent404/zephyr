@@ -1,0 +1,14 @@
+/*
+ * Copyright (c) 2024 SYSTech Co.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+/ {
+	aliases {
+		watchdog0 = &wdt;
+	};
+};
+&wdt {
+	status = "okay";
+	timeout-sec = <5>;
+	reset = <1>;
+};
