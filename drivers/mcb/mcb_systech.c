@@ -43,6 +43,13 @@ struct mcb_systech_config {
 	bool slow_mode;
 };
 
+static inline void mcb_busy_wait(uint32_t us)
+{
+	for (int i = 0; i < us * 100; i++) {
+		__asm volatile("nop");
+	}
+}
+
 static inline void mcb_write_unsafe(uint32_t value, uint32_t addr)
 {
 	sys_write32(value, addr);
@@ -55,7 +62,7 @@ static inline uint32_t mcb_read(const struct device *dev, uint32_t addr)
 	uint32_t val;
 
 	if (cfg->slow_mode) {
-		k_busy_wait(1);
+		mcb_busy_wait(1);
 	}
 	val = sys_read32(addr);
 	LOG_DBG("Read %08x from %08x", val, addr);
@@ -374,7 +381,7 @@ void mcb_systech_set_tx_len(const struct device *dev, uint8_t port, uint16_t len
 		LOG_WRN("MCB: TX len not set correctly, retry %d...", retry);
 		if (--retry) {
 			mcb_write(dev, len, reg_base + MCB_REG_PORT_TX_LEN(port));
-			k_busy_wait(1);
+			mcb_busy_wait(1);
 		} else {
 			LOG_ERR("set_tx_len error can't be recovery, panic!");
 			k_panic();
