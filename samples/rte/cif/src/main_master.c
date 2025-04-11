@@ -368,14 +368,88 @@ static bool handle_io_state(int sock, uint32_t *timeout, uint8_t *in_buf, size_t
 	}
 	return true;
 }
+static void handle_open_ports_echo(int sock)
+{
+	static uint8_t buf[CIF_ASYNC_MTU];
+
+	for (int i = 0; i < MAX_OPEN_PORTS; i++) {
+		if (!open_ports[i].active) {
+			continue;
+		}
+
+		struct sockaddr_cif port_addr = {
+			.cif_family = AF_CIF,
+			.slot = open_ports[i].sid,
+			.port = open_ports[i].port,
+		};
+		socklen_t addr_len = sizeof(port_addr);
+		bool need_echo = false;
+		uint32_t now, later;
+		uint32_t elapsed;
+		int ret;
+
+		now = k_cyc_to_us_near32(k_cycle_get_32());
+		ret = recvfrom(sock, buf, sizeof(buf), 0, (struct sockaddr *)&port_addr, &addr_len);
+		later = k_cyc_to_us_near32(k_cycle_get_32());
+		if (ret > 0) {
+			open_ports[i].stat_received++;
+			LOG_DBG("Echoing data for port %d", open_ports[i].port);
+			need_echo = true;
+		} else if (errno != EAGAIN) {
+			open_ports[i].stat_error++;
+			if (open_ports[i].stat_error < MAX_OPEN_ERRORS) {
+				LOG_ERR("Failed to receive data from [%d:%d], errno:%d",
+					open_ports[i].sid, open_ports[i].port, errno);
+			} else if (open_ports[i].stat_error == MAX_OPEN_ERRORS) {
+				LOG_ERR("Too many errors, stop echoing for port %d",
+					open_ports[i].port);
+			}
+		}
+		if (now > later) {
+			elapsed = (uint32_t)((uint64_t)UINT32_MAX + later - now);
+		} else {
+			elapsed = later - now;
+		}
+		open_ports[i].lag_rx_avg = (open_ports[i].lag_rx_avg * 7 + elapsed) / 8;
+		if (elapsed > open_ports[i].lag_rx_max) {
+			open_ports[i].lag_rx_max = elapsed;
+		}
+
+		if (need_echo || ctx_.perf_mode) {
+
+			now = k_cyc_to_us_near32(k_cycle_get_32());
+			ret = sendto(sock, buf, ret, 0, (struct sockaddr *)&port_addr, addr_len);
+			later = k_cyc_to_us_near32(k_cycle_get_32());
+
+			if (ret >= 0) {
+				open_ports[i].stat_sent++;
+			}
+			if (ret < 0 && errno != EAGAIN) {
+				LOG_ERR("Failed to echo data, errno %d", errno);
+			} else {
+				LOG_DBG("Echoed %d bytes to port %d", ret, open_ports[i].port);
+			}
+
+			if (now > later) {
+				elapsed = (uint32_t)((uint64_t)UINT32_MAX + later - now);
+			} else {
+				elapsed = later - now;
+			}
+			open_ports[i].lag_tx_avg = (open_ports[i].lag_tx_avg * 7 + elapsed) / 8;
+			if (elapsed > open_ports[i].lag_tx_max) {
+				open_ports[i].lag_tx_max = elapsed;
+			}
+		}
+	}
+}
 
 static bool handle_open_state(int sock, uint8_t *response_buf, size_t response_buf_size)
 {
-	int ret;
 	/* Open port and initialize with data */
 	bool res = dev_general_init(sock, ctx_.target_sid, ctx_.target_port,
 				    ctx_.target_opt == preempt ? CIF_PORT_FLG_PREEMPT : 0,
 				    ASYNC_DEFAULT_BANDWIDTH);
+	int ret;
 
 	if (!res) {
 		LOG_ERR("Failed to open port %d on slot %d", ctx_.target_port, ctx_.target_sid);
@@ -394,7 +468,7 @@ static bool handle_open_state(int sock, uint8_t *response_buf, size_t response_b
 		ret = sendto(sock, ctx_.initial_data, ctx_.initial_data_len, 0,
 			     (struct sockaddr *)&remote, sizeof(remote));
 
-		if (ret < 0 && errno != EAGAIN) {
+		if (ret < 0) {
 			LOG_ERR("Failed to send initial data, errno %d", errno);
 			ctx_.state = STATE_IDLE;
 			return false;
@@ -404,27 +478,27 @@ static bool handle_open_state(int sock, uint8_t *response_buf, size_t response_b
 	LOG_INF("Port %d on slot %d opened successfully with initial data", ctx_.target_port,
 		ctx_.target_sid);
 
-	/* If check response is enabled, wait and check for response */
-	if (ctx_.check_response) {
-		k_usleep(SYNC_CYCLE_TIME * 2);
-		struct sockaddr_cif port_addr = {
-			.cif_family = AF_CIF,
-			.slot = ctx_.target_sid,
-			.port = ctx_.target_port,
-		};
-		socklen_t addr_len = sizeof(port_addr);
+	/* Register the opened port */
+	bool no_space = true;
 
-		ret = recvfrom(sock, response_buf, response_buf_size, 0,
-			       (struct sockaddr *)&port_addr, &addr_len);
-
-		if (ret > 0) {
-			LOG_INF("Received response from slot %d port %d:", ctx_.target_sid,
-				ctx_.target_port);
-			LOG_HEXDUMP_INF(response_buf, ret, "Response data:");
-		} else {
-			LOG_WRN("No response received from slot %d port %d", ctx_.target_sid,
-				ctx_.target_port);
+	for (int i = 0; i < MAX_OPEN_PORTS; i++) {
+		if (!open_ports[i].active) {
+			memset(&open_ports[i], 0, sizeof(open_ports[i]));
+			open_ports[i].sid = ctx_.target_sid;
+			open_ports[i].port = ctx_.target_port;
+			open_ports[i].active = true;
+			open_ports[i].open_timestamp = k_uptime_get_32();
+			LOG_INF("Port %d registered as open", ctx_.target_port);
+			no_space = false;
+			break;
 		}
+	}
+
+	if (no_space) {
+		LOG_ERR("No space to register port %d", ctx_.target_port);
+		ctx_.state = STATE_IDLE;
+		dev_general_deinit(sock, ctx_.target_sid, ctx_.target_port);
+		return false;
 	}
 
 	ctx_.state = STATE_IDLE;
@@ -441,6 +515,15 @@ static bool handle_close_state(int sock)
 			ctx_.target_sid);
 	} else {
 		LOG_ERR("Failed to close port %d on slot %d", ctx_.target_port, ctx_.target_sid);
+	}
+
+	/* Unregister the closed port */
+	for (int i = 0; i < MAX_OPEN_PORTS; i++) {
+		if (open_ports[i].active && open_ports[i].port == ctx_.target_port) {
+			open_ports[i].active = false;
+			LOG_INF("Port %d unregistered as closed", ctx_.target_port);
+			break;
+		}
 	}
 
 	ctx_.state = STATE_IDLE;
@@ -467,27 +550,6 @@ static void handle_io_buf(uint8_t *in_buf, uint8_t *out_buf, size_t *out_buf_len
 		out_buf[5]++;
 		*out_buf_len = ctx_.initial_data_len;
 	}
-}
-
-static bool check_for_idle_responses(int sock, uint8_t *response_buf, size_t response_buf_size)
-{
-	struct sockaddr_cif port_addr = {
-		.cif_family = AF_CIF,
-		.slot = ctx_.target_sid,
-		.port = ctx_.target_port,
-	};
-	socklen_t addr_len = sizeof(port_addr);
-
-	int ret = recvfrom(sock, response_buf, response_buf_size, 0, (struct sockaddr *)&port_addr,
-			   &addr_len);
-
-	if (ret > 0) {
-		LOG_INF("Received data from slot %d port %d:", port_addr.slot, port_addr.port);
-		LOG_HEXDUMP_INF(response_buf, ret, "Received data:");
-		return true;
-	}
-
-	return false;
 }
 
 static int main_master(void)
@@ -598,10 +660,8 @@ static int main_master(void)
 			break;
 		}
 
-		/* Check for response on opened ports */
-		if (ctx_.state == STATE_IDLE) {
-			check_for_idle_responses(sock, response_buf, sizeof(response_buf));
-		}
+		/* Handle periodic echo for open ports */
+		handle_open_ports_echo(sock);
 
 		if (handle_extra_errors(sock)) {
 			break;
@@ -616,6 +676,7 @@ static K_THREAD_STACK_DEFINE(master_stack, 4096);
 
 int master_start(void)
 {
+	memset(&open_ports, 0, sizeof(open_ports));
 	k_sem_init(&ctx_.terminate_sem, 0, 1);
 	k_tid_t tid = k_thread_create(
 		&master_thread, master_stack, K_THREAD_STACK_SIZEOF(master_stack),

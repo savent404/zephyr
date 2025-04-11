@@ -17,6 +17,8 @@
 
 struct context ctx_ = {0};
 
+struct open_port_s open_ports[MAX_OPEN_PORTS];
+
 int main(void)
 {
 	/* log needs to be initialized first */
@@ -58,10 +60,11 @@ static int cif_cmd(const struct shell *sh, size_t argc, char **argv)
 		_cmd_open = CMD_OPEN,
 		_cmd_close = CMD_CLOSE,
 		_cmd_perf = CMD_PERF,
+		_cmd_list = CMD_LIST,
 	} cmd = _cmd_none;
 	const char *subcmd = argv[1];
 	static const char *const subcmd_list[] = {
-		"discovery", "config", "io", "switch", "open", "close", "perf",
+		"discovery", "config", "io", "switch", "open", "close", "perf", "list",
 	};
 
 	for (int i = 0; i < ARRAY_SIZE(subcmd_list); i++) {
@@ -241,6 +244,29 @@ static int cif_cmd(const struct shell *sh, size_t argc, char **argv)
 		}
 		handled = true;
 	} break;
+	case _cmd_list: {
+		shell_print(sh, "Open Ports:");
+		for (int i = 0; i < MAX_OPEN_PORTS; i++) {
+			if (open_ports[i].active) {
+				uint32_t dur = k_uptime_get_32() - open_ports[i].open_timestamp;
+
+				shell_print(
+					sh,
+					"SID: %d, Port: %d, Sent: %d(%d/s, lag: %d/%d), Received: "
+					"%d(%d/s, lag: %d/%d), failed: "
+					"%d, dur: %d",
+					open_ports[i].sid, open_ports[i].port,
+					open_ports[i].stat_sent,
+					open_ports[i].stat_sent * 1000 / dur,
+					open_ports[i].lag_tx_avg, open_ports[i].lag_tx_max,
+					open_ports[i].stat_received,
+					open_ports[i].stat_received * 1000 / dur,
+					open_ports[i].lag_rx_avg, open_ports[i].lag_rx_max,
+					open_ports[i].stat_error, dur);
+			}
+		}
+		handled = true;
+	} break;
 	case _cmd_none:
 	default:
 		break;
@@ -255,6 +281,7 @@ static int cif_cmd(const struct shell *sh, size_t argc, char **argv)
 		shell_print(sh, "\tswitch <slave|master> [preempt]");
 		shell_print(sh, "\topen <slot> <port> [initial_data] [check]");
 		shell_print(sh, "\tclose <slot> <port>");
+		shell_print(sh, "\tlist");
 		shell_print(sh, "\tperf on|off");
 		return 0;
 	}
