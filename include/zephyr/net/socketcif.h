@@ -129,7 +129,8 @@ struct cif_error_filter {
 #define CIF_ERR_PREV_RX_DROP_FIFO_FULL BIT(24) /* Drop packet due to rx buffer full */
 #define CIF_ERR_PREV_RX_DROP_DUPLICATE BIT(25) /* Drop packet due to duplicate */
 #define CIF_ERR_PREV_RX_DROP_INVALID   BIT(26) /* Drop packet due to invalid */
-#define CIF_ERR_MASK                   ((BIT_MASK(15) << 12))
+#define CIF_ERR_PREV_ATIMEOUT          BIT(27) /* User Period timeout */
+#define CIF_ERR_MASK                   ((BIT_MASK(16) << 12))
 	uint32_t error_mask;
 };
 
@@ -143,7 +144,7 @@ struct cif_info {
 
 /* SocketCIF MTU size */
 /** CIF frame MTU */
-#define CIF_MTU (0x800)
+#define CIF_MTU       (0x800)
 #define CIF_ASYNC_MTU (CIF_MTU - 4)
 
 /* SocketCIF address bus */

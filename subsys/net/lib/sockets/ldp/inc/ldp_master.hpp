@@ -215,14 +215,23 @@ struct ldp_master: public ldp_basic {
 					     [c](const async_conn_ptr &ci) { return ci->id == c; });
 		auto sync_it = std::find_if(sync_conns_.begin(), sync_conns_.end(),
 					    [c](const sync_conn_ptr &ci) { return ci->id == c; });
+		auto fn_clr_timeout = [](conn_info_base *ci, uint32_t bits) {
+			if ((ci->last_err & bits) & (1 << LDP_ERR_PREV_ATIMEOUT)) {
+				ci->timeout_cnt = ci->timeout_allowed;
+				ci->last_err &= ~(1 << LDP_ERR_ATIMEOUT);
+			}
+		};
+
 		if (async_it == async_conns_.end() && sync_it == sync_conns_.end()) {
 			return;
 		}
 
 		if (async_it != async_conns_.end()) {
 			(*async_it)->last_err &= ~err_bits;
+			fn_clr_timeout(async_it->get(), err_bits);
 		} else {
 			(*sync_it)->last_err &= ~err_bits;
+			fn_clr_timeout(sync_it->get(), err_bits);
 		}
 	}
 
@@ -559,7 +568,8 @@ struct ldp_master: public ldp_basic {
 				return false;
 			} else {
 				ci->timeout_cnt = 0;
-				ci->last_err |= 1 << LDP_ERR_ATIMEOUT;
+				ci->last_err |=
+					(1 << LDP_ERR_ATIMEOUT) | (1 << LDP_ERR_PREV_ATIMEOUT);
 				return true;
 			}
 		}
@@ -819,16 +829,15 @@ struct ldp_master: public ldp_basic {
 	{
 		std::shared_lock bus_lock(conns_lock);
 		std::unique_lock conn_lock(ci->lock);
-		int should_continue = 1;    /* Assume no progress, 1 slot is enough */
-		const int max_continue = 2; /* If progress made, give more time */
 		bool reset_timeout_flag = false;
+		bool comback_to_me = false;
 
-		if (!bc_->try_grant(ci->bc, should_continue)) {
-			/* If no token available, we should wait for a while */
-			should_continue = 0;
-		}
+		do {
+			if (!bc_->try_grant(ci->bc, 1)) {
+				/* If no token available, we should wait for a while */
+				break;
+			}
 
-		while (should_continue--) {
 			if (!should_process_connection(ci)) {
 				break;
 			}
@@ -882,8 +891,8 @@ struct ldp_master: public ldp_basic {
 				reset_timeout_flag = true;
 
 				/* Grant more resource if progress made */
-				if (bc_->try_grant(ci->bc, max_continue - should_continue)) {
-					should_continue = max_continue;
+				if (bc_->try_grant(ci->bc, 1)) {
+					comback_to_me = true;
 				}
 			}
 
@@ -926,7 +935,7 @@ struct ldp_master: public ldp_basic {
 			if (rx_result.is_acceptable_rsp) {
 				ci->stat_rx_packet++;
 			}
-		}
+		} while (0);
 
 		/* Handle timeout for async connections */
 		if (reset_timeout_flag) {
@@ -936,7 +945,7 @@ struct ldp_master: public ldp_basic {
 			manage_timeout(ci, false);
 		}
 
-		work_queue_->reset(ci->wq_id, ci->cycle);
+		work_queue_->reset(ci->wq_id, comback_to_me ? 0 : ci->cycle);
 	}
 
 	/**

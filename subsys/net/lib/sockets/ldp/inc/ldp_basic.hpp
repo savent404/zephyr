@@ -179,6 +179,7 @@ struct ldp_basic {
 		LDP_ERR_PREV_RX_DROP_FIFO_FULL,  /* Drop packet due to rx fifo full */
 		LDP_ERR_PREV_RX_DROP_DUPLICATE,  /* Drop packet due to duplicate */
 		LDP_ERR_PREV_RX_DROP_INVALID,    /* Drop packet due to invalid */
+		LDP_ERR_PREV_ATIMEOUT,           /* Previous operation timeout */
 		LDP_ERR_MAX,
 	};
 	static_assert(LDP_ERR_MAX < 32, "Too many error codes");

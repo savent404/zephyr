@@ -151,7 +151,7 @@ struct simu_work_queue: public systech::cif::work_queue_if {
 		void *arg1;
 		void *arg2;
 		uint32_t delay;
-
+		int32_t time_left;
 		unsigned id;
 	};
 	using items_t = std::list<item>;
@@ -161,22 +161,40 @@ struct simu_work_queue: public systech::cif::work_queue_if {
 	virtual id enqueue(void (*fn)(void *, void *), void *arg1, void *arg2,
 			   uint32_t delay) override
 	{
-		item i{fn, arg1, arg2, delay, next_id};
+		item i{fn, arg1, arg2, delay, (int32_t)delay, next_id};
 		items.push_back(i);
 		return next_id++;
 	}
 	virtual void reset(id id, uint32_t delay) override
 	{
+		auto it = std::find_if(items.begin(), items.end(),
+				       [id](const item &i) { return i.id == id; });
+		if (it != items.end()) {
+			it->delay = delay;
+			it->time_left = delay;
+		}
 	}
 	virtual void cancel(id id) override
 	{
 		items.remove_if([id](const item &i) { return i.id == id; });
 	}
-	void sync()
+	void sync(uint32_t delta = 1000'0000)
 	{
 		for (auto &i : items) {
-			i.fn(i.arg1, i.arg2);
+			i.time_left -= (int32_t)delta;
 		}
+
+		bool nothing_to_do;
+		do {
+			nothing_to_do = true;
+			for (auto &i : items) {
+				if (i.time_left <= 0) {
+					i.time_left = i.delay; /* fn might change its 'time_left' */
+					i.fn(i.arg1, i.arg2);
+					nothing_to_do = false;
+				}
+			}
+		} while (!nothing_to_do);
 	}
 	MOCK_METHOD(bool, is_ready, (id id), (override));
 };

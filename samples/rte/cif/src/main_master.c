@@ -241,6 +241,8 @@ static int handle_extra_errors(int sock)
 			LOG_WRN_ONCE("PREV_RX_DROP_DUPLICATE detected");
 		} else if (err_mask.error_mask & CIF_ERR_PREV_RX_DROP_INVALID) {
 			LOG_WRN_ONCE("PREV_RX_DROP_INVALID detected");
+		} else if (err_mask.error_mask & CIF_ERR_PREV_ATIMEOUT) {
+			LOG_WRN_ONCE("PREV_ATIMEOUT detected");
 		} else {
 			LOG_ERR("Unknown error mask 0x%08x detected", err_mask.error_mask);
 		}

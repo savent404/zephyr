@@ -107,8 +107,8 @@ struct ldp_wq: public work_queue_if {
 		void *arg1;
 		void *arg2;
 		int id;
-		uint32_t cycle;
-		uint32_t left;
+		int32_t cycle;
+		int32_t left;
 	};
 	using work_list = std::list<work_item>;
 
@@ -127,8 +127,6 @@ struct ldp_wq: public work_queue_if {
 	int next_id_;
 	ze_mutex x_lock_;
 	ze_sem work_sem_;
-	uint32_t prev_fn_cost_ = 0;
-	static inline const uint32_t enclosed_cycle = 100; /* 100us */
 };
 
 } // namespace systech::cif::zephyr

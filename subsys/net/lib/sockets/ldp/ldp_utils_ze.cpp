@@ -8,6 +8,7 @@
 #include <zephyr/logging/log.h>
 #include <mutex>
 #include <algorithm>
+#include <time.h>
 #include "ldp_utils_ze.hpp"
 
 #if !(CONFIG_STD_CPP20)
@@ -23,7 +24,7 @@ ldp_wq::id ldp_wq::enqueue(void (*fn)(void *, void *), void *arg1, void *arg2, u
 	std::lock_guard lock(x_lock_);
 	bool is_empty = work_items_.empty();
 
-	work_item wi = {fn, arg1, arg2, next_id_++, cycle, cycle};
+	work_item wi = {fn, arg1, arg2, next_id_++, (int32_t)cycle, (int32_t)cycle};
 	work_items_.push_back(wi);
 	LOG_INF("Enqueue work item %d", wi.id);
 
@@ -50,8 +51,8 @@ void ldp_wq::reset(id wq, uint32_t cycle)
 	auto it = std::find_if(work_items_.begin(), work_items_.end(),
 			       [wq](const work_item &wi) { return wi.id == wq; });
 	if (it != work_items_.end()) {
-		it->cycle = cycle;
-		it->left = cycle;
+		it->cycle = (int32_t)cycle;
+		it->left = (int32_t)cycle;
 		LOG_DBG("Reset work item %d, cycle %d", wq, cycle);
 	}
 }
@@ -62,68 +63,71 @@ bool ldp_wq::is_ready(id wq)
 	auto it = std::find_if(work_items_.begin(), work_items_.end(),
 			       [wq](const work_item &wi) { return wi.id == wq; });
 	if (it != work_items_.end()) {
-		return it->left <= enclosed_cycle;
+		return it->left <= 0;
 	}
 	return false;
 }
 
+static inline uint32_t get_usec(void)
+{
+	uint32_t cycle = k_cycle_get_32();
+	uint32_t usec = k_cyc_to_us_near32(cycle);
+	return usec;
+}
+
 void ldp_wq::schedule()
 {
-	uint32_t free_time = UINT32_MAX;
-	uint32_t curr_cycle, next_cycle, time_diff;
+	int32_t min_left = INT32_MAX;
+	uint32_t sleepTime;
+	work_item *early_wi = nullptr;
 
 	if (work_items_.empty()) {
 		work_sem_.take();
+		return;
 	}
 
-	{
-		std::lock_guard lock(x_lock_);
-		/* Find the next work item based on the left time */
-		for (auto &wi : work_items_) {
-			if (wi.left < free_time) {
-				free_time = wi.left;
-			}
-		}
-	}
-
-	/* Schedule the work item
-	 * NOTE: Since the work item is scheduled by the software timer, the
-	 *       free time is not accurate.
-	 *       But according to the LDP protocol, All the request is scheduled by
-	 *       ourself, so the bus didn't have any request at this point.
+	/* * Find the earliest work item and sleep until it is ready.
+	 * If there are no work items, just yield the CPU.
 	 */
-	free_time = ((free_time + enclosed_cycle - 1) / enclosed_cycle) * enclosed_cycle;
-
-	if (free_time >= prev_fn_cost_) {
-		k_usleep(free_time - prev_fn_cost_);
-	} else {
-		/* FIXME: bus cycle takes too long,
-		 * but we still need give CPU some time...
-		 */
-		k_yield();
-	}
-
 	{
-		curr_cycle = k_cycle_get_32();
 		std::lock_guard lock(x_lock_);
-		/* Execute the work item */
 		for (auto &wi : work_items_) {
-			if (wi.left <= free_time) {
-				wi.fn(wi.arg1, wi.arg2);
-				wi.left = wi.cycle;
-			} else {
-				wi.left -= free_time;
+			if (wi.left < min_left) {
+				min_left = wi.left;
+				early_wi = &wi;
 			}
 		}
 
-		next_cycle = k_cycle_get_32();
+		sleepTime = (min_left > 0) ? static_cast<uint32_t>(min_left) : 0;
+
+		if (sleepTime) {
+			k_usleep(sleepTime);
+		}
 	}
 
-	/* Check if the work queue overrun */
-	time_diff = next_cycle > curr_cycle ? next_cycle - curr_cycle
-					    : UINT32_MAX - curr_cycle + next_cycle;
-	prev_fn_cost_ = k_cyc_to_us_ceil32(time_diff);
-	if (prev_fn_cost_ > enclosed_cycle) {
-		LOG_WRN_ONCE("Work queue overrun %d", prev_fn_cost_);
+	if (!early_wi) {
+		return;
+	}
+
+	{
+		std::lock_guard lock(x_lock_);
+		uint32_t curr, after_work, work_time;
+
+		/* wi might change its left/cycle in its callback, so
+		 * we need to reset its left/cycle before calling it.
+		 */
+		early_wi->left = early_wi->cycle;
+		curr = get_usec();
+		early_wi->fn(early_wi->arg1, early_wi->arg2);
+		after_work = get_usec();
+		work_time =
+			(after_work > curr) ? after_work - curr : UINT32_MAX - curr + after_work;
+
+		for (auto &wi : work_items_) {
+			if (early_wi->id == wi.id) {
+				continue;
+			}
+			wi.left -= work_time + sleepTime;
+		}
 	}
 }
