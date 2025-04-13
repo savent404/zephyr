@@ -12,6 +12,10 @@
 
 LOG_MODULE_REGISTER(main, CONFIG_LOG_DEFAULT_LEVEL);
 
+#if CONFIG_FPU_SHARING
+#error "arch_switch() on ARMv7-A is not support FPU share"
+#endif
+
 int main(void)
 {
 	printk("Sample thread started\n");
