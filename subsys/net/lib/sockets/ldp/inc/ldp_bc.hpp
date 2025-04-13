@@ -139,4 +139,26 @@ struct ldp_bc {
 	unsigned count_async_auto_ = 0;
 };
 
+struct ldp_bc_dummy: public ldp_bc {
+	ldp_bc_dummy(unsigned, float, float) : ldp_bc(0, 0, 0)
+	{
+	}
+	bool add_conn(conn_ptr conn)
+	{
+		return true;
+	}
+	void rm_conn(conn_ptr conn)
+	{
+	}
+	void schedule(unsigned delta_microsec)
+	{
+	}
+	bool try_grant(conn_ptr conn, int p)
+	{
+		return true;
+	}
+};
+
+using bc_std = ldp_bc_dummy;
+
 } // namespace systech::cif::bc

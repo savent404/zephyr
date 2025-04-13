@@ -48,7 +48,7 @@ struct ldp_master: public ldp_basic {
 			this, nullptr, cycle_time_);
 		wqs_.push_back(sync_wq_id_);
 
-		bc_ = std::make_unique<bc::ldp_bc>(mcb_->get_bus_pps(), 0.1, 0.2);
+		bc_ = std::make_unique<bc::bc_std>(mcb_->get_bus_pps(), 0.1, 0.2);
 	}
 
 	virtual ~ldp_master()
@@ -985,7 +985,7 @@ struct ldp_master: public ldp_basic {
 	mcb_if *mcb_;
 	work_queue_if *work_queue_;
 	unsigned cycle_time_ = 10000;
-	std::unique_ptr<bc::ldp_bc> bc_;
+	std::unique_ptr<bc::bc_std> bc_;
 
 #if CONFIG_MCB_SYSTECH_HW_WORKAROUND
 	static inline uint32_t LDP_POLL_TIMEOUT = 1000; /* 1ms */
