@@ -117,6 +117,17 @@ struct ldp_wq: public work_queue_if {
 	virtual void reset(id wq, uint32_t cycle) override;
 	virtual void cancel(id wq) override;
 	virtual bool is_ready(id wq) override;
+
+	virtual void lock() override
+	{
+		x_lock_.lock();
+	}
+
+	virtual void unlock() override
+	{
+		x_lock_.unlock();
+	}
+
 	bool empty() const
 	{
 		return work_items_.empty();

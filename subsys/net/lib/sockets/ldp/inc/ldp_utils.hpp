@@ -63,6 +63,10 @@ struct work_queue_if {
 	 * @return false if the function is not ready to be called
 	 */
 	virtual bool is_ready(id id) = 0;
+
+	/* virtual locking functions */
+	virtual void lock() = 0;
+	virtual void unlock() = 0;
 };
 
 /**

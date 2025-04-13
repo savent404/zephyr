@@ -53,6 +53,7 @@ struct ldp_master: public ldp_basic {
 
 	virtual ~ldp_master()
 	{
+		std::unique_lock lock_wq(*work_queue_);
 		std::unique_lock lock(conns_lock);
 
 		for (auto &id : wqs_) {
@@ -90,6 +91,7 @@ struct ldp_master: public ldp_basic {
 			return -LDP_ERR_INVALID;
 		}
 
+		std::unique_lock lock_wq(*work_queue_);
 		std::unique_lock lock(conns_lock);
 
 		if (is_async) {
@@ -103,6 +105,7 @@ struct ldp_master: public ldp_basic {
 
 	virtual int destroy(conn c)
 	{
+		std::unique_lock lock_wq(*work_queue_);
 		std::unique_lock lock(conns_lock);
 
 		auto sync_it = std::find_if(sync_conns_.begin(), sync_conns_.end(),

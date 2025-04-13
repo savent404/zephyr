@@ -78,7 +78,7 @@ static inline uint32_t get_usec(void)
 void ldp_wq::schedule()
 {
 	int32_t min_left = INT32_MAX;
-	uint32_t sleepTime;
+	uint32_t sleepTime = 0;
 	work_item *early_wi = nullptr;
 
 	if (work_items_.empty()) {
@@ -98,14 +98,16 @@ void ldp_wq::schedule()
 			}
 		}
 
-		sleepTime = (min_left > 0) ? static_cast<uint32_t>(min_left) : 0;
-
-		if (sleepTime) {
-			k_usleep(sleepTime);
+		if (min_left > 0 && early_wi) {
+			for (auto &wi : work_items_) {
+				wi.left -= min_left;
+			}
+			sleepTime = static_cast<uint32_t>(min_left);
 		}
 	}
 
-	if (!early_wi) {
+	if (sleepTime) {
+		k_usleep(sleepTime);
 		return;
 	}
 

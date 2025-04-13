@@ -178,6 +178,9 @@ struct simu_work_queue: public systech::cif::work_queue_if {
 	{
 		items.remove_if([id](const item &i) { return i.id == id; });
 	}
+	virtual void lock() override {}
+	virtual void unlock() override {}
+
 	void sync(uint32_t delta = 1000'0000)
 	{
 		for (auto &i : items) {
