@@ -18,7 +18,7 @@ using namespace ::testing;
 using namespace systech::cif;
 using err = ldp_basic::ldp_error;
 
-using ldp_master_impl = ldp_master<mock_mempool, dummy_cache>;
+using ldp_master_impl = ldp_master<mock_mempool, dummy_cache, std::mutex, std::shared_mutex>;
 using ldp_slave_impl = ldp_slave<dummy_cache>;
 simu_mcb::buffer_t simu_mcb::rx_buf_[max_sid][max_port];
 simu_mcb::buffer_t simu_mcb::tx_buf_[max_sid][max_port];
