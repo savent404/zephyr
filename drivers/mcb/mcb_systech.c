@@ -203,10 +203,10 @@ void mcb_systech_tx(const struct device *dev, uint8_t sid, uint8_t port, bool pr
 		return;
 	}
 
-	if (mcb_get_tx_len(dev, port) % 4) {
+	if (mcb_get_tx_len(dev, port) % CONFIG_MCB_SYSTECH_BUFFER_ALIGN) {
 		/* HW bug, can't send frame with length not multiple of 4 */
-		LOG_WRN("Can't send frame with length not multiple of 4, sid %d, port %d", sid,
-			port);
+		LOG_WRN("Can't send frame with length not multiple of %d, sid %d, port %d",
+			CONFIG_MCB_SYSTECH_BUFFER_ALIGN, sid, port);
 		k_panic();
 	}
 

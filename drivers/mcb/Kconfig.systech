@@ -24,7 +24,7 @@ config MCB_SYSTECH_HW_WORKAROUND
 
 config MCB_SYSTECH_BUFFER_ALIGN
 		int "tx&rx buffer align size"
-		default 4
+		default 1
 		depends on MCB_SYSTECH
 		help
 			This is for HW design limitation, once 8-bit write
