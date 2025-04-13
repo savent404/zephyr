@@ -750,6 +750,9 @@ static void wq_background_entry(void *arg1, void *arg2, void *arg3)
 		} else {
 			wq->schedule();
 			NET_DBG("WQ scheduled");
+
+			/* NOTE: don't be strict aligned with the cycle time */
+			k_usleep(1);
 		}
 	}
 }
