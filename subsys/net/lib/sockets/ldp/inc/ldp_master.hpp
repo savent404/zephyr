@@ -769,6 +769,7 @@ struct ldp_master: public ldp_basic {
 	struct AsyncRxResult {
 		bool is_invalid_hdr;
 		bool is_new_rsp;
+		bool is_first_rsp;
 		bool is_ordered_rsp;
 		bool is_unordered_rsp;
 		bool is_ack_rsp;
@@ -789,9 +790,9 @@ struct ldp_master: public ldp_basic {
 
 		// Validate header
 		result.is_invalid_hdr = rx_len < hdr_size || rx_hdr->magic != LDP_MAGIC;
-		bool is_first_rsp = !result.is_invalid_hdr && ci->rxid == -1;
-		result.is_ordered_rsp = !result.is_invalid_hdr && !is_first_rsp &&
-					(rx_hdr->xid == ((ci->rxid + 1) & 0xFF));
+		result.is_first_rsp = !result.is_invalid_hdr && ci->rxid == -1;
+		result.is_ordered_rsp = !result.is_invalid_hdr && (result.is_first_rsp ||
+					(rx_hdr->xid == ((ci->rxid + 1) & 0xFF)));
 		result.is_new_rsp = !result.is_invalid_hdr && (rx_hdr->xid != ci->rxid);
 		result.is_unordered_rsp = result.is_new_rsp && !result.is_ordered_rsp;
 		result.is_ack_rsp = !result.is_invalid_hdr && (rx_hdr->rxid == tx_hdr->xid);
@@ -814,6 +815,7 @@ struct ldp_master: public ldp_basic {
 					ldp_memcpy::memcpy(rx_abuf.buf, rx_data, rx_abuf.len);
 					ci->rx_bufs.push_back(std::move(rx_abuf));
 					result.data_processed = true;
+					ci->stat_rx_packet++;
 				}
 			} else {
 				result.data_processed = true;
@@ -933,10 +935,6 @@ struct ldp_master: public ldp_basic {
 			}
 			if (rx_result.is_invalid_hdr) {
 				ci->last_err |= 1 << LDP_ERR_PREV_RX_DROP_INVALID;
-			}
-
-			if (rx_result.is_acceptable_rsp) {
-				ci->stat_rx_packet++;
 			}
 		} while (0);
 
