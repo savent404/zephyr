@@ -68,13 +68,6 @@ bool ldp_wq::is_ready(id wq)
 	return false;
 }
 
-static inline uint32_t get_usec(void)
-{
-	uint32_t cycle = k_cycle_get_32();
-	uint32_t usec = k_cyc_to_us_near32(cycle);
-	return usec;
-}
-
 void ldp_wq::schedule()
 {
 	int32_t min_left = INT32_MAX;
@@ -113,23 +106,43 @@ void ldp_wq::schedule()
 
 	{
 		std::lock_guard lock(x_lock_);
-		uint32_t curr, after_work, work_time;
+		uint64_t curr, after, duration;
 
 		/* wi might change its left/cycle in its callback, so
 		 * we need to reset its left/cycle before calling it.
 		 */
 		early_wi->left = early_wi->cycle;
-		curr = get_usec();
+		curr = k_cycle_get_64();
 		early_wi->fn(early_wi->arg1, early_wi->arg2);
-		after_work = get_usec();
-		work_time =
-			(after_work > curr) ? after_work - curr : UINT32_MAX - curr + after_work;
+		after = k_cycle_get_64();
+		duration = after - curr;
+
+		__ASSERT(after >= curr,
+			 "work item %d callback time overflow. curr: %llu, after: %llu",
+			 early_wi->id, curr, after);
+
+		/* FIXME: this is a workaround for the case that
+		 * the timer overflows and the callback takes longer than
+		 * the timer period. In this case, we need to reset the
+		 * timer to 0, otherwise the timer will never be triggered
+		 * again. This is not a good solution, but it works for now.
+		 */
+		if (after < curr) {
+			LOG_WRN("work item %d callback time overflow. curr: %llu, after: %llu",
+				early_wi->id, curr, after);
+			duration = 0;
+		}
+
+		if (duration > early_wi->cycle) {
+			LOG_WRN("work item %d callback time %llu is longer than cycle %d",
+				early_wi->id, duration, early_wi->cycle);
+		}
 
 		for (auto &wi : work_items_) {
 			if (early_wi->id == wi.id) {
 				continue;
 			}
-			wi.left -= work_time + sleepTime;
+			wi.left -= (uint32_t)duration + sleepTime;
 		}
 	}
 }
