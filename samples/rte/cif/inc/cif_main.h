@@ -117,6 +117,11 @@ struct open_port_s {
 	uint32_t stat_received;
 	uint32_t stat_error;
 	uint32_t open_timestamp;
+
+	uint32_t prev_stat_sent;
+	uint32_t prev_stat_received;
+	uint32_t prev_stat_error;
+	uint32_t prev_timestamp;
 	uint32_t lag_rx_avg;
 	uint32_t lag_rx_max;
 	uint32_t lag_tx_avg;

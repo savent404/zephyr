@@ -263,6 +263,31 @@ static int cif_cmd(const struct shell *sh, size_t argc, char **argv)
 					open_ports[i].stat_received * 1000 / dur,
 					open_ports[i].lag_rx_avg, open_ports[i].lag_rx_max,
 					open_ports[i].stat_error, dur);
+
+				if (open_ports[i].prev_timestamp) {
+					shell_print(
+						sh,
+						"curr rx: %d(%d/s), tx: %d(%d/s), err: %d, "
+						"dur:%d\n",
+						open_ports[i].stat_received -
+							open_ports[i].prev_stat_received,
+						(open_ports[i].stat_received -
+						 open_ports[i].prev_stat_received) *
+							1000 / (dur - open_ports[i].prev_timestamp),
+						open_ports[i].stat_sent -
+							open_ports[i].prev_stat_sent,
+						(open_ports[i].stat_sent -
+						 open_ports[i].prev_stat_sent) *
+							1000 / (dur - open_ports[i].prev_timestamp),
+						open_ports[i].stat_error -
+							open_ports[i].prev_stat_error,
+						dur - open_ports[i].prev_timestamp);
+				}
+
+				open_ports[i].prev_stat_received = open_ports[i].stat_received;
+				open_ports[i].prev_stat_sent = open_ports[i].stat_sent;
+				open_ports[i].prev_stat_error = open_ports[i].stat_error;
+				open_ports[i].prev_timestamp = dur;
 			}
 		}
 		handled = true;
