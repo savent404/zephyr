@@ -133,7 +133,7 @@ void ldp_wq::schedule()
 			duration = 0;
 		}
 
-		if (duration > early_wi->cycle) {
+		if (duration > (uint64_t)early_wi->cycle) {
 			LOG_WRN("work item %d callback time %llu is longer than cycle %d",
 				early_wi->id, duration, early_wi->cycle);
 		}
