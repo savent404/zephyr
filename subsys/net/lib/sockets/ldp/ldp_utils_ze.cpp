@@ -116,6 +116,7 @@ void ldp_wq::schedule()
 		early_wi->fn(early_wi->arg1, early_wi->arg2);
 		after = k_cycle_get_64();
 		duration = after - curr;
+		duration = k_cyc_to_us_near64(duration);
 
 		__ASSERT(after >= curr,
 			 "work item %d callback time overflow. curr: %llu, after: %llu",
@@ -133,7 +134,7 @@ void ldp_wq::schedule()
 			duration = 0;
 		}
 
-		if (duration > (uint64_t)early_wi->cycle) {
+		if (duration > (uint64_t)early_wi->cycle && early_wi->cycle > 0) {
 			LOG_WRN("work item %d callback time %llu is longer than cycle %d",
 				early_wi->id, duration, early_wi->cycle);
 		}
