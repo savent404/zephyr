@@ -682,7 +682,7 @@ struct ldp_master: public ldp_basic {
 				printk("LDP_MASTER: poll timeout, sid=%d, port=%d\n", 0, port);
 				k_panic();
 			}
-			k_usleep(100);
+			k_usleep(LDP_POLL_INTERVAL);
 #endif
 		} while (!data_ready && !data_timeout && !port_rejected);
 
@@ -986,7 +986,8 @@ struct ldp_master: public ldp_basic {
 	std::unique_ptr<bc::bc_std> bc_;
 
 #if CONFIG_MCB_SYSTECH_HW_WORKAROUND
-	static inline uint32_t LDP_POLL_TIMEOUT = 1000; /* 1ms */
+	static inline uint32_t LDP_POLL_TIMEOUT = 100; /* 10ms */
+	static inline uint32_t LDP_POLL_INTERVAL = 100; /* 100us */
 #endif
       public:
 #if CONFIG_LDP_MAX_HARQ
