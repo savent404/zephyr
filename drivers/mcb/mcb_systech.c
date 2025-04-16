@@ -420,20 +420,25 @@ void mcb_systech_rx_clr(const struct device *dev, uint8_t port)
 int mcb_systech_rx_is_ready(const struct device *dev, uint8_t port)
 {
 	uint32_t reg_base = DEVICE_MMIO_NAMED_GET(dev, reg);
-	uint32_t val, reg;
+	uint32_t val, reg, status;
+	const uint32_t response_but_not_ready_mask = b_MCB_STATUS1_PE | b_MCB_STATUS1_TE;
 
 	if (port >= MCB_MAX_PORT) {
 		LOG_ERR("Invalid port number");
 		return -EINVAL;
 	}
 
-	/* FIXME: check status1.rdy bit also. */
+	status = mcb_read(dev, reg_base + MCB_REG_STATUS1);
+	if (!(status & b_MCB_STATUS1_RDY) || (status & response_but_not_ready_mask)) {
+		return 0;
+	}
+
 	reg = MCB_REG_PORT_RDY_MASK0 + (port / 32) * 4;
 	val = mcb_read(dev, reg_base + reg);
 	if (val & BIT((port % 32))) {
 		LOG_INF("Port %d is ready, mask=%08x", port, val);
 		if (mcb_get_rx_len(dev, port)) {
-			LOG_HEXDUMP_INF(mcb_get_rx_buf(dev, port), mcb_get_rx_len(dev, port),
+			LOG_HEXDUMP_DBG(mcb_get_rx_buf(dev, port), mcb_get_rx_len(dev, port),
 					"BUF");
 		} else {
 			LOG_WRN("Port %d is ready, but no data", port);
