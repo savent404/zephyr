@@ -1,0 +1,40 @@
+&pinctrl {
+	/omit-if-no-ref/ spi1_mosi_mio_46: spi1_mosi_mio_46 {
+		pinmux = <FMQL_PINMUX(MIO, 46, PINMUX_SPI)>;
+		io_type = <IO_TYPE_LVCMOS33>;
+		bias-pull-up;
+	};
+	/omit-if-no-ref/ spi1_miso_mio_47: spi1_miso_mio_47 {
+		pinmux = <FMQL_PINMUX(MIO, 47, PINMUX_SPI)>;
+		io_type = <IO_TYPE_LVCMOS33>;
+		bias-pull-up;
+	};
+	/omit-if-no-ref/ spi1_sck_mio_48: spi1_sck_mio_48 {
+		pinmux = <FMQL_PINMUX(MIO, 48, PINMUX_SPI)>;
+		io_type = <IO_TYPE_LVCMOS33>;
+		bias-pull-up;
+	};
+	/omit-if-no-ref/ spi1_cs0_mio_49: spi1_cs0_mio_49 {
+		pinmux = <FMQL_PINMUX(MIO, 49, PINMUX_SPI)>;
+		io_type = <IO_TYPE_LVCMOS33>;
+		bias-pull-up;
+	};
+};
+
+&gpio1{
+	status = "okay";
+};
+
+&spi1 {
+	pinctrl-0 = <&spi1_mosi_mio_46>,
+	<&spi1_miso_mio_47>,
+	<&spi1_sck_mio_48>,
+	<&spi1_cs0_mio_49>;
+	pinctrl-names = "default";
+	cs-gpios = <&gpio1 17 0>;
+	status = "okay";
+};
+
+&qspi0_flash {
+	status = "okay";
+};

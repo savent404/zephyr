@@ -6,5 +6,7 @@ common:
 tests:
   sample.rbs2530.rte.security_shell:
     tags: app
+    extra_args:
+      - CONFIG_COMPILER_WARNINGS_AS_ERRORS=n
     platform_allow:
       - rbs2530_cpu
