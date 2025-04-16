@@ -3,6 +3,14 @@
 
 mainmenu "cif"
 
+config SYNC_ECHO
+	bool "Open sync echo also"
+	default y
+
+config DUAL_BUS
+	bool "Dual bus mode"
+	default y
+
 module = CIF
 module-str = cif
 source "subsys/logging/Kconfig.template.log_config"
