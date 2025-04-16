@@ -218,11 +218,13 @@ struct ldp_master: public ldp_basic {
 					     [c](const async_conn_ptr &ci) { return ci->id == c; });
 		auto sync_it = std::find_if(sync_conns_.begin(), sync_conns_.end(),
 					    [c](const sync_conn_ptr &ci) { return ci->id == c; });
-		auto fn_clr_timeout = [](conn_info_base *ci, uint32_t bits) {
+		auto fn_clr = [](conn_info_base *ci, uint32_t bits) {
+			/* additional error handling */
 			if ((ci->last_err & bits) & (1 << LDP_ERR_PREV_ATIMEOUT)) {
 				ci->timeout_cnt = ci->timeout_allowed;
 				ci->last_err &= ~(1 << LDP_ERR_ATIMEOUT);
 			}
+			ci->last_err &= ~bits;
 		};
 
 		if (async_it == async_conns_.end() && sync_it == sync_conns_.end()) {
@@ -230,11 +232,9 @@ struct ldp_master: public ldp_basic {
 		}
 
 		if (async_it != async_conns_.end()) {
-			(*async_it)->last_err &= ~err_bits;
-			fn_clr_timeout(async_it->get(), err_bits);
+			fn_clr(async_it->get(), err_bits);
 		} else {
-			(*sync_it)->last_err &= ~err_bits;
-			fn_clr_timeout(sync_it->get(), err_bits);
+			fn_clr(sync_it->get(), err_bits);
 		}
 	}
 
