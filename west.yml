@@ -23,8 +23,6 @@ manifest:
       url-base: https://github.com/zephyrproject-rtos
     - name: babblesim
       url-base: https://github.com/BabbleSim
-    - name: nordicjm
-      url-base: https://github.com/nordicjm
 
   group-filter: [-babblesim, -optional]
 
