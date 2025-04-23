@@ -660,7 +660,7 @@ struct ldp_master: public ldp_basic {
 	 * @param port_rejected Reference to port_rejected flag
 	 * @return MCB status value
 	 */
-	uint32_t wait_for_bus_operation(int port, bool &data_ready, bool &data_timeout,
+	uint32_t wait_for_bus_operation(int port, int sid, bool &data_ready, bool &data_timeout,
 					bool &port_rejected)
 	{
 		uint32_t status;
@@ -679,7 +679,7 @@ struct ldp_master: public ldp_basic {
 				data_ready = false;
 				data_timeout = true;
 				port_rejected = false;
-				printk("LDP_MASTER: poll timeout, sid=%d, port=%d\n", 0, port);
+				printk("LDP_MASTER: poll timeout, sid=%d, port=%d\n", sid, port);
 				k_panic();
 			}
 			k_usleep(LDP_POLL_INTERVAL);
@@ -732,7 +732,7 @@ struct ldp_master: public ldp_basic {
 
 			/* Wait for response */
 			bool data_ready, data_timeout, port_rejected;
-			uint32_t status = wait_for_bus_operation(ci->port, data_ready, data_timeout,
+			uint32_t status = wait_for_bus_operation(ci->port, ci->sid, data_ready, data_timeout,
 								 port_rejected);
 
 			/* Process received data */
@@ -876,7 +876,7 @@ struct ldp_master: public ldp_basic {
 			/* Wait for response */
 			bool data_ready, data_timeout, p_error;
 			uint32_t status =
-				wait_for_bus_operation(ci->port, data_ready, data_timeout, p_error);
+				wait_for_bus_operation(ci->port, ci->sid, data_ready, data_timeout, p_error);
 
 			AsyncRxResult rx_result = {};
 
