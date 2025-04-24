@@ -419,6 +419,11 @@ static void handle_open_ports_echo(int sock)
 
 		if (need_echo || ctx_.perf_mode) {
 
+			/* if perf is enabled, ret might be negative, reset to a default value */
+			if (ret < 0) {
+				ret = 0x20;
+			}
+
 			now = k_cyc_to_us_near32(k_cycle_get_32());
 			ret = sendto(sock, buf, ret, 0, (struct sockaddr *)&port_addr, addr_len);
 			later = k_cyc_to_us_near32(k_cycle_get_32());

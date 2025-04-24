@@ -7,4 +7,10 @@ module = CIF
 module-str = cif
 source "subsys/logging/Kconfig.template.log_config"
 
+config CIF_SLAVE_ONLY_RECV
+	bool "Enable slave only receive mode"
+	help
+	  Enable slave only receive mode. In this mode, the CIF will not send any data to the master.
+	  This is useful for testing purposes or when the master is not available.
+
 source "Kconfig.zephyr"

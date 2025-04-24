@@ -83,10 +83,12 @@ static int deal_ethernet_data(int sock, uint8_t port)
 			LOG_INF("Received data from port %d", port);
 			LOG_HEXDUMP_INF(rx_buf, ret, "Data:");
 
+#if !CONFIG_CIF_SLAVE_ONLY_RECV
 			ret = sendto(sock, rx_buf, ret, 0, (struct sockaddr *)&port_addr, sl);
 			if (ret < 0 && errno != EAGAIN) {
 				LOG_ERR("Failed to send data back, errno %d", errno);
 			}
+#endif
 
 			something2do = true;
 		}
@@ -102,6 +104,7 @@ static int deal_ethernet_data(int sock, uint8_t port)
 			something2do = true;
 		}
 
+#if !CONFIG_CIF_SLAVE_ONLY_RECV
 		ret = sendto(sock, rx_buf, 1500, 0, (struct sockaddr *)&port_addr, sl);
 		if (ret < 0 && errno != EAGAIN) {
 			LOG_ERR("Failed to send data back, errno %d", errno);
@@ -109,6 +112,7 @@ static int deal_ethernet_data(int sock, uint8_t port)
 			LOG_INF("Sent data back to port %d", port);
 			something2do = true;
 		}
+#endif
 	}
 
 	return something2do ? 1 : 0;
