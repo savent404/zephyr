@@ -53,19 +53,16 @@ static inline void mcb_busy_wait(uint32_t us)
 static inline void mcb_write_unsafe(uint32_t value, uint32_t addr)
 {
 	sys_write32(value, addr);
-	LOG_DBG("Write %08x to %08x", value, addr);
 }
 
 static inline uint32_t mcb_read(const struct device *dev, uint32_t addr)
 {
-	const struct mcb_systech_config *cfg = DEV_CFG(dev);
+	ARG_UNUSED(dev);
+
 	uint32_t val;
 
-	if (cfg->slow_mode) {
-		mcb_busy_wait(1);
-	}
+	mcb_busy_wait(1);
 	val = sys_read32(addr);
-	LOG_DBG("Read %08x from %08x", val, addr);
 	return val;
 }
 
@@ -373,6 +370,9 @@ void mcb_systech_set_tx_len(const struct device *dev, uint8_t port, uint16_t len
 		return;
 	}
 	mcb_write(dev, len, reg_base + MCB_REG_PORT_TX_LEN(port));
+
+	LOG_DBG("Set tx len to %d, port %d, reg: %08x", len, port,
+		mcb_read(dev, reg_base + MCB_REG_PORT_TX_LEN(port)));
 
 #if CONFIG_MCB_SYSTECH_HW_WORKAROUND
 	uint32_t retry = 10;
