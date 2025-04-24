@@ -213,9 +213,6 @@ template <typename T_cache> struct ldp_slave: public ldp_basic {
 				return -LDP_ERR_AGAIN;
 			}
 			mcb_->clr_rx(port);
-			if (rx_len <= 4) {
-				return -LDP_ERR_AGAIN;
-			}
 			ldp_a_header rx_hdr(*reinterpret_cast<volatile uint32_t *>(rx_buf));
 			ldp_a_header tx_hdr(
 				*reinterpret_cast<volatile uint32_t *>(mcb_->get_tx_buf(port)));
@@ -223,6 +220,9 @@ template <typename T_cache> struct ldp_slave: public ldp_basic {
 			cache_if::rmb(); /* make sure buffer is updated */
 			if (rx_hdr.magic != LDP_MAGIC || (size_t)rx_len < offset) {
 				return -LDP_ERR_INVALID_ASYNC_PACK;
+			}
+			if (rx_len == offset) {
+				return -LDP_ERR_AGAIN;
 			}
 			rx_buf = rx_buf + offset;
 			rx_len = rx_len - offset;

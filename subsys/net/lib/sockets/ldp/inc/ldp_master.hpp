@@ -265,6 +265,7 @@ struct ldp_master: public ldp_basic {
 	struct async_conn_info: public conn_info_base {
 		work_queue_if::id wq_id; /* work queue id */
 		bool flg_wait_for_rx;    /* flag to activate timeout mechanism */
+		bool flg_wait_for_tx;    /* flag to activate timeout mechanism */
 		bool flg_strong_order;   /* only accept response if rsp.xid == req.rxid+1 */
 		uint8_t xid;             /* transaction id */
 		int rxid; /* last received transaction id, -1 means no response received */
@@ -360,6 +361,7 @@ struct ldp_master: public ldp_basic {
 		ci->timeout_allowed = cfg->timeout / cfg->cycle_time;
 		ci->timeout_cnt = ci->timeout_allowed;
 		ci->flg_wait_for_rx = false;
+		ci->flg_wait_for_tx = false;
 		ci->flg_strong_order = cfg->strong_order;
 		ci->flg_one_shot = cfg->one_shot;
 		ci->flg_hold_on = cfg->one_shot ? true : false;
@@ -432,6 +434,10 @@ struct ldp_master: public ldp_basic {
 		std::unique_lock lock(ci->lock);
 		async_buf abuf;
 
+		if (len > CIF_ASYNC_MTU) {
+			return -LDP_ERR_INVALID;
+		}
+
 		if (ci->tx_bufs.size() >= LDP_MAX_TX_BUF) {
 			return -LDP_ERR_AGAIN;
 		}
@@ -447,7 +453,8 @@ struct ldp_master: public ldp_basic {
 		abuf.len = len;
 		ldp_memcpy::memcpy(abuf.buf, buf, len);
 		ci->tx_bufs.push_back(std::move(abuf));
-
+		ci->flg_wait_for_tx = true;
+		ci->timeout_cnt = ci->timeout_allowed;
 		ci->flg_hold_on = false;
 		return len;
 	}
@@ -455,8 +462,12 @@ struct ldp_master: public ldp_basic {
 	int send_sync(sync_conn_info *ci, const uint8_t *buf, uint16_t len)
 	{
 		std::unique_lock lock(ci->lock);
+		if (len > CIF_MTU) {
+			return -LDP_ERR_INVALID;
+		}
 		uint8_t *tx_buf = reinterpret_cast<uint8_t *>(mempool_if::alloc(len));
 		uint8_t *tx_buf_prev = ci->tx_buf;
+
 		if (!tx_buf) {
 			return -LDP_ERR_NOMEM;
 		}
@@ -486,17 +497,8 @@ struct ldp_master: public ldp_basic {
 
 		if (ci->rx_bufs.empty()) {
 			/* no data received */
-			if (!ci->flg_wait_for_rx) {
-				/* If timeout is not activated, and no data received, start to count
-				 */
-				ci->timeout_cnt = ci->timeout_allowed;
-				ci->flg_wait_for_rx = true;
-			}
 			return -LDP_ERR_AGAIN;
 		}
-
-		/* data ready, reset timeout */
-		ci->flg_wait_for_rx = false;
 
 		abuf = ci->rx_bufs.front();
 		if (abuf.len <= len) {
@@ -549,6 +551,11 @@ struct ldp_master: public ldp_basic {
 	{
 		mcb_->config_port(port, true, true, mcb_if::MCB_MAX_FRAME_LEN);
 		mcb_->set_tx_len(port, len);
+
+		if (len > mcb_if::MCB_MAX_FRAME_LEN) {
+			printk("LDP_MASTER: Invalid tx length %d\n", len);
+			k_panic();
+		}
 	}
 
 	/**
@@ -893,11 +900,19 @@ struct ldp_master: public ldp_basic {
 
 			/* Process response and update state */
 			if (rx_result.is_new_rsp || rx_result.is_ack_rsp) {
-				reset_timeout_flag = true;
 
 				/* Grant more resource if progress made */
 				if (bc_->try_grant(ci->bc, 1)) {
 					comback_to_me = true;
+				}
+
+				if (rx_result.is_new_rsp && ci->flg_wait_for_rx) {
+					ci->flg_wait_for_rx = false;
+					reset_timeout_flag = true;
+				}
+				if (rx_result.is_ack_rsp && ci->flg_wait_for_tx) {
+					ci->flg_wait_for_tx = false;
+					reset_timeout_flag = true;
 				}
 			}
 
@@ -938,12 +953,8 @@ struct ldp_master: public ldp_basic {
 			}
 		} while (0);
 
-		/* Handle timeout for async connections */
-		if (reset_timeout_flag) {
-			ci->flg_wait_for_rx = false;
-			ci->last_err &= ~(1 << LDP_ERR_ATIMEOUT);
-		} else if (ci->flg_wait_for_rx) {
-			manage_timeout(ci, false);
+		if (ci->flg_wait_for_tx || ci->flg_wait_for_rx || reset_timeout_flag) {
+			manage_timeout(ci, reset_timeout_flag);
 		}
 
 		work_queue_->reset(ci->wq_id, comback_to_me ? 0 : ci->cycle);

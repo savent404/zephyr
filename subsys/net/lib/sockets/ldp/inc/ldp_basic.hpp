@@ -200,6 +200,7 @@ struct ldp_basic {
 			return (xid | (rxid << 8) | (magic << 16));
 		}
 	};
+	static_assert(sizeof(ldp_a_header) == 4, "ldp_a_header size mismatch");
 };
 
 } // namespace cif
