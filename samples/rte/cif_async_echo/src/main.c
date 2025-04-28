@@ -176,6 +176,16 @@ int main(void)
 						log_port_activity(ports[i].bus, ports[i].port,
 								  errno, 0, "SEND_FAIL");
 					}
+
+					if (result.status != MSG_STATUS_OK) {
+						k_sleep(K_SECONDS(1));
+						LOG_WRN("Port[%s:%d] %s: ID=%d Status=%d",
+							ports[i].bus == CIF_BUS_SLOW ? "SLOW"
+										     : "FAST",
+							ports[i].port, "RECV", buf[0],
+							result.status);
+						k_panic();
+					}
 				} else if (rc < 0 && errno != EAGAIN) {
 					log_port_activity(ports[i].bus, ports[i].port, errno, 0,
 							  "RECV_FAIL");
@@ -187,7 +197,7 @@ int main(void)
 			handle_extra_errors(ports[i].sock);
 		}
 
-		k_sleep(is_master ? K_SECONDS(1) : K_MSEC(10));
+		k_sleep(is_master ? K_MSEC(40) : K_MSEC(10));
 		count++;
 	}
 }
