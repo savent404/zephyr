@@ -267,6 +267,7 @@ struct ldp_master: public ldp_basic {
 		bool flg_wait_for_rx;    /* flag to activate timeout mechanism */
 		bool flg_wait_for_tx;    /* flag to activate timeout mechanism */
 		bool flg_strong_order;   /* only accept response if rsp.xid == req.rxid+1 */
+		bool flg_tx_acked;	  /* flag to indicate if tx is acked */
 		uint8_t xid;             /* transaction id */
 		int rxid; /* last received transaction id, -1 means no response received */
 
@@ -363,6 +364,7 @@ struct ldp_master: public ldp_basic {
 		ci->flg_wait_for_rx = false;
 		ci->flg_wait_for_tx = false;
 		ci->flg_strong_order = cfg->strong_order;
+		ci->flg_tx_acked = true;
 		ci->flg_one_shot = cfg->one_shot;
 		ci->flg_hold_on = cfg->one_shot ? true : false;
 		ci->stat_rx_packet = 0;
@@ -867,15 +869,21 @@ struct ldp_master: public ldp_basic {
 			volatile ldp_a_header *tx_hdr =
 				reinterpret_cast<volatile ldp_a_header *>(tx_buf);
 
+			/* Copy data if any */
+			if (abuf.len) {
+				ldp_memcpy::memcpy(tx_data, abuf.buf, abuf.len);
+
+				/* Increment transaction ID if data is not empty */
+				if (ci->flg_tx_acked) {
+					ci->flg_tx_acked = false;
+					ci->xid = (ci->xid + 1) & 0xFF;
+				}
+			}
+
 			/* Fill header */
 			tx_hdr->xid = ci->xid;
 			tx_hdr->rxid = ci->rxid;
 			tx_hdr->magic = LDP_MAGIC;
-
-			/* Copy data if any */
-			if (abuf.len) {
-				ldp_memcpy::memcpy(tx_data, abuf.buf, abuf.len);
-			}
 
 			cache_if::wmb(); /* Make sure buffer is updated */
 			mcb_->tx(ci->port, ci->sid, ci->preempt);
@@ -924,7 +932,8 @@ struct ldp_master: public ldp_basic {
 				if (abuf.buf) {
 					mempool_if::free(abuf.buf);
 				}
-				ci->xid++;
+				ci->flg_tx_acked = true;
+				mcb_->set_tx_len(ci->port, sizeof(ldp_a_header));
 			}
 
 			/* Handle errors */
