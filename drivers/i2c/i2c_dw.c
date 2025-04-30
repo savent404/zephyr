@@ -625,6 +625,138 @@ static int i2c_dw_setup(const struct device *dev, uint16_t slave_address)
 	return 0;
 }
 
+#if CONFIG_I2C_DW_POLLING
+static inline void i2c_dw_busy_wait(const struct device *dev)
+{
+	uint32_t reg_base = get_regs(dev);
+
+	while (!test_bit_status_tfe(reg_base)) {
+		k_busy_wait(1);
+	}
+}
+
+static int i2c_dw_transfer_poll(const struct device *dev, struct i2c_msg *msgs, uint8_t num_msgs,
+				uint16_t slave_address)
+{
+	struct i2c_dw_dev_config *const dw = dev->data;
+	struct i2c_msg *cur_msg = msgs;
+	uint8_t msg_left = num_msgs;
+	uint8_t pflags;
+	int ret;
+	uint32_t reg_base = get_regs(dev);
+
+	__ASSERT_NO_MSG(msgs);
+	if (!num_msgs) {
+		return 0;
+	}
+
+	ret = k_mutex_lock(&dw->bus_mutex, K_FOREVER);
+	if (ret != 0) {
+		return ret;
+	}
+
+	/* First step, check if there is current activity */
+	if (test_bit_status_activity(reg_base) || (dw->state & I2C_DW_BUSY)) {
+		ret = -EBUSY;
+		goto error;
+	}
+
+	dw->state |= I2C_DW_BUSY;
+
+	ret = i2c_dw_setup(dev, slave_address);
+	if (ret) {
+		goto error;
+	}
+
+	/* Enable controller */
+	set_bit_enable_en(reg_base);
+
+	/*
+	 * While waiting at device_sync_sem, kernel can switch to idle
+	 * task which in turn can call pm_system_suspend() hook of Power
+	 * Management App (PMA).
+	 * pm_device_busy_set() call here, would indicate to PMA that it should
+	 * not execute PM policies that would turn off this ip block, causing an
+	 * ongoing hw transaction to be left in an inconsistent state.
+	 * Note : This is just a sample to show a possible use of the API, it is
+	 * up to the driver expert to see, if he actually needs it here, or
+	 * somewhere else, or not needed as the driver's suspend()/resume()
+	 * can handle everything
+	 */
+	pm_device_busy_set(dev);
+
+	/* Process all the messages */
+	while (msg_left > 0) {
+		/* Workaround for I2C scanner as DW HW does not support 0 byte transfers.*/
+		if ((cur_msg->len == 0) && (cur_msg->buf != NULL)) {
+			cur_msg->len = 1;
+		}
+
+		pflags = dw->xfr_flags;
+
+		dw->xfr_buf = cur_msg->buf;
+		dw->xfr_len = cur_msg->len;
+		dw->xfr_flags = cur_msg->flags;
+		dw->rx_pending = 0U;
+
+		/* Need to RESTART if changing transfer direction */
+		if ((pflags & I2C_MSG_RW_MASK) != (dw->xfr_flags & I2C_MSG_RW_MASK)) {
+			dw->xfr_flags |= I2C_MSG_RESTART;
+		}
+
+		dw->state &= ~(I2C_DW_CMD_SEND | I2C_DW_CMD_RECV);
+
+		if ((dw->xfr_flags & I2C_MSG_RW_MASK) == I2C_MSG_WRITE) {
+			dw->state |= I2C_DW_CMD_SEND;
+			dw->request_bytes = 0U;
+			ret = i2c_dw_data_send(dev);
+			/* wait for cmd to be done */
+			i2c_dw_busy_wait(dev);
+		} else {
+			dw->state |= I2C_DW_CMD_RECV;
+			dw->request_bytes = dw->xfr_len;
+			i2c_dw_data_ask(dev);
+			i2c_dw_busy_wait(dev);
+			do {
+				i2c_dw_data_read(dev);
+			} while (dw->state & I2C_DW_CMD_RECV);
+		}
+
+		/* flush rx fifo if needed */
+		while (test_bit_status_rfne(reg_base)) {
+			read_cmd_data(reg_base);
+		}
+
+		if (ret < 0) {
+			break;
+		}
+
+		if (dw->state & I2C_DW_CMD_ERROR) {
+			ret = -EIO;
+			break;
+		}
+
+		/* Something wrong if there is something left to do */
+		if (dw->xfr_len > 0) {
+			ret = -EIO;
+			break;
+		}
+
+		cur_msg++;
+		msg_left--;
+	}
+
+	pm_device_busy_clear(dev);
+
+error:
+	dw->state = I2C_DW_STATE_READY;
+	k_mutex_unlock(&dw->bus_mutex);
+
+	return ret;
+}
+
+#else
+
 static int i2c_dw_transfer(const struct device *dev,
 			   struct i2c_msg *msgs, uint8_t num_msgs,
 			   uint16_t slave_address)
@@ -671,7 +803,7 @@ static int i2c_dw_transfer(const struct device *dev,
 	 * not execute PM policies that would turn off this ip block, causing an
 	 * ongoing hw transaction to be left in an inconsistent state.
 	 * Note : This is just a sample to show a possible use of the API, it is
-	 * upto the driver expert to see, if he actually needs it here, or
+	 * up to the driver expert to see, if he actually needs it here, or
 	 * somewhere else, or not needed as the driver's suspend()/resume()
 	 * can handle everything
 	 */
@@ -748,6 +880,7 @@ error:
 
 	return ret;
 }
+#endif
 
 static int i2c_dw_runtime_configure(const struct device *dev, uint32_t config)
 {
@@ -1018,7 +1151,11 @@ static void i2c_dw_slave_read_clear_intr_bits(const struct device *dev)
 
 static const struct i2c_driver_api funcs = {
 	.configure = i2c_dw_runtime_configure,
+#if CONFIG_I2C_DW_POLLING
+	.transfer = i2c_dw_transfer_poll,
+#else
 	.transfer = i2c_dw_transfer,
+#endif
 #ifdef CONFIG_I2C_TARGET
 	.target_register = i2c_dw_slave_register,
 	.target_unregister = i2c_dw_slave_unregister,
