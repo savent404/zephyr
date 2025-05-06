@@ -1,0 +1,10 @@
+sample:
+  description: rbs2530 security shell
+  name: rbs2530 security shell
+common:
+  tags: app
+tests:
+  sample.rbs2530.rte.security_shell:
+    tags: app
+    platform_allow:
+      - rbs2530_cpu
