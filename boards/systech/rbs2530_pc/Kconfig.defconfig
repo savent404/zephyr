@@ -50,4 +50,7 @@ endif # NETWORKING
 config SHELL_STACK_SIZE
 	default 8192 if SHELL
 
+config I2C_DW_POLLING
+	default y
+
 endif # BOARD_RBS2530_PC
