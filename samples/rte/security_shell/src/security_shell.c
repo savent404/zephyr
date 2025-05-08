@@ -30,8 +30,6 @@
 
 LOG_MODULE_REGISTER(security_shell, CONFIG_LOG_DEFAULT_LEVEL);
 
-#define PEM_BUFFER_SIZE 8192
-
 static int initialize_rng(WC_RNG **rng)
 {
 	/* Initialize the random number generator */
@@ -64,14 +62,20 @@ static void cleanup_rng(WC_RNG *rng)
 	}
 }
 
-#define MAX_KEY_NUM     32
-#define MY_MAX_KEY_SIZE 1024
+#define PEM_BUFFER_SIZE  8192
+#define MAX_KEY_NUM      32
+#define MY_MAX_KEY_SIZE  1024
+#define MAX_SIGN_STR_LEN 512
+
+size_t strnlen(const char *s, size_t maxlen);
+
 typedef enum {
 	KEY_TYPE_PRIV,
 	KEY_TYPE_PUB,
 	KEY_TYPE_CSR,
 	KEY_TYPE_CERT,
-	KEY_TYPE_MAX, /* Key size number */
+	KEY_TYPE_SIGSTR, /* Key type for signing strings */
+	KEY_TYPE_MAX,    /* Key size number */
 } key_type_t;
 typedef struct {
 	bool is_used; /* Key is used or not */
@@ -448,6 +452,22 @@ static int cmd_ss_gencsr(const struct shell *sh, size_t argc, char **argv)
 
 	const char *subject = argv[1];
 	int priv_key_id = atoi(argv[2]);
+
+	if (priv_key_id < 0 || priv_key_id >= MAX_KEY_NUM) {
+		shell_print(sh, "Invalid private key id: %d", priv_key_id);
+		return -EINVAL;
+	}
+	const key_info_t *kinfo = &key_info[priv_key_id];
+
+	if (!kinfo->is_used) {
+		shell_print(sh, "Key id %d is not used", priv_key_id);
+		return -EINVAL;
+	}
+	if (kinfo->type != KEY_TYPE_PRIV) {
+		shell_print(sh, "Key id %d is not a private key", priv_key_id);
+		return -EINVAL;
+	}
+
 	int ret;
 	int csr_id = -1;
 	ecc_key *priv_key = NULL;
@@ -813,6 +833,17 @@ static int cmd_ss_dump(const struct shell *sh, size_t argc, char **argv)
 	case KEY_TYPE_CERT:
 		key_type_enum = CERT_TYPE;
 		break;
+	case KEY_TYPE_SIGSTR:
+		shell_print(sh, "key_id: %d, type: signature, length: %zu", key_id, size);
+		shell_print(sh, "Signature (hex):");
+		for (size_t i = 0; i < size; i++) {
+			shell_fprintf(sh, SHELL_NORMAL, "%02x", data[i]);
+			if ((i + 1) % 16 == 0 && i < size - 1) {
+				shell_fprintf(sh, SHELL_NORMAL, "\n");
+			}
+		}
+		shell_fprintf(sh, SHELL_NORMAL, "\n");
+		return 0;
 	default:
 		shell_print(sh, "Invalid key type");
 		return -EINVAL;
@@ -856,6 +887,113 @@ static int cmd_ss_dump(const struct shell *sh, size_t argc, char **argv)
 	return 0;
 }
 
+static int cmd_ss_sign(const struct shell *sh, size_t argc, char **argv)
+{
+	if (argc < 3) {
+		shell_print(sh, "Invalid arguments number");
+		return -EINVAL;
+	}
+
+	const char *sign_str = argv[1];
+	int priv_id = atoi(argv[2]);
+
+	if (priv_id < 0 || priv_id >= MAX_KEY_NUM) {
+		shell_print(sh, "Invalid private key id: %d", priv_id);
+		return -EINVAL;
+	}
+	const key_info_t *kinfo = &key_info[priv_id];
+
+	if (!kinfo->is_used) {
+		shell_print(sh, "Key id %d is not used", priv_id);
+		return -EINVAL;
+	}
+	if (kinfo->type != KEY_TYPE_PRIV) {
+		shell_print(sh, "Key id %d is not a private key", priv_id);
+		return -EINVAL;
+	}
+
+	int ret;
+	WC_RNG *rng = NULL;
+	ecc_key *privkey = NULL;
+	byte signature[512];
+	word32 signature_len = sizeof(signature);
+	int signature_id = -1;
+
+	/* Initialize RNG */
+	ret = initialize_rng(&rng);
+	if (ret != 0) {
+		shell_print(sh, "Failed to initialize RNG: %d", ret);
+		return ret;
+	}
+
+	/* Load the private key */
+	ret = load_buf_get_ecckey(priv_id, &privkey);
+	if (ret != 0) {
+		shell_print(sh, "Failed to get private key from buffer: %d", ret);
+		ret = -EIO;
+		goto cleanup;
+	}
+	shell_print(sh, "Private key loaded from buffer, id: %d", priv_id);
+
+	/* Compute the SHA-256 hash of the original string first */
+	byte hash[32];
+	wc_Sha256 sha;
+
+	/* Initialize SHA-256 */
+	ret = wc_InitSha256(&sha);
+	if (ret != 0) {
+		shell_print(sh, "Failed to initialize SHA-256: %d", ret);
+		ret = -EIO;
+		goto cleanup;
+	}
+
+	size_t sign_str_len = strnlen(sign_str, MAX_SIGN_STR_LEN);
+	/* Update SHA-256 context with the original string */
+	ret = wc_Sha256Update(&sha, (const byte *)sign_str, sign_str_len);
+	if (ret != 0) {
+		shell_print(sh, "Failed to update SHA-256: %d", ret);
+		ret = -EIO;
+		goto cleanup;
+	}
+
+	/* Compute the SHA-256 hash */
+	ret = wc_Sha256Final(&sha, hash);
+	if (ret != 0) {
+		shell_print(sh, "Failed to finalize SHA-256: %d", ret);
+		ret = -EIO;
+		goto cleanup;
+	}
+
+	/* Sign the hash */
+	ret = wc_ecc_sign_hash(hash, sizeof(hash), signature, &signature_len, rng, privkey);
+	if (ret != 0) {
+		shell_print(sh, "Failed to sign hash: %d", ret);
+		char errorBuf[80];
+
+		wc_ErrorString(ret, errorBuf);
+		shell_print(sh, "Detailed error: %s", errorBuf);
+		ret = -EIO;
+		goto cleanup;
+	}
+
+	/* Load the signature to buffer */
+	signature_id = load_keybuf(KEY_TYPE_SIGSTR, signature, signature_len);
+	if (signature_id < 0) {
+		shell_print(sh, "Failed to load signature to buffer: %d", signature_id);
+		ret = -EIO;
+		goto cleanup;
+	}
+	shell_print(sh, "Signature loaded to buffer, id: %d", signature_id);
+
+cleanup:
+	if (privkey) {
+		wc_ecc_free(privkey);
+		k_free(privkey);
+	}
+	cleanup_rng(rng);
+	return ret;
+}
+
 SHELL_STATIC_SUBCMD_SET_CREATE(sub_ss_cmds,
 			       SHELL_CMD_ARG(genkey, NULL,
 					     "Generate key\n"
@@ -873,6 +1011,10 @@ SHELL_STATIC_SUBCMD_SET_CREATE(sub_ss_cmds,
 					     "Dump key in PEM format\n"
 					     "Usage: dump [key_id]",
 					     cmd_ss_dump, 2, 0),
+			       SHELL_CMD_ARG(sign, NULL,
+					     "Sign a string with privkey\n"
+					     "Usage: sign [string] [privkey_id]",
+					     cmd_ss_sign, 3, 0),
 			       SHELL_SUBCMD_SET_END);
 
 SHELL_CMD_REGISTER(security, &sub_ss_cmds, "Security shell commands", NULL);
