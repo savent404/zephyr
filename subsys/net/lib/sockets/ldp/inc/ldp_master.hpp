@@ -267,7 +267,7 @@ struct ldp_master: public ldp_basic {
 		bool flg_wait_for_rx;    /* flag to activate timeout mechanism */
 		bool flg_wait_for_tx;    /* flag to activate timeout mechanism */
 		bool flg_strong_order;   /* only accept response if rsp.xid == req.rxid+1 */
-		bool flg_tx_acked;	  /* flag to indicate if tx is acked */
+		bool flg_tx_acked;       /* flag to indicate if tx is acked */
 		uint8_t xid;             /* transaction id */
 		int rxid; /* last received transaction id, -1 means no response received */
 
@@ -436,7 +436,7 @@ struct ldp_master: public ldp_basic {
 		std::unique_lock lock(ci->lock);
 		async_buf abuf;
 
-		if (len > CIF_ASYNC_MTU) {
+		if (len > LDP_USR_ASYNC_MAX_LEN) {
 			return -LDP_ERR_INVALID;
 		}
 
@@ -464,7 +464,7 @@ struct ldp_master: public ldp_basic {
 	int send_sync(sync_conn_info *ci, const uint8_t *buf, uint16_t len)
 	{
 		std::unique_lock lock(ci->lock);
-		if (len > CIF_MTU) {
+		if (len > LDP_USR_SYNC_MAX_LENGTH) {
 			return -LDP_ERR_INVALID;
 		}
 		uint8_t *tx_buf = reinterpret_cast<uint8_t *>(mempool_if::alloc(len));
@@ -741,8 +741,8 @@ struct ldp_master: public ldp_basic {
 
 			/* Wait for response */
 			bool data_ready, data_timeout, port_rejected;
-			uint32_t status = wait_for_bus_operation(ci->port, ci->sid, data_ready, data_timeout,
-								 port_rejected);
+			uint32_t status = wait_for_bus_operation(ci->port, ci->sid, data_ready,
+								 data_timeout, port_rejected);
 
 			/* Process received data */
 			uint8_t *rx_buf = mcb_->get_rx_buf(ci->port);
@@ -890,8 +890,8 @@ struct ldp_master: public ldp_basic {
 
 			/* Wait for response */
 			bool data_ready, data_timeout, p_error;
-			uint32_t status =
-				wait_for_bus_operation(ci->port, ci->sid, data_ready, data_timeout, p_error);
+			uint32_t status = wait_for_bus_operation(ci->port, ci->sid, data_ready,
+								 data_timeout, p_error);
 
 			AsyncRxResult rx_result = {};
 
@@ -1006,7 +1006,7 @@ struct ldp_master: public ldp_basic {
 	std::unique_ptr<bc::bc_std> bc_;
 
 #if CONFIG_MCB_SYSTECH_HW_WORKAROUND
-	static inline uint32_t LDP_POLL_TIMEOUT = 100; /* 10ms */
+	static inline uint32_t LDP_POLL_TIMEOUT = 100;  /* 10ms */
 	static inline uint32_t LDP_POLL_INTERVAL = 100; /* 100us */
 #endif
       public:

@@ -201,6 +201,11 @@ struct ldp_basic {
 		}
 	};
 	static_assert(sizeof(ldp_a_header) == 4, "ldp_a_header size mismatch");
+
+	inline static constexpr uint16_t LDP_USR_SYNC_MAX_LENGTH = 0x800;
+
+	inline static constexpr uint16_t LDP_USR_ASYNC_MAX_LEN =
+		(LDP_USR_SYNC_MAX_LENGTH - sizeof(ldp_a_header));
 };
 
 } // namespace cif

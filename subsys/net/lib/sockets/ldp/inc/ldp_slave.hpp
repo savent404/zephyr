@@ -127,6 +127,10 @@ template <typename T_cache> struct ldp_slave: public ldp_basic {
 		port = (*it)->port;
 
 		if (!(*it)->is_async) {
+
+			if (len > LDP_USR_SYNC_MAX_LENGTH) {
+				return -LDP_ERR_INVALID;
+			}
 			/**
 			 * @brief Sync connection send data
 			 * copy data into tx buffer and set tx length simply
@@ -138,6 +142,10 @@ template <typename T_cache> struct ldp_slave: public ldp_basic {
 			cache_if::wmb(); /* make sure buffer is updated */
 			mcb_->set_tx_len(port, len);
 		} else {
+
+			if (len > LDP_USR_ASYNC_MAX_LEN) {
+				return -LDP_ERR_INVALID;
+			}
 			/**
 			 * @brief Async connection send data
 			 * copy data and modify the header (see @c ldp_a_header)
