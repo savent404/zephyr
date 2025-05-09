@@ -1031,6 +1031,7 @@ flagged.
         "SUIT_MPI_APP_AREA_PATH", # Used by nRF runners to program provisioning data, based on build configuration
         "SUIT_MPI_RAD_AREA_PATH", # Used by nRF runners to program provisioning data, based on build configuration
         "WOLFSSL", # External module
+        "WOLFSSL_SETTINGS_FILE", # External module
         "WOLFSSL_BUILTIN", # External module
         "WOLFTPM", # External module
     }
