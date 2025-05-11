@@ -41,9 +41,6 @@
 };
 
 &spi0 {
-	cs-gpios =
-			<&gpio2 1 GPIO_ACTIVE_LOW>,
-			<&gpio2 2 GPIO_ACTIVE_LOW>;
 	sf2507_u28: sf2507@0 {
 		compatible = "netforward,sf2507";
 		reg = <0>;
