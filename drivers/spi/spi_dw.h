@@ -13,6 +13,7 @@
 #include <string.h>
 #include <zephyr/device.h>
 #include <zephyr/drivers/spi.h>
+#include <zephyr/autoconf.h>
 
 #include "spi_context.h"
 
@@ -109,6 +110,9 @@ static uint32_t reg_read(uint8_t size, mm_reg_t addr, uint32_t off)
 
 static void reg_write(uint8_t size, uint32_t data, mm_reg_t addr, uint32_t off)
 {
+#if CONFIG_SPI_DW_LOW_SPEED_WORKAROUND
+	k_busy_wait(1);
+#endif
 	switch (size) {
 	case 8:
 		sys_write8(data, addr + off); break;

@@ -26,4 +26,9 @@ config SPI_DW_HSSI
 	  Use register layout compatible with the SPI DW HSSI variant of the
 	  peripheral.
 
+config SPI_DW_LOW_SPEED_WORKAROUND
+	bool "DesignWare SPI workaround for low speed bus(<200KHz)"
+	help
+	  If the bus speed is too low, writing register needs to wait for a while.
+
 endif # SPI_DW
