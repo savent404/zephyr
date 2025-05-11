@@ -1,0 +1,31 @@
+# Copyright (c) 2025 SYSFly Co.
+# SPDX-License-Identifier: Apache-2.0
+
+description: SF2507 Registers R/W
+
+compatible: "netforward,sf2507"
+
+include: [spi-device.yaml]
+
+properties:
+  spi-max-frequency:
+    type: int
+    default: 200000
+    description: The maximum SPI frequency in Hz. Default is 200kHz.
+  register-init:
+    type: array
+    description: |
+      Array of register address and value pairs for initialization.
+      Format is <address value address value...>
+  reset_delay:
+    type: int
+    default: 100
+    description: |
+      Delay in milliseconds after reset. Default is 1000ms.
+  gpios:
+    type: phandle-array
+    description: |
+      Array of GPIOs to be used as reset pins. The first pin in the array
+      will be used for the reset pin, and the second pin will be used for
+      the power down pin. If only one pin is provided, it will be used as
+      the reset pin.

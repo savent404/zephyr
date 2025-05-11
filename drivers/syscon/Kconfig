@@ -29,6 +29,16 @@ config SYSCON_GENERIC
 	help
 	  Enable generic SYSCON (System Controller) driver
 
+config SYSCON_SF2507
+	bool "Switch driver (SF2507)"
+	select SPI
+	select GPIO
+	select SPI_DW_LOW_SPEED_WORKAROUND if SPI_DW
+	default y
+	depends on DT_HAS_NETFORWARD_SF2507_ENABLED
+	help
+	  Enable SF2507 driver
+
 config SYSCON_INIT_PRIORITY
 	int "SYSCON (System Controller) driver init priority"
 	default 50
