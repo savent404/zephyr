@@ -5,3 +5,23 @@
 &ethernet1 {
 	status = "okay";
 };
+
+&gpio2 {
+	status = "okay";
+};
+
+&spi0 {
+	status = "okay";
+};
+
+&sf2507_u1 {
+	status = "okay";
+};
+
+&sf2507_u3 {
+	status = "okay";
+};
+
+&sf2507_u21 {
+	status = "okay";
+};
