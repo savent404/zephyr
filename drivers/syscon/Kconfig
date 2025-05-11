@@ -34,6 +34,7 @@ config SYSCON_SF2507
 	select SPI
 	select GPIO
 	select SPI_DW_LOW_SPEED_WORKAROUND if SPI_DW
+	select SPI_DW_FMQL_EMIO_CS if SPI_DW
 	default y
 	depends on DT_HAS_NETFORWARD_SF2507_ENABLED
 	help

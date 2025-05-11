@@ -41,6 +41,8 @@
 };
 
 &spi0 {
+	cs-gpios = <&gpio2 3 GPIO_ACTIVE_LOW>, <&gpio2 4 GPIO_ACTIVE_LOW>;
+
 	sf2507_u28: sf2507@0 {
 		compatible = "netforward,sf2507";
 		reg = <0>;
@@ -60,6 +62,7 @@
 		>;
 		gpios = <&gpio2 0 0>;
 		reset_delay = <100>;
+		slave_id = <1>;
 	};
 
 	sf2507_u29: sf2507@1 {
@@ -79,6 +82,8 @@
 			0x3EE0 0x0022
 			0x3BE4 0x0003
 		>;
-		// Reset pin is the same as sf2507_u28, don't do that again!
+		gpios = <&gpio2 0 0>;
+		reset_delay = <100>;
+		slave_id = <0>;
 	};
 };

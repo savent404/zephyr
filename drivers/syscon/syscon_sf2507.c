@@ -22,6 +22,7 @@ struct sf2507_config {
 	size_t num_reg_pairs;
 	struct gpio_dt_spec reset_gpio;
 	uint32_t reset_delay;
+	uint16_t slave_id;
 };
 
 struct sf2507_data {
@@ -45,6 +46,12 @@ static int sf2507_write_reg(const struct device *dev, uint16_t addr, uint16_t va
 		.buffers = &tx,
 		.count = 1,
 	};
+	struct spi_config spi_cfg = {
+		.frequency = config->bus.config.frequency,
+		.operation = config->bus.config.operation,
+		.slave = config->slave_id,
+		.cs = config->bus.config.cs,
+	};
 	int ret;
 
 	k_mutex_lock(&data->lock, K_FOREVER);
@@ -55,7 +62,7 @@ static int sf2507_write_reg(const struct device *dev, uint16_t addr, uint16_t va
 	tx_buf[3] = (value >> 8) & 0xFF;
 	tx_buf[4] = value & 0xFF;
 
-	ret = spi_write_dt(&config->bus, &tx_bufs);
+	ret = spi_write(config->bus.bus, &spi_cfg, &tx_bufs);
 	if (ret < 0) {
 		LOG_ERR("SPI write failed: %d", ret);
 	}
@@ -86,6 +93,12 @@ static int sf2507_read_reg(const struct device *dev, uint16_t addr, uint16_t *va
 		.buffers = &rx,
 		.count = 1,
 	};
+	struct spi_config spi_cfg = {
+		.frequency = config->bus.config.frequency,
+		.operation = config->bus.config.operation,
+		.slave = config->slave_id,
+		.cs = config->bus.config.cs,
+	};
 	int ret;
 
 	k_mutex_lock(&data->lock, K_FOREVER);
@@ -94,7 +107,7 @@ static int sf2507_read_reg(const struct device *dev, uint16_t addr, uint16_t *va
 	tx_buf[1] = (addr >> 8) & 0xFF;
 	tx_buf[2] = addr & 0xFF;
 
-	ret = spi_transceive_dt(&config->bus, &tx_bufs, &rx_bufs);
+	ret = spi_transceive(config->bus.bus, &spi_cfg, &tx_bufs, &rx_bufs);
 	if (ret < 0) {
 		LOG_ERR("SPI read failed: %d", ret);
 	} else {
@@ -125,29 +138,42 @@ static const struct syscon_driver_api sf2507_driver_api = {
 	.write = sf2507_reg_write,
 };
 
+static void sf2507_reset(const struct device *dev)
+{
+	const struct sf2507_config *config = dev->config;
+	static uint32_t reset_cnt_bitmap;
+
+	if (config->reset_gpio.port) {
+		if (!device_is_ready(config->reset_gpio.port)) {
+			LOG_ERR("Reset GPIO port %s not ready", config->reset_gpio.port->name);
+			return;
+		}
+
+		if (!gpio_is_ready_dt(&config->reset_gpio)) {
+			LOG_ERR("Reset GPIO %s not ready", config->reset_gpio.port->name);
+			return;
+		}
+
+		if (reset_cnt_bitmap & (1 << config->reset_gpio.pin)) {
+			LOG_WRN("Reset GPIO %s already set", config->reset_gpio.port->name);
+			return;
+		}
+		reset_cnt_bitmap |= 1 << config->reset_gpio.pin;
+
+		gpio_pin_configure_dt(&config->reset_gpio, GPIO_OUTPUT_ACTIVE);
+		k_msleep(5);
+		gpio_pin_set_dt(&config->reset_gpio, 1);
+		k_msleep(config->reset_delay);
+	}
+}
+
 static int sf2507_init(const struct device *dev)
 {
 	const struct sf2507_config *config = dev->config;
 	struct sf2507_data *data = dev->data;
 	int i, ret;
 
-	if (config->reset_gpio.port) {
-
-		if (!device_is_ready(config->reset_gpio.port)) {
-			LOG_ERR("Reset GPIO port %s not ready", config->reset_gpio.port->name);
-			return -ENODEV;
-		}
-
-		if (!gpio_is_ready_dt(&config->reset_gpio)) {
-			LOG_ERR("Reset GPIO %s not ready", config->reset_gpio.port->name);
-			return -ENODEV;
-		}
-
-		gpio_pin_configure_dt(&config->reset_gpio, 0);
-		k_msleep(5);
-		gpio_pin_set_dt(&config->reset_gpio, 1);
-		k_msleep(config->reset_delay);
-	}
+	sf2507_reset(dev);
 
 	if (!spi_is_ready_dt(&config->bus)) {
 		LOG_ERR("SPI bus %s not ready", config->bus.bus->name);
@@ -181,6 +207,7 @@ static int sf2507_init(const struct device *dev)
 			return -EIO;
 		}
 	}
+	k_msleep(10);
 	LOG_INF("SF2507 device %s initialized", dev->name);
 
 	return 0;
@@ -194,6 +221,7 @@ static int sf2507_init(const struct device *dev)
 		.num_reg_pairs = ARRAY_SIZE(sf2507_reg_init_##inst),                               \
 		.reset_gpio = GPIO_DT_SPEC_INST_GET_OR(inst, gpios, {0}),                          \
 		.reset_delay = DT_INST_PROP(inst, reset_delay),                                    \
+		.slave_id = DT_INST_PROP(inst, slave_id),                                          \
 	};                                                                                         \
 	static struct sf2507_data sf2507_data_##inst;                                              \
 	DEVICE_DT_INST_DEFINE(inst, sf2507_init, NULL, &sf2507_data_##inst, &sf2507_config_##inst, \

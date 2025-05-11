@@ -31,4 +31,11 @@ config SPI_DW_LOW_SPEED_WORKAROUND
 	help
 	  If the bus speed is too low, writing register needs to wait for a while.
 
+config SPI_DW_FMQL_EMIO_CS
+	bool "FMQL EMIO chip select support"
+	depends on SPI_DW
+	help
+	  Enable support for FMQL Extended Multiplexed I/O (EMIO) chip select.
+	  This option allows using EMIO pins as chip select signals for SPI devices.
+
 endif # SPI_DW
