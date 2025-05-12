@@ -187,17 +187,17 @@ struct simu_work_queue: public systech::cif::work_queue_if {
 			i.time_left -= (int32_t)delta;
 		}
 
-		bool nothing_to_do;
+		int things_to_do = 0;
 		do {
-			nothing_to_do = true;
+			things_to_do = 0;
 			for (auto &i : items) {
 				if (i.time_left <= 0) {
 					i.time_left = i.delay; /* fn might change its 'time_left' */
 					i.fn(i.arg1, i.arg2);
-					nothing_to_do = false;
+					things_to_do += i.time_left > 0 ? 0 : 1;
 				}
 			}
-		} while (!nothing_to_do);
+		} while (things_to_do);
 	}
 	MOCK_METHOD(bool, is_ready, (id id), (override));
 };
@@ -351,9 +351,26 @@ struct simu_mcb: public systech::cif::mcb_if {
 			break;
 		}
 
-		printf("[%02x:%02x](%04d) -->%c<-- [%02x:%02x](%04d) s[%d]=%08x s[%d]=%08x\n", sid_,
-		       port, tx_len_[sid_][port], r ? '!' : ' ', dst_sid, port,
-		       tx_len_[dst_sid][port], sid_, status_[sid_], dst_sid, status_[dst_sid]);
+		auto is_async_port = [](uint8_t port) { return port >= 0x08; };
+
+		if (!is_async_port(port)) {
+			printf("[%02x:%02x](%04d) -->%c<-- [%02x:%02x](%04d) s[%d]=%08x "
+			       "s[%d]=%08x\n",
+			       sid_, port, tx_len_[sid_][port], r ? '!' : ' ', dst_sid, port,
+			       tx_len_[dst_sid][port], sid_, status_[sid_], dst_sid,
+			       status_[dst_sid]);
+		} else {
+			using header = systech::cif::ldp_basic::ldp_a_header;
+			auto master_hdr =
+				reinterpret_cast<header *>(tx_buf_[sid_][port]);
+			auto slave_hdr =
+				reinterpret_cast<header *>(tx_buf_[dst_sid][port]);
+			printf("[%02x:%02x](%04d){%02x,%02x} -->%c<-- [%02x:%02x](%04d){%02x,%02x} "
+			       "s[%d]=%08x s[%d]=%08x\n",
+			       sid_, port, tx_len_[sid_][port], master_hdr->xid, master_hdr->rxid,
+			       r ? '!' : ' ', dst_sid, port, tx_len_[dst_sid][port], slave_hdr->xid,
+			       slave_hdr->rxid, sid_, status_[sid_], dst_sid, status_[dst_sid]);
+		}
 	}
 
 	static void setup()

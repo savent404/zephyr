@@ -35,6 +35,10 @@ std::list<void *> mock_mempool::ptrs;
 
 using err = ldp_basic::ldp_error;
 
+#define NO_TIMEOUT     0x1000'0000
+#define SYNC_PORT(n)   ((0x00 + (n)) & 7)
+#define ASYNC_PORT(n)  ((0x08 + (n)) & 0x1F)
+
 TEST_F(test_ldp_sm, basic_concept)
 {
 	simu_work_queue wq;
@@ -43,29 +47,29 @@ TEST_F(test_ldp_sm, basic_concept)
 	ldp_slave_impl s1(&bus_s1), s2(&bus_s2);
 
 	ldp_master_async_config m_cfg_cfg[2] = {
-		{0x10, 1, 1000, 2000, false, true, true},
-		{0x10, 2, 1000, 2000, false, true, true},
+		{ASYNC_PORT(0), 1, 1000, NO_TIMEOUT, false, true, true},
+		{ASYNC_PORT(0), 2, 1000, NO_TIMEOUT, false, true, true},
 	};
 	ldp_master_sync_config m_cfg_io[2] = {
-		{0x40, 1, 1000, 1000, false, false},
-		{0x40, 2, 1000, 1000, false, false},
+		{SYNC_PORT(0), 1, 1000, NO_TIMEOUT, false, false},
+		{SYNC_PORT(0), 2, 1000, NO_TIMEOUT, false, false},
 	};
 	ldp_master_async_config m_cfg_async_io[2] = {
-		{0x60, 1, 1000, 2000, false, false, false},
-		{0x60, 2, 1000, 2000, false, false, false},
+		{ASYNC_PORT(1), 1, 1000, NO_TIMEOUT, false, false, false},
+		{ASYNC_PORT(1), 2, 1000, NO_TIMEOUT, false, false, false},
 	};
 
 	ldp_slave_async_config s_cfg_cfg[2] = {
-		{0x10, 32},
-		{0x10, 8},
+		{ASYNC_PORT(0), 32},
+		{ASYNC_PORT(0), 8},
 	};
 	ldp_slave_sync_config s_cfg_io[2] = {
-		{0x40, 32, true},
-		{0x40, 8, true},
+		{SYNC_PORT(0), 32, true},
+		{SYNC_PORT(0), 8, true},
 	};
 	ldp_slave_async_config s_cfg_async_io[2] = {
-		{0x60, 32},
-		{0x60, 8},
+		{ASYNC_PORT(1), 32},
+		{ASYNC_PORT(1), 8},
 	};
 
 	int m_conn_cfg[2], m_conn_io[2], m_conn_async_io[2];
@@ -235,10 +239,10 @@ TEST_F(test_ldp_sm, DISABLED_harq)
 	ldp_slave_impl s1(&bus_s1), s2(&bus_s2);
 
 	ldp_master_async_config m_cfg_cfg[] = {
-		{0x60, 1, 1000, 10000, false, false, false},
+		{ASYNC_PORT(0), 1, 1000, 10000, false, false, false},
 	};
 	ldp_slave_async_config s_cfg_cfg[] = {
-		{0x60, 32},
+		{ASYNC_PORT(0), 32},
 	};
 	int m_conn = m.create(true, &m_cfg_cfg[0]);
 	int s_conn = s1.create(true, &s_cfg_cfg[0]);
@@ -284,10 +288,10 @@ TEST_F(test_ldp_sm, sync_timeout)
 	ldp_slave_impl s1(&bus_s1);
 
 	ldp_master_sync_config m_cfg_cfg[] = {
-		{0x40, 1, 1000, 3000, false, false},
+		{SYNC_PORT(0), 1, 1000, 3000, false, false},
 	};
 	ldp_slave_sync_config s_cfg_cfg[] = {
-		{0x40, 32, true},
+		{SYNC_PORT(0), 32, true},
 	};
 	uint8_t rx_buf[32];
 
@@ -323,12 +327,12 @@ TEST_F(test_ldp_sm, async_timeout)
 	ldp_slave_impl s1(&bus_s1);
 
 	ldp_master_async_config m_cfg_cfg[] = {
-		{0x10, 1, 1000, 3000, false, true, true},
-		{0x60, 1, 1000, 3000, false, false, false},
+		{ASYNC_PORT(0), 1, 1000, 3000, false, true, true},
+		{ASYNC_PORT(1), 1, 1000, 3000, false, false, false},
 	};
 	ldp_slave_async_config s_cfg_cfg[] = {
-		{0x10, 32},
-		{0x60, 32},
+		{ASYNC_PORT(0), 32},
+		{ASYNC_PORT(1), 32},
 	};
 	uint8_t rx_buf[32];
 
@@ -377,29 +381,29 @@ TEST_F(test_ldp_sm, worst_case_slave_no_response)
 	ldp_slave_impl s1(&bus_s1), s2(&bus_s2);
 
 	ldp_master_async_config m_cfg_cfg[2] = {
-		{0x10, 1, 1000, 10000, false, true, true},
-		{0x10, 2, 1000, 10000, false, true, true},
+		{ASYNC_PORT(0), 1, 1000, 10000, false, true, true},
+		{ASYNC_PORT(0), 2, 1000, 10000, false, true, true},
 	};
 	ldp_master_sync_config m_cfg_io[2] = {
-		{0x40, 1, 1000, 1000, false, false},
-		{0x40, 2, 1000, 1000, false, false},
+		{SYNC_PORT(0), 1, 1000, 1000, false, false},
+		{SYNC_PORT(0), 2, 1000, 1000, false, false},
 	};
 	ldp_master_async_config m_cfg_async_io[2] = {
-		{0x60, 1, 1000, 2000, false, false, false},
-		{0x60, 2, 1000, 2000, false, false, false},
+		{ASYNC_PORT(1), 1, 1000, 2000, false, false, false},
+		{ASYNC_PORT(1), 2, 1000, 2000, false, false, false},
 	};
 
 	ldp_slave_async_config s_cfg_cfg[2] = {
-		{0x10, 32},
-		{0x10, 8},
+		{ASYNC_PORT(0), 32},
+		{ASYNC_PORT(0), 8},
 	};
 	ldp_slave_sync_config s_cfg_io[2] = {
-		{0x40, 32, true},
-		{0x40, 8, true},
+		{SYNC_PORT(0), 32, true},
+		{SYNC_PORT(0), 8, true},
 	};
 	ldp_slave_async_config s_cfg_async_io[2] = {
-		{0x60, 32},
-		{0x60, 8},
+		{ASYNC_PORT(1), 32},
+		{ASYNC_PORT(1), 8},
 	};
 
 	int m_conn_cfg[2], m_conn_io[2], m_conn_async_io[2];
@@ -486,14 +490,14 @@ TEST_F(test_ldp_sm, master_slave_switch)
 	/* case 1: MPU switch to master, mpu_bak switch to slave */
 	{
 		const ldp_master_async_config m_cfg_cfg[] = {
-			{0x10, 1, 1000, 10000, false, true, true},
-			{0x60, 1, 1000, 10000, false, false, false},
-			{0x10, 2, 1000, 10000, false, true, true},
-			{0x60, 2, 1000, 10000, false, false, false},
+			{ASYNC_PORT(0), 1, 1000, 10000, false, true, true},
+			{ASYNC_PORT(2), 1, 1000, 10000, false, false, false},
+			{ASYNC_PORT(0), 2, 1000, 10000, false, true, true},
+			{ASYNC_PORT(2), 2, 1000, 10000, false, false, false},
 		};
 		const ldp_master_sync_config m_cfg_io[] = {
-			{0x40, 1, 1000, 1000, false, false},
-			{0x40, 2, 1000, 1000, false, false},
+			{SYNC_PORT(0), 1, 1000, 1000, false, false},
+			{SYNC_PORT(0), 2, 1000, 1000, false, false},
 		};
 		mpu_conn[0] = mpu->create(true, &m_cfg_cfg[0]);
 		mpu_conn[1] = mpu->create(true, &m_cfg_cfg[1]);
@@ -503,11 +507,11 @@ TEST_F(test_ldp_sm, master_slave_switch)
 		mpu_conn[5] = mpu->create(false, &m_cfg_io[1]);
 
 		ldp_slave_async_config s_cfg_cfg[] = {
-			{0x10, 32},
-			{0x60, 32},
+			{ASYNC_PORT(0), 32},
+			{ASYNC_PORT(2), 32},
 		};
 		ldp_slave_sync_config s_cfg_io[] = {
-			{0x40, 32, true},
+			{SYNC_PORT(0), 32, true},
 		};
 		mpu_bak_conn[0] = s1->create(true, &s_cfg_cfg[0]);
 		mpu_bak_conn[1] = s1->create(true, &s_cfg_cfg[1]);
@@ -529,7 +533,7 @@ TEST_F(test_ldp_sm, master_slave_switch)
 
 		s1_m = std::make_unique<ldp_master_impl>(&bus_mpu_bak, &wq);
 		ldp_master_sync_config cfg_io[] = {
-			{0x40, 0, 1000, 1000, true, false},
+			{SYNC_PORT(0), 0, 1000, 1000, true, false},
 		};
 		mpu_bak_conn[0] = s1_m->create(false, &cfg_io[0]);
 		s1_m->send(mpu_bak_conn[0], (const uint8_t *)"io>000", 8);
@@ -562,11 +566,11 @@ TEST_F(test_ldp_sm, master_slave_switch)
 		mpu_s = std::make_unique<ldp_slave_impl>(&bus_mpu);
 
 		ldp_slave_async_config s_cfg_cfg[] = {
-			{0x10, 32},
-			{0x60, 32},
+			{ASYNC_PORT(0), 32},
+			{ASYNC_PORT(2), 32},
 		};
 		ldp_slave_sync_config s_cfg_io[] = {
-			{0x40, 32, true},
+			{SYNC_PORT(0), 32, true},
 		};
 
 		mpu_conn[0] = mpu_s->create(true, &s_cfg_cfg[0]);
@@ -591,7 +595,7 @@ TEST_F(test_ldp_sm, master_slave_switch)
 	{
 		s1_m->destroy(mpu_bak_conn[0]);
 		ldp_master_sync_config cfg_io[] = {
-			{0x40, 0, 1000, 1000, true, false},
+			{SYNC_PORT(0), 0, 1000, 1000, true, false},
 		};
 		mpu_bak_conn[0] = s1_m->create(false, &cfg_io[0]);
 	}
@@ -610,12 +614,12 @@ TEST_F(test_ldp_sm, async_recv_memleak)
 	int s_conn[2];
 
 	ldp_master_async_config m_cfg_cfg[] = {
-		{0x60, 1, 1000, 10000, false, false, false},
-		{0x60, 2, 1000, 10000, false, false, false},
+		{ASYNC_PORT(2), 1, 1000, 10000, false, false, false},
+		{ASYNC_PORT(2), 2, 1000, 10000, false, false, false},
 	};
 	ldp_slave_async_config s_cfg_cfg[] = {
-		{0x60, 32},
-		{0x60, 32},
+		{ASYNC_PORT(2), 32},
+		{ASYNC_PORT(2), 32},
 	};
 
 	mpu_conn[0] = mpu->create(true, &m_cfg_cfg[0]);
@@ -672,13 +676,13 @@ TEST_F(test_ldp_sm, sync_send_memleak)
 	int s_conn[2];
 
 	ldp_master_sync_config m_cfg_io[] = {
-		{0x40, 1, 1000, 1000, true, false},
-		{0x40, 2, 1000, 1000, true, false},
+		{SYNC_PORT(0), 1, 1000, 1000, true, false},
+		{SYNC_PORT(0), 2, 1000, 1000, true, false},
 	};
 
 	ldp_slave_sync_config s_cfg_io[] = {
-		{0x40, 32, true},
-		{0x40, 32, true},
+		{SYNC_PORT(0), 32, true},
+		{SYNC_PORT(0), 32, true},
 	};
 
 	mpu_conn[0] = mpu->create(false, &m_cfg_io[0]);
@@ -746,23 +750,23 @@ TEST_F(test_ldp_sm, async_bandwidth_control)
 	int mpu_conn[5], s_conn[5];
 
 	ldp_master_sync_config m_cfg_io[] = {
-		{0x40, 1, 1'000'000, 1'000'000, false, false},
-		{0x40, 2, 1'000'000, 1'000'000, false, false},
-		{0x41, 1, 1'000'000, 1'000'000, false, false},
+		{SYNC_PORT(0), 1, 1'000'000, 1'000'000, false, false},
+		{SYNC_PORT(0), 2, 1'000'000, 1'000'000, false, false},
+		{SYNC_PORT(1), 1, 1'000'000, 1'000'000, false, false},
 	};
 	ldp_master_async_config m_cfg_async_io[] = {
-		{0x60, 1, 1'000'000, 1'000'000, false, false, false, 1},
-		{0x60, 2, 1'000'000, 1'000'000, false, false, false, 1},
+		{ASYNC_PORT(2), 1, 1'000'000, 1'000'000, false, false, false, 1},
+		{ASYNC_PORT(2), 2, 1'000'000, 1'000'000, false, false, false, 1},
 	};
 
 	ldp_slave_sync_config s_cfg_io[] = {
-		{0x40, 32, true},
-		{0x40, 32, true},
-		{0x41, 32, true},
+		{SYNC_PORT(0), 32, true},
+		{SYNC_PORT(0), 32, true},
+		{SYNC_PORT(1), 32, true},
 	};
 	ldp_slave_async_config s_cfg_async_io[] = {
-		{0x60, 32},
-		{0x60, 32},
+		{ASYNC_PORT(2), 32},
+		{ASYNC_PORT(2), 32},
 	};
 
 	mpu_conn[0] = m.create(false, &m_cfg_io[0]);
