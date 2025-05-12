@@ -359,7 +359,7 @@ struct ldp_master: public ldp_basic {
 		ci->port = cfg->port;
 		ci->cycle = cfg->cycle_time;
 		ci->preempt = cfg->preempt;
-		ci->timeout_allowed = cfg->timeout / cfg->cycle_time;
+		ci->timeout_allowed = cfg->timeout ? (cfg->timeout / cfg->cycle_time) + 1 : 0xFFFF'FFFF;
 		ci->timeout_cnt = ci->timeout_allowed;
 		ci->flg_wait_for_rx = false;
 		ci->flg_wait_for_tx = false;
@@ -968,7 +968,12 @@ struct ldp_master: public ldp_basic {
 			manage_timeout(ci, reset_timeout_flag);
 		}
 
-		work_queue_->reset(ci->wq_id, comback_to_me ? 0 : ci->cycle);
+		if (comback_to_me) {
+			work_queue_->reset(ci->wq_id, 0);
+			ci->timeout_cnt++; /* next iteration won't cost a cycle */
+		} else {
+			work_queue_->reset(ci->wq_id, ci->cycle);
+		}
 	}
 
 	/**
