@@ -275,6 +275,7 @@ struct ldp_master: public ldp_basic {
 				          * it can update its rxid & xid in rsp packet without cache(delay) */
 		uint8_t xid;             /* transaction id */
 		int rxid; /* last received transaction id, -1 means no response received */
+		uint8_t acked_xid; /* last received transaction id from slave, -1 means no response received yet */
 
 		std::list<async_buf> rx_bufs; /* received buffers */
 		std::list<async_buf> tx_bufs; /* transmit buffers */
@@ -377,6 +378,7 @@ struct ldp_master: public ldp_basic {
 		ci->last_err = 0;
 		ci->xid = LDP_INITIAL_XID;
 		ci->rxid = -1;
+		ci->acked_xid = -1;
 		ci->bc = bc;
 		ci->wq_id = work_queue_->enqueue(
 			[](void *arg1, void *arg2) {
@@ -789,6 +791,7 @@ struct ldp_master: public ldp_basic {
 		bool is_ordered_rsp;
 		bool is_unordered_rsp;
 		bool is_ack_rsp;
+		bool is_ack_boring;
 		bool is_acceptable_rsp;
 		bool is_rx_full;
 		bool is_memalloc_fail;
@@ -816,6 +819,7 @@ struct ldp_master: public ldp_basic {
 		result.is_new_rsp = !result.is_invalid_hdr && (rx_hdr->xid != ci->rxid);
 		result.is_unordered_rsp = result.is_new_rsp && !result.is_ordered_rsp;
 		result.is_ack_rsp = !result.is_invalid_hdr && (rx_hdr->rxid == tx_hdr->xid);
+		result.is_ack_boring = result.is_ack_rsp && (rx_hdr->rxid == ci->acked_xid);
 		result.is_acceptable_rsp =
 			result.is_new_rsp && (ci->flg_strong_order ? result.is_ordered_rsp : true);
 		result.is_rx_full = ci->rx_bufs.size() >= LDP_MAX_RX_BUF;
@@ -946,7 +950,7 @@ struct ldp_master: public ldp_basic {
 			}
 
 			/* Process response and update state */
-			if (rx_result.is_new_rsp || rx_result.is_ack_rsp) {
+			if (rx_result.is_new_rsp || (rx_result.is_ack_rsp && !rx_result.is_ack_boring)) {
 
 				/* Grant more resource if progress made */
 				if (bc_->try_grant(ci->bc, 1)) {
@@ -968,7 +972,7 @@ struct ldp_master: public ldp_basic {
 				comback_to_me = true;
 			}
 
-			if (rx_result.is_ack_rsp) {
+			if (rx_result.is_ack_rsp && !rx_result.is_ack_boring) {
 				/* Slave accepted the previous transmit data */
 				if (ci->tx_bufs.size()) {
 					ci->tx_bufs.pop_front();
@@ -978,6 +982,7 @@ struct ldp_master: public ldp_basic {
 				}
 				ci->flg_tx_acked = true;
 				mcb_->set_tx_len(ci->port, sizeof(ldp_a_header));
+				ci->acked_xid = ci->xid;
 			}
 
 			/* Handle errors */
