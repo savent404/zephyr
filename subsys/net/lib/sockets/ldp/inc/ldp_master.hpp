@@ -35,20 +35,31 @@ struct ldp_master: public ldp_basic {
 
 	using bc_mode = bc::bc_mode;
 
+	static inline const float bc_ratio_sync = 0.3f;
+	static inline const float bc_ratio_async = 0.2f;
+
 	explicit ldp_master(mcb_if *mcb, work_queue_if *wq) : mcb_(mcb), work_queue_(wq)
 	{
 		mcb->reset(mcb_if::MCB_ROLE_MASTER);
 
+		bc_ = std::make_unique<bc::bc_std>(mcb_->get_bus_pps(), bc_ratio_sync, bc_ratio_async);
+		/* Create a work queue for BS schedule */
+		bc_wq_id_ = work_queue_->enqueue(
+			[](void *arg, void *) {
+				auto self = static_cast<ldp_master *>(arg);
+				self->bc_handler();
+			},
+			this, nullptr, bc_interval_);
+		wqs_.push_back(bc_wq_id_);
+
 		/* Create a work queue for sync handler */
 		sync_wq_id_ = work_queue_->enqueue(
-			[](void *arg, void *_1) {
+			[](void *arg, void *) {
 				auto self = static_cast<ldp_master *>(arg);
 				self->sync_handler();
 			},
 			this, nullptr, cycle_time_);
 		wqs_.push_back(sync_wq_id_);
-
-		bc_ = std::make_unique<bc::bc_std>(mcb_->get_bus_pps(), 0.1, 0.2);
 	}
 
 	virtual ~ldp_master()
@@ -86,6 +97,7 @@ struct ldp_master: public ldp_basic {
 	virtual conn create(bool is_async, const ldp_config *config)
 	{
 		conn id;
+		unsigned cycle_time;
 
 		if (!config) {
 			return -LDP_ERR_INVALID;
@@ -95,11 +107,21 @@ struct ldp_master: public ldp_basic {
 		std::unique_lock lock(conns_lock);
 
 		if (is_async) {
-			id = create_async(
-				reinterpret_cast<const ldp_master_async_config *>(config));
+			auto cfg = static_cast<const ldp_master_async_config *>(config);
+			id = create_async(cfg);
+			cycle_time = cfg->cycle_time;
 		} else {
-			id = create_sync(reinterpret_cast<const ldp_master_sync_config *>(config));
+			auto cfg = static_cast<const ldp_master_sync_config *>(config);
+			id = create_sync(cfg);
+			cycle_time = cfg->cycle_time;
 		}
+
+		/* update bc interval to minimal cycle of connections */
+		if (id >= 0 && cycle_time > 0 && cycle_time < bc_interval_) {
+			bc_interval_ = cycle_time;
+			work_queue_->reset(bc_wq_id_, bc_interval_);
+		}
+
 		return id;
 	}
 
@@ -238,6 +260,17 @@ struct ldp_master: public ldp_basic {
 		}
 	}
 
+	virtual void set_sync_cycle(uint32_t cycle)
+	{
+		cycle_time_ = cycle;
+
+		work_queue_->reset(sync_wq_id_, cycle_time_);
+
+		if (cycle_time_ < bc_interval_) {
+			bc_interval_ = cycle_time_;
+			work_queue_->reset(bc_wq_id_, bc_interval_);
+		}
+	}
       protected:
 	struct async_buf {
 		uint8_t *buf;
@@ -544,12 +577,6 @@ struct ldp_master: public ldp_basic {
 		return ci->rx_len;
 	}
 
-	void set_sync_cycle(uint32_t cycle)
-	{
-		cycle_time_ = cycle;
-
-		work_queue_->reset(sync_wq_id_, cycle_time_);
-	}
 	/**
 	 * @brief Configure MCB port for transmission
 	 *
@@ -770,9 +797,12 @@ struct ldp_master: public ldp_basic {
 			/* Process bus status and errors */
 			process_bus_status(ci.get(), status);
 		}
+	}
 
+	void bc_handler()
+	{
 		/* Refresh all available packets */
-		bc_->schedule(cycle_time_);
+		bc_->schedule(bc_interval_);
 	}
 
 	/**
@@ -1053,11 +1083,14 @@ struct ldp_master: public ldp_basic {
 	int32_t next_id_ = 0;
 	wq_list wqs_;
 	work_queue_if::id sync_wq_id_;
+	work_queue_if::id bc_wq_id_;
 
 	mcb_if *mcb_;
 	work_queue_if *work_queue_;
 	unsigned cycle_time_ = 10000;
 	std::unique_ptr<bc::bc_std> bc_;
+
+	unsigned bc_interval_ = UINT32_MAX;
 
 #if CONFIG_MCB_SYSTECH_HW_WORKAROUND
 	static inline uint32_t LDP_POLL_TIMEOUT = 100;  /* 10ms */

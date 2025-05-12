@@ -159,6 +159,6 @@ struct ldp_bc_dummy: public ldp_bc {
 	}
 };
 
-using bc_std = ldp_bc_dummy;
+using bc_std = ldp_bc;
 
 } // namespace systech::cif::bc

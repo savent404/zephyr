@@ -74,8 +74,7 @@ void ldp_bc::rm_conn(conn_ptr conn)
 
 void ldp_bc::schedule(unsigned delta_microsec)
 {
-	float delta = static_cast<float>(delta_microsec) / 1000000;
-	float pps_for_sync = pps_reserved_for_sync_ * delta;
+	float delta = static_cast<float>(delta_microsec) / 1'000'000;
 	float pps_for_async = bus_pps_ - pps_reserved_for_sync_;
 	float minimal_pps_for_async_no_limit = pps_reserved_for_async_;
 	float pps_for_async_limited = pps_async_used_;
@@ -86,13 +85,10 @@ void ldp_bc::schedule(unsigned delta_microsec)
 	for (const auto &conn : conn_list) {
 		switch (conn->mode) {
 		case bc_mode::BC_MODE_SYNC:
-
-			t = pps_for_sync * (conn->pps_required / pps_for_sync);
+			t = delta * float(conn->pps_required);
 			break;
 		case bc_mode::BC_MODE_ASYNC:
-			t = pps_for_async_limited * delta *
-			    (conn->pps_required / pps_for_async_limited) /
-			    (async_overrun > 1 ? async_overrun : 1);
+			t = delta * float(conn->pps_required) / (async_overrun > 1 ? async_overrun : 1);
 			break;
 		case bc_mode::BC_MODE_ASYNC_AUTO:
 			if (async_overrun < 1) {
@@ -107,7 +103,7 @@ void ldp_bc::schedule(unsigned delta_microsec)
 		/* Avoid value overflow, only allow tiny increment */
 		if (conn->pps_granted < 1) {
 			conn->pps_granted += t;
-		} else {
+		} else if (t > 1) {
 			conn->pps_granted = t;
 		}
 	}

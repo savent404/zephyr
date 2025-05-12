@@ -547,9 +547,15 @@ TEST_F(test_ldp_sm, master_slave_switch)
 	{
 		uint8_t rx_buf[32];
 		ASSERT_EQ(mpu->recv(mpu_conn[4], rx_buf, 32), 8);
-		auto extra_err = mpu->get_extra_error(mpu_conn[4]);
-		mpu->clr_extra_error(mpu_conn[4], extra_err);
-		ASSERT_EQ(mpu->get_extra_error(mpu_conn[4]), 0);
+
+		/* NOTE: any port could recv the preempt flag. It is only about the
+		 * order of the execution */
+		uint32_t extra_err = 0;
+		for (int i = 0; i < 5; i++) {
+			uint32_t m = mpu->get_extra_error(mpu_conn[i]);
+			extra_err |= m;
+			mpu->clr_extra_error(mpu_conn[i], m);
+		}
 		ASSERT_TRUE(extra_err &
 			    (1 << err::LDP_ERR_PREEMPT | 1 << err::LDP_ERR_PREV_PREEMPT));
 		mpu->destroy(mpu_conn[0]);
@@ -741,28 +747,27 @@ TEST_F(test_ldp_sm, sync_send_memleak)
 TEST_F(test_ldp_sm, async_bandwidth_control)
 {
 	simu_work_queue wq;
-	simu_mcb bus_m(0), bus_s1(1), bus_s2(2);
+	simu_mcb bus_m(0, simu_mcb::ps_io, 10), bus_s1(1), bus_s2(2);
 	ldp_master_impl m(&bus_m, &wq);
 	ldp_slave_impl s1(&bus_s1), s2(&bus_s2);
 
-	bus_m.bus_pps_ = 3;
+	ASSERT_EQ(int(m.bc_ratio_sync * 10), 3); /* max 3 pps for sync */
+	ASSERT_EQ(int(m.bc_ratio_async * 10), 2); /* at least 2 pps for async */
 
-	int mpu_conn[5], s_conn[5];
+	int mpu_conn[4], s_conn[4];
 
 	ldp_master_sync_config m_cfg_io[] = {
 		{SYNC_PORT(0), 1, 1'000'000, 1'000'000, false, false},
-		{SYNC_PORT(0), 2, 1'000'000, 1'000'000, false, false},
-		{SYNC_PORT(1), 1, 1'000'000, 1'000'000, false, false},
+		{SYNC_PORT(0), 2, 1'000, 1'000, false, false},
 	};
 	ldp_master_async_config m_cfg_async_io[] = {
-		{ASYNC_PORT(2), 1, 1'000'000, 1'000'000, false, false, false, 1},
-		{ASYNC_PORT(2), 2, 1'000'000, 1'000'000, false, false, false, 1},
+		{ASYNC_PORT(2), 1, 1'000'000, 1'000'000'000, false, false, false, false, 100},
+		{ASYNC_PORT(2), 2, 1'000'000, 1'000'000'000, false, false, false, false, 0},
 	};
 
 	ldp_slave_sync_config s_cfg_io[] = {
 		{SYNC_PORT(0), 32, true},
 		{SYNC_PORT(0), 32, true},
-		{SYNC_PORT(1), 32, true},
 	};
 	ldp_slave_async_config s_cfg_async_io[] = {
 		{ASYNC_PORT(2), 32},
@@ -772,51 +777,49 @@ TEST_F(test_ldp_sm, async_bandwidth_control)
 	mpu_conn[0] = m.create(false, &m_cfg_io[0]);
 	mpu_conn[1] = m.create(false, &m_cfg_io[1]);
 	mpu_conn[2] = m.create(true, &m_cfg_async_io[0]);
-	// mpu_conn[3] = m.create(true, &m_cfg_async_io[1]);
-	mpu_conn[4] = m.create(false, &m_cfg_io[2]);
+	mpu_conn[3] = m.create(true, &m_cfg_async_io[1]);
 	s_conn[0] = s1.create(false, &s_cfg_io[0]);
 	s_conn[1] = s2.create(false, &s_cfg_io[1]);
 	s_conn[2] = s1.create(true, &s_cfg_async_io[0]);
 	s_conn[3] = s2.create(true, &s_cfg_async_io[1]);
-	s_conn[4] = s1.create(false, &s_cfg_io[2]);
 
 	ASSERT_EQ(mpu_conn[0], 0);
-	ASSERT_EQ(mpu_conn[1], 1);
-	ASSERT_EQ(mpu_conn[2], 2);
-	// ASSERT_EQ(mpu_conn[3], -err::LDP_ERR_INVALID); /* bandwidth control denied */
-	ASSERT_EQ(mpu_conn[4], 3);
-	/* sync occupied mpu_conn[2]'s time, since sync has higher priority */
+	ASSERT_EQ(mpu_conn[1], -err::LDP_ERR_INVALID); /* bandwidth control denied */
+	ASSERT_EQ(mpu_conn[2], 1);
+	ASSERT_EQ(mpu_conn[3], 2); /* pps is not enough, but async port doesn't have our promise */
 
-	m.send(mpu_conn[0], (const uint8_t *)"io:000", 8);
-	m.send(mpu_conn[1], (const uint8_t *)"io:001", 8);
-	m.send(mpu_conn[2], (const uint8_t *)"aio:000", 8);
-	m.send(mpu_conn[4], (const uint8_t *)"io:002", 8);
-	s1.send(s_conn[0], (const uint8_t *)"io>008\0", 8);
-	s2.send(s_conn[1], (const uint8_t *)"io>00C\0", 8);
-	s1.send(s_conn[2], (const uint8_t *)"aio>008\0", 8);
-	s2.send(s_conn[3], (const uint8_t *)"aio>00C\0", 8);
-	s1.send(s_conn[4], (const uint8_t *)"io>010\0", 8);
+	m.send(mpu_conn[0], (const uint8_t *)"io:100", 8);
+	m.send(mpu_conn[2], (const uint8_t *)"aio:200", 8);
+	m.send(mpu_conn[3], (const uint8_t *)"aio:300", 8);
 
+	s1.send(s_conn[0], (const uint8_t *)"io>100\0", 8);
+	s1.send(s_conn[2], (const uint8_t *)"aio>200\0", 8);
+	s2.send(s_conn[3], (const uint8_t *)"aio>300\0", 8);
+
+	uint8_t rx_buf[32];
 	{
-		uint8_t rx_buf[32];
+		/* Due to the required bandwidth, the second async port won't be processed for a while */
 		wq.sync();
-		ASSERT_EQ(m.recv(mpu_conn[0], rx_buf, 32), 8);
-		ASSERT_EQ(m.recv(mpu_conn[1], rx_buf, 32), 8);
-		ASSERT_EQ(m.recv(mpu_conn[2], rx_buf, 32), -err::LDP_ERR_AGAIN);
-		ASSERT_EQ(m.recv(mpu_conn[4], rx_buf, 32), 8);
-		ASSERT_EQ(s1.recv(s_conn[0], rx_buf, 32), 8);
-		ASSERT_EQ(s2.recv(s_conn[1], rx_buf, 32), 8);
-	}
-	{
-		uint8_t rx_buf[32];
 		wq.sync();
+
 		ASSERT_EQ(m.recv(mpu_conn[0], rx_buf, 32), 8);
-		ASSERT_EQ(m.recv(mpu_conn[1], rx_buf, 32), 8);
-		ASSERT_EQ(m.recv(mpu_conn[2], rx_buf, 32), -err::LDP_ERR_ATIMEOUT);
-		ASSERT_EQ(m.recv(mpu_conn[4], rx_buf, 32), 8);
-		ASSERT_EQ(s1.recv(s_conn[0], rx_buf, 32), 8);
-		ASSERT_EQ(s2.recv(s_conn[1], rx_buf, 32), 8);
+		ASSERT_STREQ((const char *)rx_buf, "io>100");
+		ASSERT_EQ(m.recv(mpu_conn[2], rx_buf, 32), 8);
+		ASSERT_STREQ((const char *)rx_buf, "aio>200");
+		ASSERT_EQ(m.recv(mpu_conn[3], rx_buf, 32), -err::LDP_ERR_AGAIN);
 	}
+
+	int cnt = 0;
+	while (1) {
+		if (m.recv(mpu_conn[3], rx_buf, 32) == 8) {
+			break;
+		}
+		wq.sync();
+		cnt++;
+	}
+	ASSERT_STREQ((const char *)rx_buf, "aio>300");
+	printf("%d times\n", cnt);
+	ASSERT_TRUE(cnt > 3);
 }
 
 TEST_F(test_ldp_sm, async_reset_master_sw)

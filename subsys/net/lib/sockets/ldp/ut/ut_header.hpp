@@ -187,17 +187,34 @@ struct simu_work_queue: public systech::cif::work_queue_if {
 			i.time_left -= (int32_t)delta;
 		}
 
-		int things_to_do = 0;
+		int things_to_do;
 		do {
 			things_to_do = 0;
+
+			item* ptr = nullptr;
+			int32_t min_time_left = INT32_MAX;
+
+			for (auto &i : items) {
+				if (i.time_left < min_time_left) {
+					min_time_left = i.time_left;
+					ptr = &i;
+				}
+			}
+
+			if (ptr && min_time_left <= 0) {
+				ptr->time_left = ptr->delay;
+				ptr->fn(ptr->arg1, ptr->arg2);
+			}
+
+			/* If there is still something to do, we need to wait */
 			for (auto &i : items) {
 				if (i.time_left <= 0) {
-					i.time_left = i.delay; /* fn might change its 'time_left' */
-					i.fn(i.arg1, i.arg2);
-					things_to_do += i.time_left > 0 ? 0 : 1;
+					things_to_do++;
 				}
 			}
 		} while (things_to_do);
+
+		printf("=================================\n");
 	}
 	MOCK_METHOD(bool, is_ready, (id id), (override));
 };
@@ -218,7 +235,7 @@ struct simu_mcb: public systech::cif::mcb_if {
 	inline static constexpr uint8_t max_port = 0x80;
 
       public:
-	simu_mcb(uint8_t sid, io_mode m = ps_io, uint32_t pps = 1'000'000)
+	simu_mcb(uint8_t sid, io_mode m = ps_io, uint32_t pps = 10'000)
 		: sid_(sid), bus_pps_(pps)
 	{
 		io_mode_[sid_] = m;

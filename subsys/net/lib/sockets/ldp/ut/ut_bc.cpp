@@ -3,6 +3,7 @@
  * COPYRIGHT (c) 2025 SYSTech Co.
  */
 #include <gtest/gtest.h>
+#include <cmath>
 #include "ldp_bc.hpp"
 
 using namespace systech::cif::bc;
@@ -114,6 +115,32 @@ TEST(bc, async_hyp)
 	ASSERT_NEAR(conn1->pps_granted, 100.0, 0.001);
 	ASSERT_NEAR(conn2->pps_granted, 300.0, 0.001);
 	ASSERT_NEAR(conn3->pps_granted, 500.0, 0.001);
+}
+
+TEST(bc, async_tiny_interval)
+{
+	/* alloc 200 pps for sync, reserved 200 pps for no limited async */
+	ldp_bc bc(1000, 0.2, 0.2);
+
+	auto conn1 = std::make_shared<conn_item>(bc_mode::BC_MODE_SYNC, 100, 0);
+	auto conn2 = std::make_shared<conn_item>(bc_mode::BC_MODE_ASYNC_AUTO, 0, 0);
+	auto conn3 = std::make_shared<conn_item>(bc_mode::BC_MODE_ASYNC, 500, 0);
+
+	EXPECT_EQ(bc.add_conn(conn1), true);
+	EXPECT_EQ(bc.add_conn(conn2), true);
+	EXPECT_EQ(bc.add_conn(conn3), true);
+
+	for (int i = 0; i < 10'000; i++) {
+
+		ASSERT_NEAR(conn1->pps_granted, fmod(i * (100 * 1e-3), 1), 0.001);
+		ASSERT_NEAR(conn2->pps_granted, fmod(i * (300 * 1e-3), 1), 0.001);
+		ASSERT_NEAR(conn3->pps_granted, fmod(i * (500 * 1e-3), 1), 0.001);
+
+		bc.schedule(1000); /* 1ms */
+		bc.try_grant(conn1, 1);
+		bc.try_grant(conn2, 1);
+		bc.try_grant(conn3, 1);
+	}
 }
 
 TEST(bc, async_hyp_overrun)
