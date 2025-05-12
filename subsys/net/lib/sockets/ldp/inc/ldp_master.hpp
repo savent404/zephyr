@@ -554,10 +554,12 @@ struct ldp_master: public ldp_basic {
 		mcb_->config_port(port, true, true, mcb_if::MCB_MAX_FRAME_LEN);
 		mcb_->set_tx_len(port, len);
 
+#if CONFIG_MCB
 		if (len > mcb_if::MCB_MAX_FRAME_LEN) {
 			printk("LDP_MASTER: Invalid tx length %d\n", len);
 			k_panic();
 		}
+#endif
 	}
 
 	/**
