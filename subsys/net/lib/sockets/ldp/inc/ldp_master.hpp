@@ -265,7 +265,6 @@ struct ldp_master: public ldp_basic {
 	struct async_conn_info: public conn_info_base {
 		work_queue_if::id wq_id; /* work queue id */
 		bool flg_wait_for_rx;    /* flag to activate timeout mechanism */
-		bool flg_wait_for_tx;    /* flag to activate timeout mechanism */
 		bool flg_strong_order;   /* only accept response if rsp.xid == req.rxid+1 */
 		bool flg_tx_acked;       /* flag to indicate if tx is acked, for the first request,
 		                          * it is not acked yet, but for the service assume it is acked */
@@ -368,7 +367,6 @@ struct ldp_master: public ldp_basic {
 		ci->timeout_allowed = cfg->timeout ? (cfg->timeout / cfg->cycle_time) + 1 : 0xFFFF'FFFF;
 		ci->timeout_cnt = ci->timeout_allowed;
 		ci->flg_wait_for_rx = false;
-		ci->flg_wait_for_tx = false;
 		ci->flg_strong_order = cfg->strong_order;
 		ci->flg_tx_acked = true;
 		ci->flg_one_shot = cfg->one_shot;
@@ -463,7 +461,6 @@ struct ldp_master: public ldp_basic {
 		abuf.len = len;
 		ldp_memcpy::memcpy(abuf.buf, buf, len);
 		ci->tx_bufs.push_back(std::move(abuf));
-		ci->flg_wait_for_tx = true;
 		ci->timeout_cnt = ci->timeout_allowed;
 		ci->flg_hold_on = false;
 		return len;
@@ -877,6 +874,7 @@ struct ldp_master: public ldp_basic {
 		std::unique_lock conn_lock(ci->lock);
 		bool reset_timeout_flag = false;
 		bool comback_to_me = false;
+		bool flg_wait_for_tx = false;
 
 		do {
 			if (!bc_->try_grant(ci->bc, 1)) {
@@ -891,6 +889,7 @@ struct ldp_master: public ldp_basic {
 			async_buf abuf = {nullptr, 0};
 			if (!ci->tx_bufs.empty()) {
 				abuf = ci->tx_bufs.front();
+				flg_wait_for_tx = true;
 			}
 
 			/* Prepare to transmit */
@@ -958,8 +957,8 @@ struct ldp_master: public ldp_basic {
 					ci->flg_wait_for_rx = false;
 					reset_timeout_flag = true;
 				}
-				if (rx_result.is_ack_rsp && ci->flg_wait_for_tx) {
-					ci->flg_wait_for_tx = false;
+				if (rx_result.is_ack_rsp && flg_wait_for_tx) {
+					flg_wait_for_tx = false;
 					reset_timeout_flag = true;
 				}
 			}
@@ -1007,7 +1006,7 @@ struct ldp_master: public ldp_basic {
 			}
 		} while (0);
 
-		if (ci->flg_wait_for_tx || ci->flg_wait_for_rx || reset_timeout_flag) {
+		if (flg_wait_for_tx || ci->flg_wait_for_rx || reset_timeout_flag) {
 			manage_timeout(ci, reset_timeout_flag);
 		}
 
