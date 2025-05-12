@@ -818,3 +818,131 @@ TEST_F(test_ldp_sm, async_bandwidth_control)
 		ASSERT_EQ(s2.recv(s_conn[1], rx_buf, 32), 8);
 	}
 }
+
+TEST_F(test_ldp_sm, async_reset_master_sw)
+{
+	/* Master reset will not affect the slave.
+	 * Due to the async port is using xid to identify the data,
+	 * the xid will be reset to 0 after master reset. So we need to
+	 * make sure that the xid wouldn't affect the slave in this scenario.
+	 */
+	using m_t = std::unique_ptr<ldp_master_impl>;
+	simu_work_queue wq;
+	simu_mcb bus_m(0), bus_s(1);
+	m_t m;
+	ldp_slave_impl s(&bus_s);
+
+	int conn_m, conn_s;
+
+	ldp_master_async_config m_cfg_cfg[] = {
+		{ASYNC_PORT(0), 1, 1000, 10000, false, false, false, false},
+	};
+	ldp_slave_async_config s_cfg_cfg[] = {
+		{ASYNC_PORT(0), 32},
+	};
+
+	m = std::make_unique<ldp_master_impl>(&bus_m, &wq);
+	conn_m = m->create(true, &m_cfg_cfg[0]);
+	conn_s = s.create(true, &s_cfg_cfg[0]);
+	ASSERT_EQ(conn_m, 0);
+	ASSERT_EQ(conn_s, 0);
+
+	uint8_t rx_buf[32];
+
+	/* First round, master send config data and slave response */
+	m->send(conn_m, (const uint8_t *)"aio:000", 8);
+	wq.sync();
+	ASSERT_EQ(s.recv(conn_s, rx_buf, 32), 8);
+	ASSERT_EQ(s.send(conn_s, (const uint8_t *)"aio>000", 8), 8);
+
+	/* Second round, master recv config data */
+	wq.sync();
+	ASSERT_EQ(m->recv(conn_m, rx_buf, 32), 8);
+	ASSERT_STREQ((const char *)rx_buf, "aio>000");
+
+	/* After master reset, the step 1&2 will be reproduced, and it should be ok */
+	m = nullptr;
+
+	m = std::make_unique<ldp_master_impl>(&bus_m, &wq);
+	conn_m = m->create(true, &m_cfg_cfg[0]);
+	ASSERT_EQ(conn_m, 0);
+
+	/* 3nd, master detect the conflict resp, and change its xid */
+	m->send(conn_m, (const uint8_t *)"aio:001", 8);
+	wq.sync();
+	ASSERT_EQ(m->recv(conn_m, rx_buf, 32), -err::LDP_ERR_AGAIN);
+	ASSERT_EQ(s.recv(conn_s, rx_buf, 32), 8);
+	ASSERT_STREQ((const char *)rx_buf, "aio:001");
+	ASSERT_EQ(s.send(conn_s, (const uint8_t *)"aio>001", 8), 8);
+
+	/* 4nd, master recv the right feed back */
+	wq.sync();
+	ASSERT_EQ(m->recv(conn_m, rx_buf, 32), 8);
+	ASSERT_STREQ((const char *)rx_buf, "aio>001");
+}
+
+TEST_F(test_ldp_sm, async_reset_master_sw_failed)
+{
+	/* Master reset will not affect the slave.
+	 * Due to the async port is using xid to identify the data,
+	 * the xid will be reset to 0 after master reset. So we need to
+	 * make sure that the xid wouldn't affect the slave in this scenario.
+	 * But if the master assumes the slave is hardware implemented, and
+	 * the actual slave is implemented in software, the slave transaction
+	 * would be blocked.
+	 */
+	using m_t = std::unique_ptr<ldp_master_impl>;
+	simu_work_queue wq;
+	simu_mcb bus_m(0), bus_s(1);
+	m_t m;
+	ldp_slave_impl s(&bus_s);
+
+	int conn_m, conn_s;
+
+	ldp_master_async_config m_cfg_cfg[] = {
+		{ASYNC_PORT(0), 1, 1000, 10000, false, false, false, true},
+	};
+	ldp_slave_async_config s_cfg_cfg[] = {
+		{ASYNC_PORT(0), 32},
+	};
+
+	m = std::make_unique<ldp_master_impl>(&bus_m, &wq);
+	conn_m = m->create(true, &m_cfg_cfg[0]);
+	conn_s = s.create(true, &s_cfg_cfg[0]);
+	ASSERT_EQ(conn_m, 0);
+	ASSERT_EQ(conn_s, 0);
+
+	uint8_t rx_buf[32];
+
+	/* First round, master send config data and slave response */
+	m->send(conn_m, (const uint8_t *)"aio:000", 8);
+	wq.sync();
+	ASSERT_EQ(m->recv(conn_m, rx_buf, 32), -err::LDP_ERR_AGAIN);
+	ASSERT_EQ(s.recv(conn_s, rx_buf, 32), 8);
+	ASSERT_EQ(s.send(conn_s, (const uint8_t *)"aio>000", 8), 8);
+
+	/* Second round, master recv config data */
+	wq.sync();
+	ASSERT_EQ(m->recv(conn_m, rx_buf, 32), 8);
+	ASSERT_STREQ((const char *)rx_buf, "aio>000");
+	ASSERT_EQ(s.recv(conn_s, rx_buf, 32), -err::LDP_ERR_AGAIN);
+
+	/* After master reset, the step 1&2 will be reproduced, and it should be not ok*/
+	m = nullptr;
+
+	m = std::make_unique<ldp_master_impl>(&bus_m, &wq);
+	conn_m = m->create(true, &m_cfg_cfg[0]);
+	ASSERT_EQ(conn_m, 0);
+
+	/* 3nd, master will recv the conflict resp, and slave won't recv anything */
+	m->send(conn_m, (const uint8_t *)"aio:001", 8);
+	wq.sync();
+	ASSERT_EQ(m->recv(conn_m, rx_buf, 32), 8);
+	ASSERT_STREQ((const char *)rx_buf, "aio>000");
+	ASSERT_EQ(s.recv(conn_s, rx_buf, 32), -err::LDP_ERR_AGAIN);
+
+	/* 4nd, slave won't recv anything */
+	wq.sync();
+	ASSERT_EQ(m->recv(conn_m, rx_buf, 32), -err::LDP_ERR_AGAIN);
+	ASSERT_EQ(s.recv(conn_s, rx_buf, 32), -err::LDP_ERR_AGAIN);
+}

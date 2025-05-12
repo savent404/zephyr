@@ -267,7 +267,13 @@ struct ldp_master: public ldp_basic {
 		bool flg_wait_for_rx;    /* flag to activate timeout mechanism */
 		bool flg_wait_for_tx;    /* flag to activate timeout mechanism */
 		bool flg_strong_order;   /* only accept response if rsp.xid == req.rxid+1 */
-		bool flg_tx_acked;       /* flag to indicate if tx is acked */
+		bool flg_tx_acked;       /* flag to indicate if tx is acked, for the first request,
+		                          * it is not acked yet, but for the service assume it is acked */
+		bool flg_rx_conflict;    /* flag to indicate if rx conflict, for the first request,
+		                          * it is not acked yet, but for the service assume it is acked */
+		bool flg_is_first_req;   /* flag to indicate if this is the first request */
+		bool flg_is_hw_slave;    /* flag to indicate the shave's MCB is implemented in HW, which means
+				          * it can update its rxid & xid in rsp packet without cache(delay) */
 		uint8_t xid;             /* transaction id */
 		int rxid; /* last received transaction id, -1 means no response received */
 
@@ -367,6 +373,8 @@ struct ldp_master: public ldp_basic {
 		ci->flg_tx_acked = true;
 		ci->flg_one_shot = cfg->one_shot;
 		ci->flg_hold_on = cfg->one_shot ? true : false;
+		ci->flg_is_first_req = true;
+		ci->flg_is_hw_slave = cfg->is_hw_slave;
 		ci->stat_rx_packet = 0;
 		ci->last_err = 0;
 		ci->xid = LDP_INITIAL_XID;
@@ -788,6 +796,10 @@ struct ldp_master: public ldp_basic {
 		bool is_rx_full;
 		bool is_memalloc_fail;
 		bool is_rx_duplicate;
+		bool is_rx_conflict;	/* similar with is_rx_duplicated, but this flg is set when we
+		                         * are on the first request, and the response is acked by a
+					 * software implemented LDP slave, which means the response
+					 * should be fake acked due to master reset or other reasons */
 		bool data_processed;
 	};
 
@@ -811,11 +823,29 @@ struct ldp_master: public ldp_basic {
 			result.is_new_rsp && (ci->flg_strong_order ? result.is_ordered_rsp : true);
 		result.is_rx_full = ci->rx_bufs.size() >= LDP_MAX_RX_BUF;
 		result.is_rx_duplicate = !result.is_invalid_hdr && (rx_hdr->xid == ci->rxid);
+		result.is_rx_conflict = result.is_ack_rsp && ci->flg_is_first_req &&
+				 !ci->flg_is_hw_slave;
+
+		if (result.is_rx_conflict) {
+			/* Slave doesn't response to the first request actually, we need to reset the related
+			 * and increase the xid to avoid duplicate response */
+			result.is_first_rsp = false;
+			result.is_ordered_rsp = false;
+			result.is_new_rsp = false;
+			result.is_unordered_rsp = ci->flg_strong_order ? true : false;
+			result.is_ack_rsp = false;
+			result.is_acceptable_rsp = false;
+			result.is_rx_full = false;
+			result.is_rx_duplicate = false;
+			ci->flg_tx_acked = true;
+			ci->flg_rx_conflict = true;
+		}
 
 		// Process data if valid
-		if (result.is_acceptable_rsp && !result.is_rx_full) {
+		if (result.is_acceptable_rsp && !result.is_rx_full && !ci->flg_rx_conflict) {
 			async_buf rx_abuf;
 			rx_abuf.len = rx_len - hdr_size;
+
 
 			if (rx_abuf.len) {
 				rx_abuf.buf =
@@ -906,6 +936,14 @@ struct ldp_master: public ldp_basic {
 				rx_result = process_received_data_async(ci, rx_buf, rx_len, tx_hdr);
 
 				mcb_->clr_rx(ci->port);
+
+				if (ci->flg_is_first_req) {
+					ci->flg_is_first_req = false; /* Reset first request flag if we got a response */
+				}
+				if (!rx_result.is_rx_conflict && ci->flg_rx_conflict) {
+					ci->flg_rx_conflict = false; /* Clear conflict flag if we are not on the first request */
+				}
+
 			}
 
 			/* Process response and update state */
@@ -924,6 +962,11 @@ struct ldp_master: public ldp_basic {
 					ci->flg_wait_for_tx = false;
 					reset_timeout_flag = true;
 				}
+			}
+
+			/* Handle RX conflict */
+			if (rx_result.is_rx_conflict && bc_->try_grant(ci->bc, 1)) {
+				comback_to_me = true;
 			}
 
 			if (rx_result.is_ack_rsp) {
