@@ -271,10 +271,11 @@ static bool handle_config_state(int sock)
 {
 	uint32_t flags = CIF_PORT_FLG_STRONG_ORDER | CIF_PORT_FLG_ONE_SHOT;
 
-	bool res =
-		dev_general_init(sock, ctx_.target_sid, PORT_ID_CFG,
-				 ctx_.target_opt == normal ? flags : flags | CIF_PORT_FLG_PREEMPT,
-				 ASYNC_DEFAULT_BANDWIDTH);
+	bool res = dev_general_init(sock, ctx_.target_sid, PORT_ID_CFG,
+				    ctx_.target_opt == normal
+					    ? flags
+					    : flags | CIF_PORT_FLG_PREEMPT | CIF_PORT_FLG_SW_SLAVE,
+				    ASYNC_DEFAULT_BANDWIDTH);
 
 	if (res) {
 		static const char config_data[] = "cfg:123";
@@ -289,11 +290,13 @@ static bool handle_config_state(int sock)
 	return true;
 }
 
-static bool handle_io_start_state(int sock, uint32_t *timeout)
+static bool handle_io_start_state(int sock, uint32_t *timeout, bool is_sw_slave)
 {
+	uint8_t flg_preempt = ctx_.target_opt == preempt ? CIF_PORT_FLG_PREEMPT : 0;
+	uint8_t flg_sw_slave = is_sw_slave ? CIF_PORT_FLG_SW_SLAVE : 0;
+
 	bool res = dev_general_init(sock, ctx_.target_sid, ctx_.target_port,
-				    ctx_.target_opt == preempt ? CIF_PORT_FLG_PREEMPT : 0,
-				    ctx_.target_pps);
+				    flg_preempt | flg_sw_slave, ctx_.target_pps);
 
 	*timeout = k_uptime_get_32() + ctx_.target_duration;
 	if (!res) {
@@ -642,7 +645,7 @@ static int main_master(void)
 			break;
 
 		case STATE_IO_START:
-			handle_io_start_state(sock, &timeout);
+			handle_io_start_state(sock, &timeout, false);
 			break;
 
 		case STATE_IO:

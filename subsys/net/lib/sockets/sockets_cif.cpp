@@ -593,6 +593,7 @@ static int cif_ctrl_port(struct net_context *ctx, const struct cif_raw_port_conf
 		bool is_one_shot = cfg->flags & CIF_PORT_FLG_ONE_SHOT;
 		bool is_allow_write = cfg->flags & CIF_PORT_FLG_ALLOW_WRITE;
 		bool is_strong_order = cfg->flags & CIF_PORT_FLG_STRONG_ORDER;
+		bool is_hw_slave = (cfg->flags & CIF_PORT_FLG_SW_SLAVE) == 0;
 
 		if (CIF_IS_UNKNOWN_PORT(cfg->port)) {
 			NET_DBG("Unknown port %d", cfg->port);
@@ -620,6 +621,7 @@ static int cif_ctrl_port(struct net_context *ctx, const struct cif_raw_port_conf
 			config.one_shot = is_one_shot;
 			config.strong_order = is_strong_order;
 			config.pps = cfg->async_bandwidth;
+			config.is_hw_slave = is_hw_slave;
 			conn.conn_id = (*usr_data->ldp).create(true, &config);
 		} else if (!is_master && !is_async) {
 			/* slave sync port */

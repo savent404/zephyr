@@ -44,6 +44,7 @@ struct ldp_master_async_config: ldp_config {
 	bool preempt;        /* set R flag, means want to take over the bus */
 	bool one_shot;       /* one shot mode, keep sync till receive response */
 	bool strong_order;   /* Only accept ordered response (rsp.xid == req.rxid+1) */
+	bool is_hw_slave;    /* indicate if the slave is implemented in HW */
 	unsigned pps;        /* max packets per second */
 };
 
