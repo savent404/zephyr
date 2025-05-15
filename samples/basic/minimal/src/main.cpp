@@ -123,8 +123,7 @@ int main(void)
 
 	adc.initialize();
 
-	// adc7124_8::cha_range range = adc7124_8::cha_range::CHA_RANGE_2_5V;
-	auto range = adc7124_8::cha_ctrl_param::CHA_RANGE_2_5V;
+	auto range = adc7124_8::cha_ctrl_param::CHA_RANGE_19_53125mV;
 	uint8_t fs_reject[] = { 48, 40}; // 50Hz, 60Hz
 	using namespace adc7124_8;
 
@@ -141,11 +140,11 @@ int main(void)
 	cha_ctrl_param ctrl = {
 		.range = range,
 		.ref = cha_ctrl_param::CHA_REF_INTERNAL,
-		.AIN_BUF_P = false,
-		.AIN_BUF_N = false,
+		.AIN_BUF_P = true,
+		.AIN_BUF_N = true,
 		.REF_BUF_P = false,
 		.REF_BUF_N = false,
-		.burnout = cha_ctrl_param::CHA_BURNOUT_4uA,
+		.burnout = cha_ctrl_param::CHA_BURNOUT_OFF,
 		.bipolar = true
 	};
 	cha_filter_param filter = {
@@ -156,7 +155,7 @@ int main(void)
 		.fs = fs_reject[0],
 	};
 	for (int i = 0; i < 8; i++) {
-		if (i < 1) {
+		if (i == 1) {
 			adc.cha_config(i, true ? true : false, ctrl, filter, adc_pin_mux::ADC_PIN_MUX_DIFF_AUTO);
 		}
 		else {
@@ -210,29 +209,27 @@ int main(void)
 		if (ch == 1) {
 			int32_t max = 0, min = 0;
 			record<128>(val, &max, &min, nullptr);
-			/* Print data */
-			printk("uptime: %d\n", k_uptime_get_32());
-			printk("Channel %d: %06x(%08.4fmV)\t {%06d, %06d, %08.3fuV}\tdiag: %06X\tspin: %lld us\tconvert: %lld ms\n", ch,
+			printk("Channel %d: %6x(%8.4fmV)\t {%06d, %06d, %08.3fuV}\tdiag: %06X\tspin: %03lld us\tconvert: %03lld ms\n", ch,
 				val, fn_val(val, range, true), max, min, fn_val(max-min, range, false, 1e6),
 				diag, k_ticks_to_us_near64(tick), k_ticks_to_ms_near64(convert_duration));
 		}
-		adc.cha_config(ch, false, ctrl, filter, adc_pin_mux::ADC_PIN_MUX_DIFF_AUTO);
+		// adc.cha_config(ch, false, ctrl, filter, adc_pin_mux::ADC_PIN_MUX_DIFF_AUTO);
 
-		if (wirebreak)
-		{
-			wirebreak = false;
-			ctrl.burnout = cha_ctrl_param::CHA_BURNOUT_OFF;
-			ctrl.range = range;
-			adc.cha_config(ch, true, ctrl, filter, adc_pin_mux::ADC_PIN_MUX_DIFF_AUTO);
-		}
-		else
-		{
-			wirebreak = true;
-			ctrl.burnout = cha_ctrl_param::CHA_BURNOUT_4uA;
-			ctrl.range = cha_ctrl_param::CHA_RANGE_312_5mV;
-			ch = (ch + 1) % 8;
-			adc.cha_config(ch, true, ctrl, filter, adc_pin_mux::ADC_PIN_MUX_DIFF_AUTO);
-		}
+		// if (wirebreak)
+		// {
+		// 	wirebreak = false;
+		// 	ctrl.burnout = cha_ctrl_param::CHA_BURNOUT_OFF;
+		// 	ctrl.range = range;
+		// 	adc.cha_config(ch, true, ctrl, filter, adc_pin_mux::ADC_PIN_MUX_DIFF_AUTO);
+		// }
+		// else
+		// {
+		// 	wirebreak = true;
+		// 	ctrl.burnout = cha_ctrl_param::CHA_BURNOUT_4uA;
+		// 	ctrl.range = cha_ctrl_param::CHA_RANGE_312_5mV;
+		// 	ch = (ch + 1) % 8;
+		// 	adc.cha_config(ch, true, ctrl, filter, adc_pin_mux::ADC_PIN_MUX_DIFF_AUTO);
+		// }
 	}
 
 	return 0;
