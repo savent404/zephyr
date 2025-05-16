@@ -420,19 +420,16 @@ void mcb_systech_rx_clr(const struct device *dev, uint8_t port)
 int mcb_systech_rx_is_ready(const struct device *dev, uint8_t port)
 {
 	uint32_t reg_base = DEVICE_MMIO_NAMED_GET(dev, reg);
-	uint32_t val, reg, status;
-	const uint32_t response_but_not_ready_mask = b_MCB_STATUS1_PE | b_MCB_STATUS1_TE;
+	uint32_t val, reg;
 
 	if (port >= MCB_MAX_PORT) {
 		LOG_ERR("Invalid port number");
 		return -EINVAL;
 	}
 
-	status = mcb_read(dev, reg_base + MCB_REG_STATUS1);
-	if (!(status & b_MCB_STATUS1_RDY) || (status & response_but_not_ready_mask)) {
-		return 0;
-	}
-
+	/* NOTE: For slave, check status register might miss
+	 * some packets, so check port ready mask is more reliable
+	 */
 	reg = MCB_REG_PORT_RDY_MASK0 + (port / 32) * 4;
 	val = mcb_read(dev, reg_base + reg);
 	if (val & BIT((port % 32))) {
