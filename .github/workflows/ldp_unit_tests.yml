@@ -1,0 +1,86 @@
+name: LDP Unit Tests CI
+
+on:
+  push:
+    branches:
+      - main
+      - v*-branch
+      - collab-*
+      - develop
+  pull_request:
+    branches:
+      - main
+      - v*-branch
+      - collab-*
+      - develop
+
+jobs:
+  test_ldp:
+    name: LDP Unit Tests & Coverage
+    runs-on: [self-hosted, linux]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install dependencies (if needed)
+        run: |
+          echo "-----------------------------------------------------------------------------"
+          echo "This workflow assumes clang, clang++, cmake, ninja, and llvm are installed"
+          echo "on your self-hosted runner. If not, please install them."
+          echo "For example, on an Ubuntu runner, you might use:"
+          echo "# sudo apt-get update && sudo apt-get install -y clang cmake ninja-build llvm"
+          echo "-----------------------------------------------------------------------------"
+
+      - name: Configure CMake for LDP unit tests
+        run: |
+          CXX=clang++ CC=clang cmake -Bbuild-ut -DCMAKE_BUILD_TYPE=Debug -DCODE_COVERAGE=ON -G Ninja -DCMAKE_EXPORT_COMPILE_COMMANDS=1 subsys/net/lib/sockets/ldp/ut
+        working-directory: ${{ github.workspace }}
+
+      - name: Build, Run LDP unit tests, and Generate Coverage
+        run: |
+          ninja -C build-ut LDP-ccov
+        working-directory: ${{ github.workspace }}
+
+      - name: Run LDP unit tests with Valgrind for Memory Leak Detection
+        run: |
+          echo "-----------------------------------------------------------------------------"
+          echo "Running LDP unit tests with Valgrind..."
+          echo "This step assumes Valgrind is installed on your self-hosted runner."
+          echo "For example, on an Ubuntu runner, you might use: sudo apt-get install valgrind"
+          echo "-----------------------------------------------------------------------------"
+          valgrind --leak-check=full \
+                   --show-leak-kinds=all \
+                   --track-origins=yes \
+                   --verbose \
+                   --log-file="valgrind-out.txt" \
+                   ./build-ut/LDP
+          echo "Valgrind execution finished. See valgrind-out.txt for details or console output above."
+          echo "Checking Valgrind output for errors..."
+          # Fail the step if Valgrind reports any errors (leaks)
+          # The `!` inverts the exit code of grep.
+          # grep -q "ERROR SUMMARY: 0 errors" valgrind-out.txt will exit 0 if no errors, 1 otherwise.
+          # So, ! grep -q "ERROR SUMMARY: 0 errors" valgrind-out.txt will exit 1 if no errors (undesired), and 0 if errors (desired to fail step).
+          # We need to be more specific: fail if "ERROR SUMMARY" shows more than 0 errors.
+          if grep -q "ERROR SUMMARY: [1-9]" valgrind-out.txt || grep -q " डेफिनेटली खो गया" valgrind-out.txt || grep -q "indirectly lost" valgrind-out.txt || grep -q "possibly lost" valgrind-out.txt; then
+            echo "Valgrind detected memory leaks or errors."
+            exit 1
+          else
+            echo "Valgrind found no memory leaks or errors."
+          fi
+        working-directory: ${{ github.workspace }}
+
+      - name: Upload Valgrind Log
+        uses: actions/upload-artifact@v4
+        if: always() # Always upload, even if the valgrind step fails (due to leaks)
+        with:
+          name: valgrind-log
+          path: ${{ github.workspace }}/valgrind-out.txt
+          if-no-files-found: ignore
+
+      - name: Upload LDP Coverage Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: ldp-coverage-report
+          path: ${{ github.workspace }}/build-ut/LDP-llvm-cov
+          if-no-files-found: error # Fails the workflow if the report directory isn't found
