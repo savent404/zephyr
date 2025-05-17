@@ -711,6 +711,7 @@ struct ldp_master: public ldp_basic {
 		uint32_t status;
 #if CONFIG_MCB_SYSTECH_HW_WORKAROUND
 		uint32_t timeout = LDP_POLL_TIMEOUT;
+		transfer_count++;
 #endif
 
 		do {
@@ -724,6 +725,7 @@ struct ldp_master: public ldp_basic {
 				data_ready = false;
 				data_timeout = true;
 				port_rejected = false;
+				printk("LDP_MASTER: triggered transfer count: %llu\n", transfer_count);
 				printk("LDP_MASTER: poll timeout, sid=%d, port=%d\n", sid, port);
 				k_panic();
 			}
@@ -1095,6 +1097,7 @@ struct ldp_master: public ldp_basic {
 #if CONFIG_MCB_SYSTECH_HW_WORKAROUND
 	static inline uint32_t LDP_POLL_TIMEOUT = 100;  /* 10ms */
 	static inline uint32_t LDP_POLL_INTERVAL = 100; /* 100us */
+	uint64_t transfer_count = 0;
 #endif
       public:
 #if CONFIG_LDP_MAX_HARQ
