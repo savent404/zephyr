@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 
-identifier: rbs2530_sc2
+identifier: rbs2530_sc0
 name: SC2 module for RBS2530
 type: mcu
 arch: arm

@@ -3,5 +3,5 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 
-config BOARD_RBS2530_SC2
+config BOARD_RBS2530_SC0
 	select SOC_FMSH_FMQL20

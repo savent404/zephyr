@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 
-if BOARD_RBS2530_SC2
+if BOARD_RBS2530_SC0
 
 config BUILD_OUTPUT_BIN
 	default n
@@ -53,4 +53,4 @@ config SHELL_STACK_SIZE
 config I2C_DW_POLLING
 	default y
 
-endif # BOARD_RBS2530_SC2
+endif # BOARD_RBS2530_SC0
