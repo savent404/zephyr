@@ -123,15 +123,15 @@ int main(void)
 
 	adc.initialize();
 
-	auto range = adc7124_8::cha_ctrl_param::CHA_RANGE_19_53125mV;
-	uint8_t fs_reject[] = { 48, 40}; // 50Hz, 60Hz
+	auto range = adc7124_8::cha_ctrl_param::CHA_RANGE_156_25mV;
+	uint16_t fs_reject[] = { 48, 40, 384}; // 50Hz, 60Hz, 50Hz(FullPower)
 	using namespace adc7124_8;
 
 	adc_ctrl_param adc_ctrl = {
 		.clk_ref = adc_ctrl_param::ADC_CLK_REF_INT,
-		.mode = adc_ctrl_param::ADC_MODE_CONTINUE,
+		.mode = adc_ctrl_param::ADC_MODE_ONESHOT,
 		.internal_vol_ref = true,
-		.pwr_mode = adc_ctrl_param::ADC_PWR_MODE_FULL
+		.pwr_mode = adc_ctrl_param::ADC_PWR_MODE_LOW
 	};
 
 	adc.adc_config(adc_ctrl);
@@ -140,8 +140,8 @@ int main(void)
 	cha_ctrl_param ctrl = {
 		.range = range,
 		.ref = cha_ctrl_param::CHA_REF_INTERNAL,
-		.AIN_BUF_P = true,
-		.AIN_BUF_N = true,
+		.AIN_BUF_P = false,
+		.AIN_BUF_N = false,
 		.REF_BUF_P = false,
 		.REF_BUF_N = false,
 		.burnout = cha_ctrl_param::CHA_BURNOUT_OFF,
@@ -155,7 +155,7 @@ int main(void)
 		.fs = fs_reject[0],
 	};
 	for (int i = 0; i < 8; i++) {
-		if (i == 1) {
+		if (i <= 1) {
 			adc.cha_config(i, true ? true : false, ctrl, filter, adc_pin_mux::ADC_PIN_MUX_DIFF_AUTO);
 		}
 		else {
@@ -209,8 +209,9 @@ int main(void)
 		if (ch == 1) {
 			int32_t max = 0, min = 0;
 			record<128>(val, &max, &min, nullptr);
-			printk("Channel %d: %6x(%8.4fmV)\t {%06d, %06d, %08.3fuV}\tdiag: %06X\tspin: %03lld us\tconvert: %03lld ms\n", ch,
-				val, fn_val(val, range, true), max, min, fn_val(max-min, range, false, 1e6),
+			printk("Channel %d: %6x(%8.4fmV)\t {%08.3fuV, %08.3fuV, %08.3fuV}\tdiag: %06X\tspin: %03lld us\tconvert: %03lld ms\n",
+				ch, val, fn_val(val, range, true),
+				fn_val(max, range, false, 1e6), fn_val(min, range, false, 1e6), fn_val(max-min, range, false, 1e6),
 				diag, k_ticks_to_us_near64(tick), k_ticks_to_ms_near64(convert_duration));
 		}
 		// adc.cha_config(ch, false, ctrl, filter, adc_pin_mux::ADC_PIN_MUX_DIFF_AUTO);
