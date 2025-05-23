@@ -60,12 +60,12 @@ bool adc::get_diag(uint32_t *diag)
 
 void adc::adc_config(adc_ctrl_param param)
 {
-    uint8_t p = 0;
+    uint16_t p = 0;
     p |= (static_cast<uint8_t>(param.clk_ref) << 0);
     p |= ((static_cast<uint8_t>(param.mode) & 0x7) << 2);
     p |= ((static_cast<uint8_t>(param.pwr_mode) & 0x3) << 6);
     p |= (param.internal_vol_ref ? 0 : BIT(8));
-    w_<1>(cmd{true, false, REG_ADC_CTRL}, p, crc_check_);
+    w_<2>(cmd{true, false, REG_ADC_CTRL}, p, crc_check_);
 }
 
 void adc::cha_config(uint8_t ch, bool enable, const cha_ctrl_param ctrl, const cha_filter_param filter, adc_pin_mux mux)
