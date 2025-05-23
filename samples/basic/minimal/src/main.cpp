@@ -84,12 +84,22 @@ float fn_val(uint32_t val, uint8_t r, bool bipolar, double gain=1e3)
 		0.0390625 / (0x800000 - 1),
 		0.01953125 / (0x800000 - 1),
 	};
+	double val_to_vol_unipolar[] = {
+		2.5 / (0x1000000 - 1),
+		1.25 / (0x1000000 - 1),
+		0.625 / (0x1000000 - 1),
+		0.3125 / (0x1000000 - 1),
+		0.15625 / (0x1000000 - 1),
+		0.078125 / (0x1000000 - 1),
+		0.0390625 / (0x1000000 - 1),
+		0.01953125 / (0x1000000 - 1),
+	};
 	double v;
 	
 	if (bipolar) {
 		v = ((int64_t)val - 0x800000) * val_to_vol[r];
 	} else {
-		v = val * val_to_vol[r];
+		v = val * val_to_vol_unipolar[r];
 	}
 	v *= gain;
 	return (float)v;
@@ -123,15 +133,15 @@ int main(void)
 
 	adc.initialize();
 
-	auto range = adc7124_8::cha_ctrl_param::CHA_RANGE_156_25mV;
+	auto range = adc7124_8::cha_ctrl_param::CHA_RANGE_2_5V;
 	uint16_t fs_reject[] = { 48, 40, 384}; // 50Hz, 60Hz, 50Hz(FullPower)
 	using namespace adc7124_8;
 
 	adc_ctrl_param adc_ctrl = {
 		.clk_ref = adc_ctrl_param::ADC_CLK_REF_INT,
-		.mode = adc_ctrl_param::ADC_MODE_ONESHOT,
+		.mode = adc_ctrl_param::ADC_MODE_CONTINUE,
 		.internal_vol_ref = true,
-		.pwr_mode = adc_ctrl_param::ADC_PWR_MODE_LOW
+		.pwr_mode = adc_ctrl_param::ADC_PWR_MODE_FULL
 	};
 
 	adc.adc_config(adc_ctrl);
@@ -145,14 +155,14 @@ int main(void)
 		.REF_BUF_P = false,
 		.REF_BUF_N = false,
 		.burnout = cha_ctrl_param::CHA_BURNOUT_OFF,
-		.bipolar = true
+		.bipolar = true,
 	};
 	cha_filter_param filter = {
 		.type = cha_filter_param::FILTER_TYPE_SINC3,
 		.reject_50_60Hz = true,
 		.post = cha_filter_param::post_filter_reserved,
 		.single_cycle = false,
-		.fs = fs_reject[0],
+		.fs = fs_reject[2],
 	};
 	for (int i = 0; i < 8; i++) {
 		if (i <= 1) {
@@ -210,8 +220,8 @@ int main(void)
 			int32_t max = 0, min = 0;
 			record<128>(val, &max, &min, nullptr);
 			printk("Channel %d: %6x(%8.4fmV)\t {%08.3fuV, %08.3fuV, %08.3fuV}\tdiag: %06X\tspin: %03lld us\tconvert: %03lld ms\n",
-				ch, val, fn_val(val, range, true),
-				fn_val(max, range, false, 1e6), fn_val(min, range, false, 1e6), fn_val(max-min, range, false, 1e6),
+				ch, val, fn_val(val, range, ctrl.bipolar),
+				fn_val(max, range, ctrl.bipolar, 1e6), fn_val(min, range, ctrl.bipolar, 1e6), fn_val(max-min, range, ctrl.bipolar, 1e6),
 				diag, k_ticks_to_us_near64(tick), k_ticks_to_ms_near64(convert_duration));
 		}
 		// adc.cha_config(ch, false, ctrl, filter, adc_pin_mux::ADC_PIN_MUX_DIFF_AUTO);
