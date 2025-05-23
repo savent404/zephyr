@@ -22,7 +22,7 @@
 LOG_MODULE_REGISTER(eth_fmsh);
 
 /* DMA缓冲区池 */
-NET_BUF_POOL_DEFINE(rx_dma_pool, 128, GMAC_RBUFFER_UNIT_SIZE, sizeof(uint32_t), NULL);
+NET_BUF_POOL_DEFINE(rx_dma_pool, 512, GMAC_RBUFFER_UNIT_SIZE, sizeof(uint32_t), NULL);
 
 /* 数据发送接口 */
 static int eth_fmsh_send(const struct device *dev, struct net_pkt *pkt)
