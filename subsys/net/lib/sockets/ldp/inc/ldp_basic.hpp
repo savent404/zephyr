@@ -57,6 +57,47 @@ struct ldp_slave_async_config: ldp_config {
 	unsigned max_recv_len; /* max receive length */
 };
 
+struct port_stat {
+	enum stat_id {
+		STAT_ID_BLOCKING_TX_BYTES, /* Indicate the bytes from master waiting for send */
+		STAT_ID_BLOCKING_RX_BYTES, /* Indicate the bytes from slave wait for master */
+		STAT_ID_BLOCKING_TX_COUNT, /* Indicate the msg packs from master waiting for send */
+		STAT_ID_BLOCKING_RX_COUNT, /* Indicate the msg packs from slave wait for master */
+		STAT_ID_HIST_XFER_COUNT,   /* Indicate the packs tx count */
+		STAT_ID_HIST_RX_COUNT,     /* Indicate the packs rx count */
+		STAT_ID_HIST_RX_COUNT_WITH_DATA, /* Indicate the packs rx count with valid data */
+		STAT_ID_HIST_RX_COUNT_WITH_ACK, /* Indicate the packs rx count with ack */
+		STAT_ID_MAX,
+	};
+	uint32_t valid_mask;
+	uint32_t raw[STAT_ID_MAX]; /* statistic information */
+
+	uint32_t &val(stat_id id)
+	{
+		static uint32_t dummy = 0;
+		if (!is_valid(id)) {
+			return dummy;
+		}
+		return raw[id];
+	}
+
+	bool is_valid(stat_id id) const
+	{
+		if (id >= STAT_ID_MAX) {
+			return false;
+		}
+		return (valid_mask & (1 << id)) != 0;
+	}
+
+	void reset(uint32_t mask = 0xFFFF'FFFF)
+	{
+		valid_mask = mask;
+		for (unsigned i = 0; i < STAT_ID_MAX; i++) {
+			raw[i] = 0;
+		}
+	}
+};
+
 struct ldp_basic {
 	using conn = int32_t;
 	virtual ~ldp_basic()
@@ -137,6 +178,16 @@ struct ldp_basic {
 	 * @param cycle cycle time in microseconds
 	 */
 	virtual void set_sync_cycle(uint32_t cycle) = 0;
+
+	/**
+	 * @brief Gather statistic information
+	 *
+	 * @note only works for master side.
+	 * @param c connection id
+	 * @param stat pointer to a structure to store statistic information
+	 * @return bool true if successful, false otherwise
+	 */
+	virtual bool get_statistic(conn c, port_stat* stat) = 0;
 
 	/**
 	 * @brief get error string

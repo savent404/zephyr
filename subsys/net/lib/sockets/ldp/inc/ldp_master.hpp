@@ -42,7 +42,8 @@ struct ldp_master: public ldp_basic {
 	{
 		mcb->reset(mcb_if::MCB_ROLE_MASTER);
 
-		bc_ = std::make_unique<bc::bc_std>(mcb_->get_bus_pps(), bc_ratio_sync, bc_ratio_async);
+		bc_ = std::make_unique<bc::bc_std>(mcb_->get_bus_pps(), bc_ratio_sync,
+						   bc_ratio_async);
 		/* Create a work queue for BS schedule */
 		bc_wq_id_ = work_queue_->enqueue(
 			[](void *arg, void *) {
@@ -271,6 +272,27 @@ struct ldp_master: public ldp_basic {
 			work_queue_->reset(bc_wq_id_, bc_interval_);
 		}
 	}
+
+	virtual bool get_statistic(conn c, port_stat *stat)
+	{
+		std::shared_lock lock(conns_lock);
+		auto async_it = std::find_if(async_conns_.begin(), async_conns_.end(),
+					     [c](const async_conn_ptr &ci) { return ci->id == c; });
+		auto sync_it = std::find_if(sync_conns_.begin(), sync_conns_.end(),
+					    [c](const sync_conn_ptr &ci) { return ci->id == c; });
+
+		if (async_it == async_conns_.end() && sync_it == sync_conns_.end()) {
+			return false;
+		}
+
+		if (async_it != async_conns_.end()) {
+			*stat = (*async_it)->stat;
+		} else {
+			*stat = (*sync_it)->stat;
+		}
+		return true;
+	}
+
       protected:
 	struct async_buf {
 		uint8_t *buf;
@@ -290,7 +312,7 @@ struct ldp_master: public ldp_basic {
 		uint32_t timeout_cnt; /* timeout counter */
 		uint32_t timeout_allowed; /* timeout allowed in cycle count */
 
-		uint32_t stat_rx_packet; /* run loop counter */
+		port_stat stat; /* port statistic info */
 		T_mutex lock;
 		virtual ~conn_info_base() = default;
 	};
@@ -300,15 +322,18 @@ struct ldp_master: public ldp_basic {
 		bool flg_wait_for_rx;    /* flag to activate timeout mechanism */
 		bool flg_strong_order;   /* only accept response if rsp.xid == req.rxid+1 */
 		bool flg_tx_acked;       /* flag to indicate if tx is acked, for the first request,
-		                          * it is not acked yet, but for the service assume it is acked */
+					  * it is not acked yet, but for the service assume it is acked */
 		bool flg_rx_conflict;    /* flag to indicate if rx conflict, for the first request,
-		                          * it is not acked yet, but for the service assume it is acked */
+					  * it is not acked yet, but for the service assume it is acked
+					  */
 		bool flg_is_first_req;   /* flag to indicate if this is the first request */
-		bool flg_is_hw_slave;    /* flag to indicate the shave's MCB is implemented in HW, which means
-				          * it can update its rxid & xid in rsp packet without cache(delay) */
+		bool flg_is_hw_slave;    /* flag to indicate the shave's MCB is implemented in HW,
+					  * which means    it can update its rxid & xid in rsp packet
+					  * without cache(delay) */
 		uint8_t xid;             /* transaction id */
-		int rxid; /* last received transaction id, -1 means no response received */
-		uint8_t acked_xid; /* last received transaction id from slave, -1 means no response received yet */
+		int rxid;          /* last received transaction id, -1 means no response received */
+		uint8_t acked_xid; /* last received transaction id from slave, -1 means no response
+				      received yet */
 
 		std::list<async_buf> rx_bufs; /* received buffers */
 		std::list<async_buf> tx_bufs; /* transmit buffers */
@@ -398,7 +423,8 @@ struct ldp_master: public ldp_basic {
 		ci->port = cfg->port;
 		ci->cycle = cfg->cycle_time;
 		ci->preempt = cfg->preempt;
-		ci->timeout_allowed = cfg->timeout ? (cfg->timeout / cfg->cycle_time) + 1 : 0xFFFF'FFFF;
+		ci->timeout_allowed =
+			cfg->timeout ? (cfg->timeout / cfg->cycle_time) + 1 : 0xFFFF'FFFF;
 		ci->timeout_cnt = ci->timeout_allowed;
 		ci->flg_wait_for_rx = false;
 		ci->flg_strong_order = cfg->strong_order;
@@ -407,7 +433,7 @@ struct ldp_master: public ldp_basic {
 		ci->flg_hold_on = cfg->one_shot ? true : false;
 		ci->flg_is_first_req = true;
 		ci->flg_is_hw_slave = cfg->is_hw_slave;
-		ci->stat_rx_packet = 0;
+		ci->stat.reset(LDP_ASYNC_STATS_MASK);
 		ci->last_err = 0;
 		ci->xid = LDP_INITIAL_XID;
 		ci->rxid = -1;
@@ -463,7 +489,7 @@ struct ldp_master: public ldp_basic {
 		ci->preempt = cfg->preempt;
 		ci->flg_one_shot = cfg->one_shot;
 		ci->flg_hold_on = cfg->one_shot ? true : false;
-		ci->stat_rx_packet = 0;
+		ci->stat.reset(LDP_SYNC_STATS_MASK);
 		ci->bc = bc;
 		ci->flg_new_data = false;
 		ci->timeout_allowed = cfg->timeout / cfg->cycle_time;
@@ -498,6 +524,8 @@ struct ldp_master: public ldp_basic {
 		ci->tx_bufs.push_back(std::move(abuf));
 		ci->timeout_cnt = ci->timeout_allowed;
 		ci->flg_hold_on = false;
+		ci->stat.val(port_stat::STAT_ID_BLOCKING_TX_COUNT)++;
+		ci->stat.val(port_stat::STAT_ID_BLOCKING_TX_BYTES) += len;
 		return len;
 	}
 
@@ -521,6 +549,8 @@ struct ldp_master: public ldp_basic {
 		if (tx_buf_prev) {
 			mempool_if::free(tx_buf_prev);
 		}
+		ci->stat.val(port_stat::STAT_ID_BLOCKING_TX_COUNT) = 1;
+		ci->stat.val(port_stat::STAT_ID_BLOCKING_TX_BYTES) = len;
 		return len;
 	}
 
@@ -547,6 +577,8 @@ struct ldp_master: public ldp_basic {
 			ldp_memcpy::memcpy(buf, abuf.buf, abuf.len);
 			ci->rx_bufs.pop_front();
 			mempool_if::free(abuf.buf);
+			ci->stat.val(port_stat::STAT_ID_BLOCKING_RX_COUNT)--;
+			ci->stat.val(port_stat::STAT_ID_BLOCKING_RX_BYTES) -= abuf.len;
 			return abuf.len;
 		} else {
 			return -LDP_ERR_RX_BUF_TOO_SMALL;
@@ -574,6 +606,8 @@ struct ldp_master: public ldp_basic {
 		ci->flg_new_data = false;
 
 		ldp_memcpy::memcpy(buf, ci->rx_buf, ci->rx_len);
+		ci->stat.val(port_stat::STAT_ID_BLOCKING_RX_COUNT) = 0;
+		ci->stat.val(port_stat::STAT_ID_BLOCKING_RX_BYTES) = 0;
 		return ci->rx_len;
 	}
 
@@ -655,8 +689,10 @@ struct ldp_master: public ldp_basic {
 	 */
 	bool should_process_connection(conn_info_base *ci)
 	{
+		bool had_response = ci->stat.val(port_stat::STAT_ID_HIST_RX_COUNT_WITH_ACK) ||
+				    ci->stat.val(port_stat::STAT_ID_HIST_RX_COUNT_WITH_DATA);
 		// Skip if one shot mode and already received or holding on
-		return !(ci->flg_one_shot && (ci->stat_rx_packet || ci->flg_hold_on));
+		return !(ci->flg_one_shot && (had_response || ci->flg_hold_on));
 	}
 
 	/**
@@ -691,7 +727,11 @@ struct ldp_master: public ldp_basic {
 		cache_if::rmb(); // Make sure buffer is updated
 		ldp_memcpy::memcpy(ci->rx_buf, rx_buf, rx_len);
 		ci->rx_len = rx_len;
-		ci->stat_rx_packet++;
+		ci->stat.val(port_stat::STAT_ID_HIST_RX_COUNT)++;
+		ci->stat.val(port_stat::STAT_ID_BLOCKING_RX_COUNT) = 1;
+		ci->stat.val(port_stat::STAT_ID_BLOCKING_RX_BYTES) = rx_len;
+		ci->stat.val(port_stat::STAT_ID_BLOCKING_TX_COUNT) = 0;
+		ci->stat.val(port_stat::STAT_ID_BLOCKING_TX_BYTES) = 0;
 		ci->flg_new_data = true;
 		return true;
 	}
@@ -725,7 +765,8 @@ struct ldp_master: public ldp_basic {
 				data_ready = false;
 				data_timeout = true;
 				port_rejected = false;
-				printk("LDP_MASTER: triggered transfer count: %llu\n", transfer_count);
+				printk("LDP_MASTER: triggered transfer count: %llu\n",
+				       transfer_count);
 				printk("LDP_MASTER: poll timeout, sid=%d, port=%d\n", sid, port);
 				k_panic();
 			}
@@ -776,6 +817,7 @@ struct ldp_master: public ldp_basic {
 
 			cache_if::wmb(); /* Make sure buffer is updated */
 			mcb_->tx(ci->port, ci->sid, ci->preempt);
+			ci->stat.val(port_stat::STAT_ID_HIST_XFER_COUNT)++;
 
 			/* Wait for response */
 			bool data_ready, data_timeout, port_rejected;
@@ -828,10 +870,10 @@ struct ldp_master: public ldp_basic {
 		bool is_rx_full;
 		bool is_memalloc_fail;
 		bool is_rx_duplicate;
-		bool is_rx_conflict;	/* similar with is_rx_duplicated, but this flg is set when we
-		                         * are on the first request, and the response is acked by a
-					 * software implemented LDP slave, which means the response
-					 * should be fake acked due to master reset or other reasons */
+		bool is_rx_conflict; /* similar with is_rx_duplicated, but this flg is set when we
+				      * are on the first request, and the response is acked by a
+				      * software implemented LDP slave, which means the response
+				      * should be fake acked due to master reset or other reasons */
 		bool data_processed;
 	};
 
@@ -856,12 +898,12 @@ struct ldp_master: public ldp_basic {
 			result.is_new_rsp && (ci->flg_strong_order ? result.is_ordered_rsp : true);
 		result.is_rx_full = ci->rx_bufs.size() >= LDP_MAX_RX_BUF;
 		result.is_rx_duplicate = !result.is_invalid_hdr && (rx_hdr->xid == ci->rxid);
-		result.is_rx_conflict = result.is_ack_rsp && ci->flg_is_first_req &&
-				 !ci->flg_is_hw_slave;
+		result.is_rx_conflict =
+			result.is_ack_rsp && ci->flg_is_first_req && !ci->flg_is_hw_slave;
 
 		if (result.is_rx_conflict) {
-			/* Slave doesn't response to the first request actually, we need to reset the related
-			 * and increase the xid to avoid duplicate response */
+			/* Slave doesn't response to the first request actually, we need to reset
+			 * the related and increase the xid to avoid duplicate response */
 			result.is_first_rsp = false;
 			result.is_ordered_rsp = false;
 			result.is_new_rsp = false;
@@ -879,7 +921,6 @@ struct ldp_master: public ldp_basic {
 			async_buf rx_abuf;
 			rx_abuf.len = rx_len - hdr_size;
 
-
 			if (rx_abuf.len) {
 				rx_abuf.buf =
 					reinterpret_cast<uint8_t *>(mempool_if::alloc(rx_abuf.len));
@@ -888,7 +929,10 @@ struct ldp_master: public ldp_basic {
 				} else {
 					ldp_memcpy::memcpy(rx_abuf.buf, rx_data, rx_abuf.len);
 					ci->rx_bufs.push_back(std::move(rx_abuf));
-					ci->stat_rx_packet++;
+					ci->stat.val(port_stat::STAT_ID_HIST_RX_COUNT_WITH_DATA)++;
+					ci->stat.val(port_stat::STAT_ID_BLOCKING_RX_COUNT)++;
+					ci->stat.val(port_stat::STAT_ID_BLOCKING_RX_BYTES) +=
+						rx_abuf.len;
 					result.data_processed = true;
 				}
 			} else {
@@ -901,6 +945,7 @@ struct ldp_master: public ldp_basic {
 			ci->rxid = rx_hdr->xid;
 		}
 
+		ci->stat.val(port_stat::STAT_ID_HIST_RX_COUNT)++;
 		return result;
 	}
 
@@ -954,6 +999,7 @@ struct ldp_master: public ldp_basic {
 
 			cache_if::wmb(); /* Make sure buffer is updated */
 			mcb_->tx(ci->port, ci->sid, ci->preempt);
+			ci->stat.val(port_stat::STAT_ID_HIST_XFER_COUNT)++;
 
 			/* Wait for response */
 			bool data_ready, data_timeout, p_error;
@@ -973,16 +1019,19 @@ struct ldp_master: public ldp_basic {
 				mcb_->clr_rx(ci->port);
 
 				if (ci->flg_is_first_req) {
-					ci->flg_is_first_req = false; /* Reset first request flag if we got a response */
+					ci->flg_is_first_req = false; /* Reset first request flag if
+									 we got a response */
 				}
 				if (!rx_result.is_rx_conflict && ci->flg_rx_conflict) {
-					ci->flg_rx_conflict = false; /* Clear conflict flag if we are not on the first request */
+					ci->flg_rx_conflict =
+						false; /* Clear conflict flag if we are not on the
+							  first request */
 				}
-
 			}
 
 			/* Process response and update state */
-			if (rx_result.is_new_rsp || (rx_result.is_ack_rsp && !rx_result.is_ack_boring)) {
+			if (rx_result.is_new_rsp ||
+			    (rx_result.is_ack_rsp && !rx_result.is_ack_boring)) {
 
 				/* Grant more resource if progress made */
 				if (bc_->try_grant(ci->bc, 1)) {
@@ -1008,6 +1057,10 @@ struct ldp_master: public ldp_basic {
 				/* Slave accepted the previous transmit data */
 				if (ci->tx_bufs.size()) {
 					ci->tx_bufs.pop_front();
+					ci->stat.val(port_stat::STAT_ID_HIST_RX_COUNT_WITH_ACK)++;
+					ci->stat.val(port_stat::STAT_ID_BLOCKING_TX_COUNT)--;
+					ci->stat.val(port_stat::STAT_ID_BLOCKING_TX_BYTES) -=
+						abuf.len;
 				}
 				if (abuf.buf) {
 					mempool_if::free(abuf.buf);
@@ -1107,6 +1160,22 @@ struct ldp_master: public ldp_basic {
 #endif
 	static inline constexpr unsigned LDP_MAX_TX_BUF = LDP_MAX_HARQ;
 	static inline constexpr unsigned LDP_MAX_RX_BUF = LDP_MAX_HARQ;
+
+	static inline constexpr unsigned LDP_SYNC_STATS_MASK =
+		(1 << port_stat::STAT_ID_BLOCKING_TX_BYTES) |
+		(1 << port_stat::STAT_ID_BLOCKING_TX_COUNT) |
+		(1 << port_stat::STAT_ID_BLOCKING_RX_BYTES) |
+		(1 << port_stat::STAT_ID_BLOCKING_RX_COUNT) |
+		(1 << port_stat::STAT_ID_HIST_XFER_COUNT) | (1 << port_stat::STAT_ID_HIST_RX_COUNT);
+	static inline constexpr unsigned LDP_ASYNC_STATS_MASK =
+		(1 << port_stat::STAT_ID_BLOCKING_TX_BYTES) |
+		(1 << port_stat::STAT_ID_BLOCKING_TX_COUNT) |
+		(1 << port_stat::STAT_ID_BLOCKING_RX_BYTES) |
+		(1 << port_stat::STAT_ID_BLOCKING_RX_COUNT) |
+		(1 << port_stat::STAT_ID_HIST_XFER_COUNT) |
+		(1 << port_stat::STAT_ID_HIST_RX_COUNT) |
+		(1 << port_stat::STAT_ID_HIST_RX_COUNT_WITH_ACK) |
+		(1 << port_stat::STAT_ID_HIST_RX_COUNT_WITH_DATA);
 
 	using cache_if = ldp_cache<T_cache>;
 	using mempool_if = ldp_mempool<T_mempool>;

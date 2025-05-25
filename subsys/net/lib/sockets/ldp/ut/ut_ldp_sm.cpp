@@ -949,3 +949,123 @@ TEST_F(test_ldp_sm, async_reset_master_sw_failed)
 	ASSERT_EQ(m->recv(conn_m, rx_buf, 32), -err::LDP_ERR_AGAIN);
 	ASSERT_EQ(s.recv(conn_s, rx_buf, 32), -err::LDP_ERR_AGAIN);
 }
+
+TEST_F(test_ldp_sm, statistics_sync)
+{
+	simu_work_queue wq;
+	simu_mcb bus_m(0), bus_s(1);
+	ldp_master_impl m(&bus_m, &wq);
+	ldp_slave_impl s(&bus_s);
+	port_stat m_stat;
+
+	int conn_m, conn_s;
+
+	/* Create a sync port for master and slave, check status before/after transmit */
+	ldp_master_sync_config m_cfg_io[] = {
+		{SYNC_PORT(0), 1, 1'000'000, 1'000'000, false, false},
+	};
+	ldp_slave_sync_config s_cfg_io[] = {
+		{SYNC_PORT(0), 32, true},
+	};
+
+	conn_m = m.create(false, &m_cfg_io[0]);
+	conn_s = s.create(false, &s_cfg_io[0]);
+	ASSERT_EQ(conn_m, 0);
+	ASSERT_EQ(conn_s, 0);
+
+	ASSERT_TRUE(m.get_statistic(conn_m, &m_stat));
+	ASSERT_EQ(m_stat.val(port_stat::STAT_ID_BLOCKING_TX_COUNT), 0);
+	ASSERT_EQ(m_stat.val(port_stat::STAT_ID_BLOCKING_RX_COUNT), 0);
+
+	m.send(conn_m, (const uint8_t *)"io:000", 8);
+	s.send(conn_s, (const uint8_t *)"io>000\0", 8);
+
+	m.get_statistic(conn_m, &m_stat);
+	ASSERT_EQ(m_stat.val(port_stat::STAT_ID_BLOCKING_TX_COUNT), 1);
+	ASSERT_EQ(m_stat.val(port_stat::STAT_ID_BLOCKING_TX_BYTES), 8);
+	ASSERT_EQ(m_stat.val(port_stat::STAT_ID_HIST_XFER_COUNT), 0);
+	ASSERT_EQ(m_stat.val(port_stat::STAT_ID_BLOCKING_RX_COUNT), 0);
+
+	wq.sync();
+	m.get_statistic(conn_m, &m_stat);
+	ASSERT_EQ(m_stat.val(port_stat::STAT_ID_BLOCKING_TX_COUNT), 0);
+	ASSERT_EQ(m_stat.val(port_stat::STAT_ID_BLOCKING_TX_BYTES), 0);
+	ASSERT_EQ(m_stat.val(port_stat::STAT_ID_BLOCKING_RX_COUNT), 1);
+	ASSERT_EQ(m_stat.val(port_stat::STAT_ID_BLOCKING_RX_BYTES), 8);
+	ASSERT_EQ(m_stat.val(port_stat::STAT_ID_HIST_XFER_COUNT), 1);
+	ASSERT_EQ(m_stat.val(port_stat::STAT_ID_BLOCKING_RX_COUNT), 1);
+}
+
+TEST_F(test_ldp_sm, statistics_async)
+{
+	simu_work_queue wq;
+	simu_mcb bus_m(0), bus_s(1);
+	ldp_master_impl m(&bus_m, &wq);
+	ldp_slave_impl s(&bus_s);
+	port_stat m_stat;
+
+	int conn_m, conn_s;
+
+	/* Create a async port for master and slave, check status before/after transmit */
+	ldp_master_async_config m_cfg_cfg[] = {
+		{ASYNC_PORT(0), 1, 1'000'000, 1'000'000, false, false, false},
+	};
+	ldp_slave_async_config s_cfg_cfg[] = {
+		{ASYNC_PORT(0), 32},
+	};
+
+	conn_m = m.create(true, &m_cfg_cfg[0]);
+	conn_s = s.create(true, &s_cfg_cfg[0]);
+	ASSERT_EQ(conn_m, 0);
+	ASSERT_EQ(conn_s, 0);
+
+	ASSERT_TRUE(m.get_statistic(conn_m, &m_stat));
+	ASSERT_EQ(m_stat.val(port_stat::STAT_ID_BLOCKING_TX_COUNT), 0);
+	ASSERT_EQ(m_stat.val(port_stat::STAT_ID_BLOCKING_RX_COUNT), 0);
+
+	m.send(conn_m, (const uint8_t *)"aio:000", 8);
+	s.send(conn_s, (const uint8_t *)"aio>000\0", 8);
+
+	m.get_statistic(conn_m, &m_stat);
+	ASSERT_EQ(m_stat.val(port_stat::STAT_ID_BLOCKING_TX_COUNT), 1);
+	ASSERT_EQ(m_stat.val(port_stat::STAT_ID_BLOCKING_TX_BYTES), 8);
+	ASSERT_EQ(m_stat.val(port_stat::STAT_ID_HIST_XFER_COUNT), 0);
+	ASSERT_EQ(m_stat.val(port_stat::STAT_ID_BLOCKING_RX_COUNT), 0);
+
+	/* For the first round, the master will recv the data from slave, rx complete */
+	wq.sync();
+	m.get_statistic(conn_m, &m_stat);
+	ASSERT_EQ(m_stat.val(port_stat::STAT_ID_BLOCKING_TX_COUNT), 1);
+	ASSERT_EQ(m_stat.val(port_stat::STAT_ID_BLOCKING_TX_BYTES), 8);
+	ASSERT_EQ(m_stat.val(port_stat::STAT_ID_BLOCKING_RX_COUNT), 1);
+	ASSERT_EQ(m_stat.val(port_stat::STAT_ID_BLOCKING_RX_BYTES), 8);
+	/* wq will schedule another xfer directly to see if new data is updated */
+	ASSERT_EQ(m_stat.val(port_stat::STAT_ID_HIST_XFER_COUNT), 2);
+	ASSERT_EQ(m_stat.val(port_stat::STAT_ID_HIST_RX_COUNT), 2);
+	ASSERT_EQ(m_stat.val(port_stat::STAT_ID_HIST_RX_COUNT_WITH_ACK), 0);
+	ASSERT_EQ(m_stat.val(port_stat::STAT_ID_HIST_RX_COUNT_WITH_DATA), 1);
+	ASSERT_EQ(m_stat.val(port_stat::STAT_ID_BLOCKING_RX_COUNT), 1);
+
+	uint8_t buf[32];
+	ASSERT_EQ(m.recv(conn_m, buf, 32), 8);
+	ASSERT_STREQ((const char *)buf, "aio>000");
+	ASSERT_EQ(m.recv(conn_s, buf, 32), -err::LDP_ERR_AGAIN);
+	ASSERT_EQ(s.recv(conn_s, buf, 32), 8);
+	ASSERT_STREQ((const char *)buf, "aio:000");
+	/* Sync stat again, the blocking recv shall be cleared */
+	m.get_statistic(conn_m, &m_stat);
+	ASSERT_EQ(m_stat.val(port_stat::STAT_ID_BLOCKING_RX_COUNT), 0);
+	ASSERT_EQ(m_stat.val(port_stat::STAT_ID_BLOCKING_RX_BYTES), 0);
+
+	/* For the second round, the master will recv the ack pack, tx complete */
+	wq.sync();
+	m.get_statistic(conn_m, &m_stat);
+	EXPECT_EQ(m_stat.val(port_stat::STAT_ID_BLOCKING_TX_COUNT), 0);
+	ASSERT_EQ(m_stat.val(port_stat::STAT_ID_BLOCKING_TX_BYTES), 0);
+	ASSERT_EQ(m_stat.val(port_stat::STAT_ID_HIST_XFER_COUNT), 4);
+	ASSERT_EQ(m_stat.val(port_stat::STAT_ID_BLOCKING_RX_COUNT), 0);
+	ASSERT_EQ(m_stat.val(port_stat::STAT_ID_BLOCKING_RX_BYTES), 0);
+	ASSERT_EQ(m_stat.val(port_stat::STAT_ID_HIST_RX_COUNT), 4);
+	ASSERT_EQ(m_stat.val(port_stat::STAT_ID_HIST_RX_COUNT_WITH_ACK), 1);
+	ASSERT_EQ(m_stat.val(port_stat::STAT_ID_HIST_RX_COUNT_WITH_DATA), 1);
+}

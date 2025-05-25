@@ -269,6 +269,11 @@ template <typename T_cache> struct ldp_slave: public ldp_basic {
 	{
 	}
 
+	virtual bool get_statistic(conn c, port_stat *stat)
+	{
+		return false;
+	}
+
       protected:
 	struct conn_info {
 		conn id;
