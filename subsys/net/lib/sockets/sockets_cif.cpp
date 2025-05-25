@@ -41,7 +41,8 @@ struct cif_master_data {
 	k_tid_t wq_tid;
 	k_thread wq_thread;
 	k_thread_stack_t wq_stack[2048];
-	k_mutex x_lock_;
+	k_mutex x_lock_; /* This lock is for preventing multiple threads from accessing the same bus */
+	k_mutex x_lock_wq_; /* This lock is for preventing multiple threads from accessing the same wq */
 };
 
 struct cif_sock_data {
@@ -257,23 +258,29 @@ static int cif_sock_close(struct net_context *ctx)
 {
 	auto usr_data = reinterpret_cast<cif_sock_data *>(ctx->user_data);
 
-	/* Try to destroy the connection if it exists */
-	if (usr_data->ldp) {
-		/* destroy all connections by destructing the ldp instance */
-		delete usr_data->ldp;
-		usr_data->ldp = nullptr;
-		usr_data->conns.clear();
+	/* Block until the LDP is destroyed */
+	k_mutex_lock(&cif_data.x_lock_wq_, K_FOREVER);
+	{
+		/* Try to destroy the connection if it exists */
+		if (usr_data->ldp) {
+			/* destroy all connections by destructing the ldp instance */
+			delete usr_data->ldp;
+			usr_data->ldp = nullptr;
+			usr_data->conns.clear();
 
-		/* release the bus */
-		for (int idx = 0; idx < CIF_BUS_MAX; idx++) {
-			if (usr_data->mcb == &cif_data.mcb[idx]) {
-				cif_data.occupied[idx] = false;
-				break;
+			/* release the bus */
+			for (int idx = 0; idx < CIF_BUS_MAX; idx++) {
+				if (usr_data->mcb == &cif_data.mcb[idx]) {
+					cif_data.occupied[idx] = false;
+					break;
+				}
 			}
 		}
+		delete usr_data;
+		net_context_unref(ctx);
 	}
-	delete usr_data;
-	net_context_unref(ctx);
+	k_mutex_unlock(&cif_data.x_lock_wq_);
+
 	return 0;
 }
 
@@ -303,7 +310,9 @@ static int cif_sock_bind(struct net_context *ctx, const struct sockaddr_cif *add
 
 	switch (net_context_get_proto(ctx)) {
 	case CIF_RAW_MASTER:
+		k_mutex_lock(&cif_data.x_lock_wq_, K_FOREVER);
 		usr_data->ldp = new zephyr::ldp_master_impl(mcb, wq);
+		k_mutex_unlock(&cif_data.x_lock_wq_);
 		break;
 	case CIF_RAW_SLAVE:
 		usr_data->ldp = new zephyr::ldp_slave_impl(mcb);
@@ -769,17 +778,26 @@ NET_SOCKET_REGISTER(af_cif, NET_SOCKET_DEFAULT_PRIO, PF_CIF, cif_is_supported,
 static void wq_background_entry(void *arg1, void *arg2, void *arg3)
 {
 	auto wq = reinterpret_cast<cif_master_data::ldp_wq *>(arg1);
+	bool empty_wq;
 
 	while (true) {
-		k_yield();
-		if (wq->empty()) {
+
+		k_mutex_lock(&cif_data.x_lock_wq_, K_FOREVER);
+		{
+			empty_wq = wq->empty();
+			if (!empty_wq) {
+				wq->schedule();
+				NET_DBG("WQ scheduled");
+			}
+		}
+		k_mutex_unlock(&cif_data.x_lock_wq_);
+
+		if (empty_wq) {
+			/* Nothing to do, sleep for a while */
 			k_sleep(K_MSEC(10));
 		} else {
-			wq->schedule();
-			NET_DBG("WQ scheduled");
-
-			/* NOTE: don't be strict aligned with the cycle time */
-			k_usleep(1);
+			/* Don't align with the cycle time strictly */
+			k_sleep(K_USEC(1));
 		}
 	}
 }
@@ -787,6 +805,7 @@ static void wq_background_entry(void *arg1, void *arg2, void *arg3)
 static int ldp_init(void)
 {
 	k_mutex_init(&cif_data.x_lock_);
+	k_mutex_init(&cif_data.x_lock_wq_);
 	cif_data.wq_tid = k_thread_create(
 		&cif_data.wq_thread, cif_data.wq_stack, K_THREAD_STACK_SIZEOF(cif_data.wq_stack),
 		wq_background_entry, &cif_data.wq, nullptr, nullptr, K_PRIO_COOP(1), 0, K_NO_WAIT);
