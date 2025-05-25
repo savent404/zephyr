@@ -31,6 +31,9 @@ static void parse_cmd(void)
 	case CMD_CLOSE:
 		ctx_.state = STATE_CLOSE;
 		break;
+	case CMD_STATS:
+		ctx_.state = STATE_STATS;
+		break;
 	case CMD_NONE:
 	default:
 		break;
@@ -562,6 +565,74 @@ static void handle_io_buf(uint8_t *in_buf, uint8_t *out_buf, size_t *out_buf_len
 	}
 }
 
+static bool handle_stats_state(int sock)
+{
+	LOG_INF("Getting port statistics:");
+
+	for (int i = 0; i < MAX_OPEN_PORTS; i++) {
+		if (!open_ports[i].active) {
+			continue;
+		}
+
+		struct cif_stats stats = {.slot = open_ports[i].sid, .port = open_ports[i].port};
+		socklen_t stats_len = sizeof(stats);
+
+		int ret = getsockopt(sock, SOL_CIF_RAW, CIF_OPT_STATS, &stats, &stats_len);
+
+		if (ret < 0) {
+			LOG_ERR("Failed to get stats for SID: %d, Port: %d, errno: %d",
+				open_ports[i].sid, open_ports[i].port, errno);
+			continue;
+		}
+
+		LOG_INF("Port Statistics - SID: %d, Port: %d, mask=0x%08x", open_ports[i].sid,
+			open_ports[i].port, stats.valid_mask);
+
+		if (CIF_IS_STAT_VALID(&stats, CIF_STAT_ID_BLOCKING_TX_BYTES)) {
+			LOG_INF("  Blocking TX bytes: %u",
+				stats.val[CIF_STAT_ID_BLOCKING_TX_BYTES]);
+		}
+
+		if (CIF_IS_STAT_VALID(&stats, CIF_STAT_ID_BLOCKING_RX_BYTES)) {
+			LOG_INF("  Blocking RX bytes: %u",
+				stats.val[CIF_STAT_ID_BLOCKING_RX_BYTES]);
+		}
+
+		if (CIF_IS_STAT_VALID(&stats, CIF_STAT_ID_BLOCKING_TX_COUNT)) {
+			LOG_INF("  Blocking TX count: %u",
+				stats.val[CIF_STAT_ID_BLOCKING_TX_COUNT]);
+		}
+
+		if (CIF_IS_STAT_VALID(&stats, CIF_STAT_ID_BLOCKING_RX_COUNT)) {
+			LOG_INF("  Blocking RX count: %u",
+				stats.val[CIF_STAT_ID_BLOCKING_RX_COUNT]);
+		}
+
+		if (CIF_IS_STAT_VALID(&stats, CIF_STAT_ID_HIST_XFER_COUNT)) {
+			LOG_INF("  Historical TX count: %u",
+				stats.val[CIF_STAT_ID_HIST_XFER_COUNT]);
+		}
+
+		if (CIF_IS_STAT_VALID(&stats, CIF_STAT_ID_HIST_RX_COUNT)) {
+			LOG_INF("  Historical RX count: %u", stats.val[CIF_STAT_ID_HIST_RX_COUNT]);
+		}
+
+		if (CIF_IS_STAT_VALID(&stats, CIF_STAT_ID_HIST_RX_COUNT_WITH_DATA)) {
+			LOG_INF("  Historical RX count with data: %u",
+				stats.val[CIF_STAT_ID_HIST_RX_COUNT_WITH_DATA]);
+		}
+		if (CIF_IS_STAT_VALID(&stats, CIF_STAT_ID_HIST_RX_COUNT_WITH_ACK)) {
+			LOG_INF("  Historical RX count with ack: %u",
+				stats.val[CIF_STAT_ID_HIST_RX_COUNT_WITH_ACK]);
+		}
+
+		LOG_INF("-----------------------");
+	}
+
+	ctx_.state = STATE_IDLE;
+	return true;
+}
+
 static int main_master(void)
 {
 	LOG_INF("Running in master mode");
@@ -667,6 +738,10 @@ static int main_master(void)
 
 		case STATE_CLOSE:
 			handle_close_state(sock);
+			break;
+
+		case STATE_STATS:
+			handle_stats_state(sock);
 			break;
 		}
 

@@ -457,6 +457,31 @@ static int cif_sock_getsockopt(struct net_context *ctx, int level, int optname, 
 		info->i_err[1] = mcb_info.i_err[1];
 		break;
 	}
+	case CIF_OPT_STATS: {
+		auto stat = (struct cif_stats *)(optval);
+		if (*optlen < sizeof(*stat)) {
+			NET_DBG("Invalid stats: buffer too small");
+			return -EINVAL;
+		}
+		*optlen = sizeof(*stat);
+
+		auto conn_it = usr_data->conns.find(
+			conn_idx{reinterpret_cast<cif_stats *>(optval)->port,
+				 reinterpret_cast<cif_stats *>(optval)->slot});
+		if (conn_it == usr_data->conns.end()) {
+			NET_DBG("Connection not found");
+			return -ENOENT;
+		}
+		port_stat ps = {};
+
+		if (!(*usr_data->ldp).get_statistic(conn_it->second.conn_id, &ps)) {
+			NET_DBG("Failed to get statistic");
+			return -EINVAL;
+		}
+		stat->valid_mask = ps.valid_mask;
+		memcpy(stat->val, ps.raw, sizeof(ps.raw));
+		return 0;
+	} break;
 	default: {
 		return -ENOTSUP;
 	}

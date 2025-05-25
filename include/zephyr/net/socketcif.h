@@ -69,6 +69,7 @@ enum {
 	CIF_OPT_PORT,
 	CIF_OPT_ERROR,
 	CIF_OPT_INFO,
+	CIF_OPT_STATS,
 	CIF_OPT_MAX,
 };
 
@@ -141,6 +142,27 @@ struct cif_info {
 	uint32_t i_err[2];
 };
 
+enum cif_stat_id {
+	CIF_STAT_ID_BLOCKING_TX_BYTES = 0, /* Indicate the bytes from master waiting for send */
+	CIF_STAT_ID_BLOCKING_RX_BYTES,     /* Indicate the bytes from slave wait for master */
+	CIF_STAT_ID_BLOCKING_TX_COUNT,     /* Indicate the msg packs from master waiting for send */
+	CIF_STAT_ID_BLOCKING_RX_COUNT,     /* Indicate the msg packs from slave wait for master */
+	CIF_STAT_ID_HIST_XFER_COUNT,       /* Indicate the packs tx count */
+	CIF_STAT_ID_HIST_RX_COUNT,         /* Indicate the packs rx count */
+	CIF_STAT_ID_HIST_RX_COUNT_WITH_DATA, /* Indicate the packs rx count with valid data */
+	CIF_STAT_ID_HIST_RX_COUNT_WITH_ACK,  /* Indicate the packs rx count with ack */
+	CIF_STAT_ID_MAX,
+};
+struct cif_stats {
+	/* directory: IN */
+	uint8_t slot;
+	uint8_t port;
+
+	/* directory: OUT */
+	uint32_t valid_mask;
+	uint32_t val[CIF_STAT_ID_MAX]; /* statistic information */
+};
+
 /** @endcond */
 
 /* SocketCIF MTU size */
@@ -161,6 +183,7 @@ enum {
 #define CIF_IS_SYNC_PORT(port)    (CIF_PORT_MOD(port) < 0x08)
 #define CIF_IS_ASYNC_PORT(port)   (CIF_PORT_MOD(port) >= 0x08)
 #define CIF_IS_UNKNOWN_PORT(port) (!(CIF_IS_SYNC_PORT(port) || CIF_IS_ASYNC_PORT(port)))
+#define CIF_IS_STAT_VALID(stat, id) (((struct cif_stats *)(stat))->valid_mask & (1 << (id)))
 
 /**
  * struct sockaddr_can - The sockaddr structure for CIF sockets

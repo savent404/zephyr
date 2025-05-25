@@ -72,6 +72,7 @@ struct context {
 #define CMD_CLOSE     6
 #define CMD_PERF      7
 #define CMD_LIST      8
+#define CMD_STATS     9
 	uint32_t cmd;
 
 #define STATE_IDLE     0
@@ -81,6 +82,7 @@ struct context {
 #define STATE_IO       4
 #define STATE_OPEN     5
 #define STATE_CLOSE    6
+#define STATE_STATS    7
 	uint32_t state;
 
 	uint32_t stat_ok;
