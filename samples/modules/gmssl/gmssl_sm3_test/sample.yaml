@@ -1,0 +1,15 @@
+sample:
+  description: minimal sample, the SM3 testcase
+  name: gmssl_sm3
+common:
+  tags: footprint
+  harness: console
+  harness_config:
+    type: one_line
+    regex:
+      - "Basic SM3 test"
+tests:
+  sample.module.gmssl.gmssl_sm3.qemu_cortex_m3:
+    build_only: true
+    platform_allow:
+      - qemu_cortex_m3

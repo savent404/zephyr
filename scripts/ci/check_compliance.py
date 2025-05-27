@@ -1030,6 +1030,21 @@ flagged.
         "SUIT_MPI_GENERATE", # Used by nRF runners to program provisioning data, based on build configuration
         "SUIT_MPI_APP_AREA_PATH", # Used by nRF runners to program provisioning data, based on build configuration
         "SUIT_MPI_RAD_AREA_PATH", # Used by nRF runners to program provisioning data, based on build configuration
+        "GMSSL",
+        "GMSSL_AES",
+        "GMSSL_CHACHA20",
+        "GMSSL_SDF",
+        "GMSSL_SHA1",
+        "GMSSL_SHA2",
+        "GMSSL_SM2_EXTS",
+        "GMSSL_SM3_XMSS",
+        "GMSSL_SM4_CBC_MAC",
+        "GMSSL_SM4_CCM",
+        "GMSSL_SM4_CFB",
+        "GMSSL_SM4_ECB",
+        "GMSSL_SM4_OFB",
+        "GMSSL_SM4_XTS",
+        "GMSSL_TLS",
         "WOLFSSL", # External module
         "WOLFSSL_SETTINGS_FILE", # External module
         "WOLFSSL_BUILTIN", # External module

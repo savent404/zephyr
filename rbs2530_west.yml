@@ -96,6 +96,10 @@ manifest:
       remote: wolfssl
       revision: master
       path: modules/crypto/wolfssl
+    - name: GmSSL
+      remote: sysfly
+      revision: rel/ze-port
+      path: modules/crypto/GmSSL
 
   self:
     path: zephyr
