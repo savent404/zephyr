@@ -327,8 +327,6 @@ u8 FGmac_Ps_DmaInit(FGmacPs_Instance_T *pGmac, FGmacPs_RxDescriptor_T *pRxDs, u8
  *
  * **************************************************************************
  */
-#define INIT_MDIO_ADDRESS_1 1
-#define INIT_MDIO_ADDRESS_2 3
 u8 FGmac_Ps_MacInit(FGmacPs_Instance_T *pGmac, int m2m)
 {
 	FGmacPs_MacPortMap_T *pGmac_PortMap = pGmac->base_address;
@@ -356,20 +354,27 @@ u8 FGmac_Ps_MacInit(FGmacPs_Instance_T *pGmac, int m2m)
 	 * the primary interface handling dual PHY ports.
 	 */
 	if (pGmac->base_address == (void *)FPAR_GMACPS_0_BASEADDR) {
-		int mdio = pPhyConfig->mdio_address;
+		int mdio_address = pPhyConfig->mdio_address;
+		int phy_delay = pPhyConfig->phy_delay;
+		char *phy_mode = pPhyConfig->phy_mode;
 
-		pPhyConfig->mdio_address = INIT_MDIO_ADDRESS_1;
 		pPhyConfig->phy_op_init(pGmac);
 		pPhyConfig->phy_op_cfg(pGmac);
 		pPhyConfig->phy_op_reset(pGmac);
 
-		if (m2m == 0) {
-			pPhyConfig->mdio_address = INIT_MDIO_ADDRESS_2;
+		if (m2m == 0 && pGmac->phy_cfg->partner_phy_config.mdio_address !=
+					FMSH_GMAC_MDIO_INVALID_ADDR) {
+			pPhyConfig->mdio_address = pGmac->phy_cfg->partner_phy_config.mdio_address;
+			pPhyConfig->phy_delay = pGmac->phy_cfg->partner_phy_config.phy_delay;
+			pPhyConfig->phy_mode = pGmac->phy_cfg->partner_phy_config.phy_mode;
 			pPhyConfig->phy_op_init(pGmac);
 			pPhyConfig->phy_op_cfg(pGmac);
 			pPhyConfig->phy_op_reset(pGmac);
 		}
-		pPhyConfig->mdio_address = mdio;
+
+		pPhyConfig->mdio_address = mdio_address;
+		pPhyConfig->phy_mode = phy_mode;
+		pPhyConfig->phy_delay = phy_delay;
 	}
 	/*
 	 * ----------------------------

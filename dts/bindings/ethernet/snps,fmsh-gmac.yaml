@@ -84,3 +84,7 @@ properties:
     type: string
     required: true
     description: "Gateway address"
+
+  partner-eth:
+    type: phandle
+    description: "Reference to partner ethernet node that shares MDIO with this interface"

@@ -90,3 +90,7 @@
 	flat-page-count = <65536>;
 	flat-page-size = <256>;
 };
+
+&ethernet0 {
+	partner-eth = <&ethernet1>;
+};

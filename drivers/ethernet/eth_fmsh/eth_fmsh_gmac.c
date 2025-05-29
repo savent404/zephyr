@@ -4,6 +4,7 @@
  */
 #include <zephyr/kernel.h>
 #include <zephyr/device.h>
+#include <zephyr/devicetree.h>
 #include <zephyr/net/ethernet.h>
 #include <zephyr/net/net_pkt.h>
 #include <zephyr/net/net_if.h>
@@ -699,6 +700,40 @@ static const struct ethernet_api eth_fmsh_api = {
 		.phy_delay = DT_INST_PROP(n, phy_delay),                                           \
 		.auto_nag_en = DT_INST_PROP_OR(n, auto_negotiation, 1),                            \
 		.interface = FPAR_GMACPS_0_INTERFACE,                                              \
+		.partner_phy_config =                                                              \
+			{.mdio_address = COND_CODE_1(                                              \
+				 DT_INST_NODE_HAS_PROP(n, partner_eth),                            \
+				 (COND_CODE_1(                                                     \
+					 DT_NODE_HAS_STATUS(                                       \
+						 DT_INST_PHANDLE_BY_IDX(n, partner_eth, 0), okay), \
+					 (DT_PROP(DT_INST_PHANDLE_BY_IDX(n, partner_eth, 0),       \
+						  mdio_addr)),                                     \
+					 (FMSH_GMAC_MDIO_INVALID_ADDR) /* Partner not okay */      \
+					 )),                                                       \
+				 (FMSH_GMAC_MDIO_INVALID_ADDR) /* partner-eth not defined */       \
+				 ),                                                                \
+			 .phy_delay = COND_CODE_1(                                                 \
+				 DT_INST_NODE_HAS_PROP(n, partner_eth),                            \
+				 (COND_CODE_1(                                                     \
+					 DT_NODE_HAS_STATUS(                                       \
+						 DT_INST_PHANDLE_BY_IDX(n, partner_eth, 0), okay), \
+					 (DT_PROP(DT_INST_PHANDLE_BY_IDX(n, partner_eth, 0),       \
+						  phy_delay)),                                     \
+					 (0) /* Partner not okay */                                \
+					 )),                                                       \
+				 (0) /* partner-eth not defined */                                 \
+				 ),                                                                \
+			 .phy_mode = COND_CODE_1(                                                  \
+				 DT_INST_NODE_HAS_PROP(n, partner_eth),                            \
+				 (COND_CODE_1(                                                     \
+					 DT_NODE_HAS_STATUS(                                       \
+						 DT_INST_PHANDLE_BY_IDX(n, partner_eth, 0), okay), \
+					 (DT_PROP(DT_INST_PHANDLE_BY_IDX(n, partner_eth, 0),       \
+						  phy_mode)),                                      \
+					 (NULL) /* Partner not okay */                             \
+					 )),                                                       \
+				 (NULL) /* partner-eth not defined */                              \
+				 )},                                                               \
 	};                                                                                         \
                                                                                                    \
 	static FGmacPs_Instance_T s_GMAC_Instance_##n = {                                          \
