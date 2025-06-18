@@ -13,6 +13,9 @@
 #include <zephyr/storage/stream_flash.h>
 #include <mbedtls/sha256.h>
 
+#include <string.h>
+#include <ctype.h>
+
 /* Strict strategy for firmware update
  * 0 - Ignore invalid checksum and signature
  * 1 - Reject invalid checksum
@@ -45,6 +48,7 @@ enum fw_metadata_key_e {
 	FW_SIGNATURE,
 	FW_TAG,
 	FW_SIZE,
+	FW_HASH_ALGO, /* e.g. "sha256" */
 };
 
 enum fw_global_key_e {
@@ -58,10 +62,8 @@ enum fw_global_key_e {
  * e.g. app_digest_a, app_digest_b
  */
 const char *fw_metadata_keys[] = {
-	[FW_DIGEST] = "app_digest",
-	[FW_SIGNATURE] = "app_signature",
-	[FW_TAG] = "app_tag",
-	[FW_SIZE] = "app_size",
+	[FW_DIGEST] = "app_digest", [FW_SIGNATURE] = "app_signature", [FW_TAG] = "app_tag",
+	[FW_SIZE] = "app_size",     [FW_HASH_ALGO] = "app_hash_algo",
 };
 
 const char *fw_global_keys[] = {
@@ -77,6 +79,7 @@ struct fw_metadata {
 	uint8_t fw_signature[32];
 	uint32_t fw_size;
 	char fw_tag[64];
+	char fw_hash_algo[16]; /* e.g. "SHA256" */
 };
 
 struct fw_update_instance {
@@ -121,12 +124,8 @@ static int fw_digest_calculate_flash(const struct flash_area *fa, uint32_t offse
 		size);
 
 	mbedtls_sha256_init(&sha256_ctx);
-	rc = mbedtls_sha256_starts(&sha256_ctx, 0);
-	if (rc) {
-		LOG_WRN("Failed to start SHA256 calculation, rc %d", rc);
-		mbedtls_sha256_free(&sha256_ctx);
-		return rc;
-	}
+
+	mbedtls_sha256_starts(&sha256_ctx, 0);
 
 	while (size > 0) {
 		size_t len = MIN(sizeof(buf), size);
@@ -137,22 +136,14 @@ static int fw_digest_calculate_flash(const struct flash_area *fa, uint32_t offse
 			mbedtls_sha256_free(&sha256_ctx);
 			return rc;
 		}
-		rc = mbedtls_sha256_update(&sha256_ctx, buf, len);
-		if (rc) {
-			LOG_WRN("Failed to update SHA256 calculation, rc %d", rc);
-			mbedtls_sha256_free(&sha256_ctx);
-			return rc;
-		}
+
+		mbedtls_sha256_update(&sha256_ctx, buf, len);
+
 		offset += len;
 		size -= len;
 	}
 
-	rc = mbedtls_sha256_finish(&sha256_ctx, digest);
-	if (rc) {
-		LOG_WRN("Failed to finish SHA256 calculation, rc %d", rc);
-		mbedtls_sha256_free(&sha256_ctx);
-		return rc;
-	}
+	mbedtls_sha256_finish(&sha256_ctx, digest);
 
 	LOG_HEXDUMP_DBG(digest, 32, "SHA256 digest");
 	LOG_DBG("Calculating SHA256 digest from flash...done");
@@ -254,6 +245,13 @@ static void fw_load_meta_from_env(uboot_env_t env, enum partition_e part, struct
 		/* value is encoded hex value like 0x04000 */
 		meta->fw_size = strtoul(val, NULL, 16);
 	}
+
+	if (!fw_query_metadata(meta->fw_hash_algo, sizeof(meta->fw_hash_algo), FW_HASH_ALGO,
+			       part)) {
+		/* Hash algorithm is directly copied into meta->fw_hash_algo */
+		LOG_DBG("Loaded hash algorithm: %s for partition %s", meta->fw_hash_algo,
+			part == PART_A ? "A" : "B");
+	}
 }
 
 static void fw_save_meta_to_env(uboot_env_t env, enum partition_e part, struct fw_metadata *meta)
@@ -295,6 +293,14 @@ static void fw_save_meta_to_env(uboot_env_t env, enum partition_e part, struct f
 	snprintf(key, sizeof(key), "%s_%c", fw_metadata_keys[FW_SIZE], part == PART_A ? 'a' : 'b');
 	snprintf(val, sizeof(val), "0x%08x", meta->fw_size);
 	rc = uboot_env_set(env, key, val);
+	if (rc) {
+		LOG_ERR("Failed to set %s to uboot env, rc %d", key, rc);
+	}
+
+	/* set hash algorithm */
+	snprintf(key, sizeof(key), "%s_%c", fw_metadata_keys[FW_HASH_ALGO],
+		 part == PART_A ? 'a' : 'b');
+	rc = uboot_env_set(env, key, meta->fw_hash_algo);
 	if (rc) {
 		LOG_ERR("Failed to set %s to uboot env, rc %d", key, rc);
 	}
@@ -411,7 +417,42 @@ bool fw_is_valid(uint8_t slot)
 	if (slot >= ARRAY_SIZE(fw_instance)) {
 		return false;
 	}
-	return fw_instance[slot].is_valid;
+
+	const struct fw_update_instance *inst = &fw_instance[slot];
+
+	/* Check validity */
+	if (!inst->is_valid) {
+		return false;
+	}
+
+	/* Check firmware size */
+	if (inst->metadata.fw_size == 0) {
+		return false;
+	}
+
+	/* If flash area is not initialized, return basic validity */
+	if (!inst->fa_fw) {
+		return inst->is_valid;
+	}
+
+	/* Perform hash verification */
+	uint8_t calculated_digest[32];
+	int rc = fw_digest_calculate_flash(inst->fa_fw, 0, inst->metadata.fw_size,
+					   calculated_digest);
+	if (rc != 0) {
+		LOG_WRN("Failed to calculate digest for slot %d", slot);
+		return false;
+	}
+
+	/* Compare hashes */
+	if (memcmp(calculated_digest, inst->metadata.fw_digest, sizeof(calculated_digest)) != 0) {
+		LOG_WRN("Hash mismatch for slot %d", slot);
+		LOG_HEXDUMP_WRN(calculated_digest, 32, "Calculated digest");
+		LOG_HEXDUMP_WRN(inst->metadata.fw_digest, 32, "Expected digest");
+		return false;
+	}
+
+	return true;
 }
 
 bool fw_is_primary(uint8_t slot)
@@ -477,7 +518,7 @@ int fw_start(uint8_t slot, bool erase, struct stream_flash_ctx **stream)
 	return 0;
 }
 
-int fw_finish(uint8_t slot, const char *tag, size_t tag_len)
+int fw_finish(uint8_t slot, const char *tag, size_t tag_len, const char *hash_algo)
 {
 	int rc;
 
@@ -512,9 +553,16 @@ int fw_finish(uint8_t slot, const char *tag, size_t tag_len)
 	}
 	/* TODO: Calculate metadata.fw_signature */
 	memset(meta->fw_signature, 0, sizeof(meta->fw_signature));
+
+	/* Set hash algorithm from parameter */
+	if (hash_algo && strnlen(hash_algo, sizeof(meta->fw_hash_algo)) > 0) {
+		snprintf(meta->fw_hash_algo, sizeof(meta->fw_hash_algo), "%s", hash_algo);
+	}
+
 	memcpy(meta->fw_tag, tag, tag_len);
 
-	LOG_DBG("Firmware size: %u, tag: %s", meta->fw_size, meta->fw_tag);
+	LOG_DBG("Firmware size: %u, tag: %s, hash_algo: %s", meta->fw_size, meta->fw_tag,
+		meta->fw_hash_algo);
 	LOG_HEXDUMP_DBG(meta->fw_digest, 32, "digest");
 	LOG_HEXDUMP_DBG(meta->fw_signature, 32, "signature");
 	inst->is_valid = true;

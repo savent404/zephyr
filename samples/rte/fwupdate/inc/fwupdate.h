@@ -59,11 +59,12 @@ int fw_start(uint8_t slot, bool erase, struct stream_flash_ctx **stream);
  * @param slot Firmware slot
  * @param tag Firmware tag
  * @param tag_len Firmware tag length
+ * @param hash_algo Hash algorithm name (e.g., "SHA256"), can be NULL for default
  * @return 0 on success
  * @return -EINVAL if slot is invalid or tag is invalid
  * @return other negative errno codes on flash operation failure
  */
-int fw_finish(uint8_t slot, const char *tag, size_t tag_len);
+int fw_finish(uint8_t slot, const char *tag, size_t tag_len, const char *hash_algo);
 
 /**
  * @brief Check if the firmware slot is valid
