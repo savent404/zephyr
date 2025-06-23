@@ -52,6 +52,9 @@ static const struct dma_driver_api dw_dma_driver_api = {
 	.config = dw_dma_config,
 	.start = dw_dma_start,
 	.stop = dw_dma_stop,
+	.suspend = dw_dma_suspend,
+	.resume = dw_dma_resume,
+	.get_status = dw_dma_get_status,
 };
 
 #define DW_DMAC_INIT(inst)                                                                         \

@@ -18,7 +18,6 @@ config DMA_DW_LLI_POOL_SIZE
 
 config DMA_DW_HW_LLI
 	bool "hardware supports scatter gather"
-	default y
 	help
 	  The hardware is by default expected to support hardware LLI (scatter gather).
 	  When not enabled the driver will still perform scatter gather but using software

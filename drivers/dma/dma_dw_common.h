@@ -105,10 +105,8 @@ extern "C" {
 #define DW_CFGH_SRC_PER_EXT(x)		SET_BITS(29, 28, x)
 #define DW_CFGH_DST_PER(x)		SET_BITS(7, 4, x)
 #define DW_CFGH_SRC_PER(x)		SET_BITS(3, 0, x)
-#define DW_CFGH_DST(x) \
-	(DW_CFGH_DST_PER_EXT((x) >> 4) | DW_CFGH_DST_PER(x))
-#define DW_CFGH_SRC(x) \
-	(DW_CFGH_SRC_PER_EXT((x) >> 4) | DW_CFGH_SRC_PER(x))
+#define DW_CFGH_DST(x) (((x) & 0x0F) << 11)
+#define DW_CFGH_SRC(x) (((x) & 0x0F) << 7)
 
 /* CTL_LO */
 #define DW_CTLL_RELOAD_DST	BIT(31)
