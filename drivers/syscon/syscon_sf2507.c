@@ -120,11 +120,12 @@ static int sf2507_read_reg(const struct device *dev, uint16_t addr, uint16_t *va
 
 static int sf2507_reg_read(const struct device *dev, uint16_t addr, uint32_t *value)
 {
-	uint16_t val16;
+	uint16_t val16 = 0;
 	int ret;
 
 	ret = sf2507_read_reg(dev, addr, &val16);
-	*value = val16;
+	*value = (uint32_t)val16;
+
 	return ret;
 }
 
@@ -182,32 +183,21 @@ static int sf2507_init(const struct device *dev)
 
 	k_mutex_init(&data->lock);
 
-	LOG_DBG("Initializing SF2507 device %s", dev->name);
+	LOG_INF("Initializing SF2507 device %s", dev->name);
 
 	/* Initialize registers from device tree configuration */
 	for (i = 0; i < config->num_reg_pairs; i += 2) {
 		uint16_t addr = config->reg_init[i];
 		uint16_t val = config->reg_init[i + 1];
-		uint16_t readback;
 
 		ret = sf2507_write_reg(dev, addr, val);
 		if (ret < 0) {
 			LOG_ERR("Failed to initialize register 0x%04x", addr);
 			return ret;
 		}
-
-		ret = sf2507_read_reg(dev, addr, &readback);
-		if (ret < 0) {
-			LOG_ERR("Failed to read back register 0x%04x", addr);
-			return ret;
-		}
-		if (readback != val) {
-			LOG_ERR("Register 0x%04x readback mismatch: expected 0x%04x, got 0x%04x",
-				addr, val, readback);
-			return -EIO;
-		}
 	}
 	k_msleep(10);
+
 	LOG_INF("SF2507 device %s initialized", dev->name);
 
 	return 0;

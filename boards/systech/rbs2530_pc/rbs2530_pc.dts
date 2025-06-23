@@ -46,12 +46,54 @@
 
 &spi0 {
 	cs-gpios =
-			<&gpio2 1 GPIO_ACTIVE_LOW>,
-			<&gpio2 2 GPIO_ACTIVE_LOW>,
-			<&gpio2 3 GPIO_ACTIVE_LOW>;
-	sf2507_u1: sf2507@0 {
+			<&gpio2 3 GPIO_ACTIVE_LOW>,
+			<&gpio2 4 GPIO_ACTIVE_LOW>,
+			<&gpio2 5 GPIO_ACTIVE_LOW>,
+			<&gpio2 3 GPIO_ACTIVE_LOW>,
+			<&gpio2 4 GPIO_ACTIVE_LOW>,
+			<&gpio2 5 GPIO_ACTIVE_LOW>;
+
+	sf2507_u1_reset: sf2507@0 {
 		compatible = "netforward,sf2507";
 		reg = <0>;
+		status = "disabled";
+		spi-max-frequency = <100000>;
+		register-init = <
+			0x0000 0x0000
+		>;
+
+		gpios = <&gpio2 0 0>;
+		reset_delay = < 100 >;
+	};
+
+	sf2507_u3_reset: sf2507@1 {
+		compatible = "netforward,sf2507";
+		reg = <1>;
+		status = "disabled";
+		spi-max-frequency = <100000>;
+		register-init = <
+			0x0000 0x0000
+		>;
+
+		gpios = <&gpio2 1 0>;
+		reset_delay = < 100 >;
+	};
+
+	sf2507_u21_reset: sf2507@2 {
+		compatible = "netforward,sf2507";
+		reg = <2>;
+		status = "disabled";
+		spi-max-frequency = <100000>;
+		register-init = <
+			0x0000 0x0000
+		>;
+		gpios = <&gpio2 2 0>;
+		reset_delay = < 100 >;
+	};
+
+	sf2507_u1: sf2507@3 {
+		compatible = "netforward,sf2507";
+		reg = <3>;
 		status = "disabled";
 		spi-max-frequency = <100000>;
 		register-init = <
@@ -60,24 +102,26 @@
 			0x1307 0x0980
 			0x3B0C 0x0003
 			0x3EE0 0x0022
-			0x3ba7 0x0005
+			0x3BA7 0x0005
 			0x1F03 0x0768
-			0x1F02 0x52
+			0x1F02 0x0052
 			0x1F00 0x0003
-			0x3ba8 0x0005
+			0x3BA8 0x0005
 			0x1F03 0x0768
-			0x1F02 0x72
+			0x1F02 0x0072
 			0x1F00 0x0003
-			0x3ba9 0x0005
+			0x3BA9 0x0005
 			0x1F03 0x0768
-			0x1F02 0x92
+			0x1F02 0x0092
 			0x1F00 0x0003
 			0x3BE4 0x0003
 		>;
+		slave_id = < 0 >;
 	};
-	sf2507_u3: sf2507@1 {
+
+	sf2507_u3: sf2507@4 {
 		compatible = "netforward,sf2507";
-		reg = <1>;
+		reg = <4>;
 		status = "disabled";
 		spi-max-frequency = <100000>;
 		register-init = <
@@ -100,9 +144,10 @@
 			0x1F00 0x0003
 		>;
 	};
-	sf2507_u21: sf2507@2 {
+
+	sf2507_u21: sf2507@5 {
 		compatible = "netforward,sf2507";
-		reg = <2>;
+		reg = <5>;
 		status = "disabled";
 		spi-max-frequency = <100000>;
 		register-init = <
@@ -113,31 +158,30 @@
 			0x13C3 0x0001
 			0x13C4 0x1006
 			0x13C5 0x0980
-			0x3B0D 0x0022
-			0x3D0D 0x0000
-			0x3ba5 0x0005
-			0x1F03 0x0768
-			0x1F02 0x12
-			0x1F00 0x0003
-			0x3ba6 0x0005
-			0x1F03 0x0768
-			0x1F02 0x32
-			0x1F00 0x0003
-			0x3ba7 0x0005
-			0x1F03 0x0768
-			0x1F02 0x52
-			0x1F00 0x0003
-			0x3ba8 0x0005
-			0x1F03 0x0768
-			0x1F02 0x72
-			0x1F00 0x0003
-			0x3ba9 0x0005
-			0x1F03 0x0768
-			0x1F02 0x92
-			0x1F00 0x0003
+			0x3B0D 0x0003
 			0x3EE0 0x0022
+			0x3D0D 0x0000
+			0x3BA5 0x0005
+			0x1F03 0x0768
+			0x1F02 0x0012
+			0x1F00 0x0003
+			0x3BA6 0x0005
+			0x1F03 0x0768
+			0x1F02 0x0032
+			0x1F00 0x0003
+			0x3BA7 0x0005
+			0x1F03 0x0768
+			0x1F02 0x0052
+			0x1F00 0x0003
+			0x3BA8 0x0005
+			0x1F03 0x0768
+			0x1F02 0x0072
+			0x1F00 0x0003
+			0x3BA9 0x0005
+			0x1F03 0x0768
+			0x1F02 0x0092
+			0x1F00 0x0003
 			0x3BE4 0x0003
 		>;
-		gpios = <&gpio2 0 0>;
 	};
 };

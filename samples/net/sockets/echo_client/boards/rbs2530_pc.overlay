@@ -14,6 +14,18 @@
 	status = "okay";
 };
 
+&sf2507_u1_reset {
+	status = "okay";
+};
+
+&sf2507_u3_reset {
+	status = "okay";
+};
+
+&sf2507_u21_reset {
+	status = "okay";
+};
+
 &sf2507_u1 {
 	status = "okay";
 };
