@@ -1,0 +1,35 @@
+/**
+ * Copyright (c) 2024 SYSTech Co.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+#include <mem.h>
+
+&mmc0 {
+	status = "okay";
+	non-removable;
+
+	mmc {
+		compatible = "zephyr,mmc-disk";
+		status = "okay";
+		bus-width = <4>;
+		disk-name = "MMC";
+
+		partitions {
+			compatible = "fixed-partitions";
+			#address-cells = <1>;
+			#size-cells = <1>;
+
+			// LittleFS
+			storage_partition: partition@200000 {
+				label = "filesystem";
+				reg = <0x00000000 DT_SIZE_M(1)>; //  1MB offset
+			};
+
+			// RAW API
+			data_partition: partition@100000 {
+				label = "raw_data";
+				reg = <0x00100000 DT_SIZE_M(1)>; // 1MB @ 1MB offset
+			};
+		};
+	};
+};
