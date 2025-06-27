@@ -160,28 +160,36 @@ static int raw_api_read_and_verify(uint8_t expected_value)
 	get_partition_info("raw_data", &raw_info);
 
 	uint32_t sector_start = raw_info.offset / SECTOR_SIZE;
-	uint32_t sector_count = TEST_BUFFER_SIZE / SECTOR_SIZE;
+	uint32_t total_sectors = raw_info.size / SECTOR_SIZE;
+	uint32_t sectors_per_read = TEST_BUFFER_SIZE / SECTOR_SIZE;
+	uint32_t read_sectors = 0;
 
-	memset(read_buffer, 0, TEST_BUFFER_SIZE);
+	while (read_sectors < total_sectors) {
+		uint32_t read_now = sectors_per_read;
 
-	LOG_DBG("-> Reading from sectors %u-%u (offset: 0x%08X, size: %u bytes)", sector_start,
-		sector_start + sector_count - 1, raw_info.offset, TEST_BUFFER_SIZE);
-
-	ret = disk_access_read(MMC_DEVICE_NAME, read_buffer, sector_start, sector_count);
-	if (ret) {
-		LOG_ERR("Failed to read from raw partition: %d", ret);
-		return ret;
-	}
-
-	for (int i = 0; i < TEST_BUFFER_SIZE; i++) {
-		if (read_buffer[i] != expected_value) {
-			LOG_ERR("Data mismatch at offset %d: expected 0x%02X, got 0x%02X", i,
-				expected_value, read_buffer[i]);
-			return -EIO;
+		if (read_sectors + read_now > total_sectors) {
+			read_now = total_sectors - read_sectors;
 		}
+		memset(read_buffer, 0, TEST_BUFFER_SIZE);
+		ret = disk_access_read(MMC_DEVICE_NAME, read_buffer, sector_start + read_sectors,
+				       read_now);
+		if (ret) {
+			LOG_ERR("Failed to read from raw partition at sector %u: %d",
+				sector_start + read_sectors, ret);
+			return ret;
+		}
+		for (int i = 0; i < read_now * SECTOR_SIZE; i++) {
+			if (read_buffer[i] != expected_value) {
+				LOG_ERR("Data mismatch at offset %u: expected 0x%02X, got 0x%02X",
+					read_sectors * SECTOR_SIZE + i, expected_value,
+					read_buffer[i]);
+				return -EIO;
+			}
+		}
+		read_sectors += read_now;
 	}
 	LOG_INF(" ■ Raw partition data verification successful - all %u bytes match 0x%02X",
-		TEST_BUFFER_SIZE, expected_value);
+		raw_info.size, expected_value);
 	return 0;
 }
 
