@@ -66,7 +66,7 @@
 			reg = <0xe004b000 0x1000>;
 			interrupts = <GIC_SPI 13 IRQ_TYPE_LEVEL IRQ_DEFAULT_PRIORITY>;
 			interrupt-names = "irq_0";
-			#dma-cells = <1>;
+			#dma-cells = <2>;
 			dma-channels = <8>;
 			dma-requests = <16>;
 			dma-buf-addr-alignment = <4>;
@@ -99,6 +99,9 @@
 			reg-shift = <2>;
 			// reg-io-width = <4>;
 			// u-boot,dm-pre-reloc;
+			// Pre-allocate channel tx-6, rx-7; uart1 hardware slot is 12, 13
+			dmas = <&dma0 6 12>, <&dma0 7 13>;
+			dma-names = "tx", "rx";
 			status = "disabled";
 		};
 
@@ -224,6 +227,9 @@
 			clock-frequency = <166666666>;
 			clocks = <&clkc CLKID_SPI1>;
 			clock-names = "spi";
+			// Pre-allocate channel tx-0, rx-1; spi1 hardware slot is 2, 3
+			dmas = <&dma0 0 2>, <&dma0 1 3>;
+			dma-names = "tx", "rx";
 			status = "disabled";
 		};
 
@@ -236,6 +242,9 @@
 			clock-frequency = <100000>; // 100kHz
 			#address-cells = <1>;
 			#size-cells = <0>;
+			// Pre-allocate channel tx-4, rx-5; i2c0 hardware slot is 8, 9
+			dmas = <&dma0 4 8>, <&dma0 5 9>;
+			dma-names = "tx", "rx";
 			status = "disabled";
 		};
 
@@ -273,7 +282,8 @@
 			card-detect-delay = <200>;
 
 			/* enable dma */
-			dmas = <&dma0 0>;
+			// Pre-allocate channel 5; mmc0 slot is 0
+			dmas = <&dma0 5 0>;
 			dma-burst = <2>;
 		};
 		mmc1: dwmmc@e0044000 {
@@ -305,6 +315,9 @@
 			clock-frequency = <30000000>;
 			clocks = <&clkc CLKID_QSPI>;
 			clock-names = "qspi";
+			// Pre-allocate channel tx-2, rx-3; qspi0 hardware slot is 6, 7
+			dmas = <&dma0 2 6>, <&dma0 3 7>;
+			dma-names = "tx", "rx";
 			status = "disabled";
 		};
 
