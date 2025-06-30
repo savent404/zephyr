@@ -281,29 +281,23 @@ static int littlefs_verify_test_files(void)
 	}
 	fs_closedir(&dir);
 
-	/* Verify specific test files */
-	static const char *const test_files[] = {MOUNT_POINT "/test1.txt", MOUNT_POINT "/test2.txt",
-						 MOUNT_POINT "/config.dat"};
+	const char *bigfile = MOUNT_POINT "/bigfile.bin";
 
-	for (int i = 0; i < ARRAY_SIZE(test_files); i++) {
-		fs_file_t_init(&file);
+	fs_file_t_init(&file);
 
-		ret = fs_open(&file, test_files[i], FS_O_READ);
-		if (ret) {
-			LOG_ERR("Failed to open file %s: %d", test_files[i], ret);
-			return ret;
-		}
-
-		memset(read_buf, 0, sizeof(read_buf));
-		ret = fs_read(&file, read_buf, sizeof(read_buf) - 1);
-		if (ret < 0) {
-			LOG_ERR("Failed to read file %s: %d", test_files[i], ret);
-			fs_close(&file);
-			return ret;
-		}
-
-		fs_close(&file);
+	ret = fs_open(&file, bigfile, FS_O_READ);
+	if (ret) {
+		LOG_ERR("Failed to open file %s: %d", bigfile, ret);
+		return ret;
 	}
+	memset(read_buf, 0, sizeof(read_buf));
+	ret = fs_read(&file, read_buf, sizeof(read_buf) - 1);
+	if (ret < 0) {
+		LOG_ERR("Failed to read file %s: %d", bigfile, ret);
+		fs_close(&file);
+		return ret;
+	}
+	fs_close(&file);
 
 	return 0;
 }
@@ -323,6 +317,38 @@ static int littlefs_unmount(void)
 		return ret;
 	}
 
+	return 0;
+}
+
+static int littlefs_clean_all(void)
+{
+	struct fs_dir_t dir;
+	struct fs_dirent entry;
+	char path[128];
+	int ret;
+
+	fs_dir_t_init(&dir);
+	ret = fs_opendir(&dir, MOUNT_POINT);
+	if (ret) {
+		LOG_ERR("fs_opendir failed: %d", ret);
+		return ret;
+	}
+
+	while (fs_readdir(&dir, &entry) == 0) {
+		if (entry.name[0] == 0) {
+			break;
+		}
+		snprintf(path, sizeof(path), "%s/%s", MOUNT_POINT, entry.name);
+		if (entry.type == FS_DIR_ENTRY_FILE) {
+			ret = fs_unlink(path);
+			if (ret) {
+				LOG_WRN("Failed to delete file %s: %d", path, ret);
+			}
+		} else if (entry.type == FS_DIR_ENTRY_DIR) {
+			LOG_WRN("Subdir %s not deleted (not implemented)", path);
+		}
+	}
+	fs_closedir(&dir);
 	return 0;
 }
 
@@ -382,6 +408,14 @@ int main(void)
 		LOG_ERR("Step 2a failed: %d", ret);
 		return ret;
 	}
+
+	/* ===== Clear the LittleFS partition ===== */
+	ret = littlefs_clean_all();
+	if (ret) {
+		LOG_ERR("LittleFS clean failed: %d", ret);
+		return ret;
+	}
+	LOG_INF(" ■ LittleFS partition cleaned successfully");
 
 	ret = littlefs_create_test_files();
 	if (ret) {

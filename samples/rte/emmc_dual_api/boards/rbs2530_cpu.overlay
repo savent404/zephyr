@@ -20,7 +20,7 @@
 			#size-cells = <1>;
 
 			// LittleFS
-			storage_partition: partition@200000 {
+			storage_partition: partition@0 {
 				label = "filesystem";
 				reg = <0x00000000 DT_SIZE_M(1)>; //  1MB offset
 			};
