@@ -41,6 +41,13 @@
 #include <zephyr/drivers/serial/uart_ns16550.h>
 #include <zephyr/logging/log.h>
 
+#ifdef CONFIG_MMU
+#include <zephyr/kernel/internal/mm.h>
+#endif
+#ifdef CONFIG_DCACHE
+#include <zephyr/cache.h>
+#endif
+
 LOG_MODULE_REGISTER(uart_ns16550, CONFIG_UART_LOG_LEVEL);
 
 #define UART_NS16550_PCP_ENABLED DT_ANY_INST_HAS_PROP_STATUS_OKAY(pcp)
@@ -1441,6 +1448,11 @@ static void async_evt_rx_rdy(const struct device *dev)
 	dma_params->offset = dma_params->counter;
 
 	if (event.data.rx.len > 0) {
+		/* Invalidate cache after DMA operation to ensure data coherency */
+#ifdef CONFIG_DCACHE
+		sys_cache_data_invd_range((void *)((uint8_t *)dma_params->buf),
+					  dma_params->buf_len);
+#endif
 		async_user_callback(dev, &event);
 	}
 }
@@ -1478,7 +1490,7 @@ static void uart_ns16550_async_rx_flush(const struct device *dev)
 		       dma_params->dma_channel,
 		       &status);
 
-	const int rx_count = dma_params->buf_len - status.pending_length;
+	const int rx_count = status.pending_length;
 
 	if (rx_count > dma_params->counter) {
 		dma_params->counter = rx_count;
@@ -1535,7 +1547,19 @@ static void prepare_rx_dma_block_config(const struct device *dev)
 
 	struct dma_block_config *head_block_config = &rx_dma_params->active_dma_block;
 
-	head_block_config->dest_address = (uintptr_t)rx_dma_params->buf;
+	/* Convert virtual address to physical address for DMA */
+#ifdef CONFIG_MMU
+	uintptr_t dest_phys_addr = k_mem_phys_addr(rx_dma_params->buf);
+#else
+	uintptr_t dest_phys_addr = (uintptr_t)rx_dma_params->buf;
+#endif
+
+	/* Invalidate cache before DMA operation */
+#ifdef CONFIG_DCACHE
+	sys_cache_data_invd_range(rx_dma_params->buf, rx_dma_params->buf_len);
+#endif
+
+	head_block_config->dest_address = dest_phys_addr;
 	head_block_config->source_address = data->phys_addr;
 	head_block_config->block_size = rx_dma_params->buf_len;
 }
@@ -1563,10 +1587,21 @@ static void dma_callback(const struct device *dev, void *user_data, uint32_t cha
 		data->async.next_rx_buffer = NULL;
 		data->async.next_rx_buffer_len = 0U;
 
-		if (rx_params->buf != NULL &&
-		    rx_params->buf_len > 0) {
-			dma_reload(dev, rx_params->dma_channel, data->phys_addr,
-				   (uintptr_t)rx_params->buf, rx_params->buf_len);
+		if (rx_params->buf != NULL && rx_params->buf_len > 0) {
+			/* Convert virtual address to physical address for DMA */
+#ifdef CONFIG_MMU
+			uintptr_t dest_phys_addr = k_mem_phys_addr(rx_params->buf);
+#else
+			uintptr_t dest_phys_addr = (uintptr_t)rx_params->buf;
+#endif
+
+			/* Invalidate cache before DMA operation */
+#ifdef CONFIG_DCACHE
+			sys_cache_data_invd_range(rx_params->buf, rx_params->buf_len);
+#endif
+
+			dma_reload(dev, rx_params->dma_channel, data->phys_addr, dest_phys_addr,
+				   rx_params->buf_len);
 			dma_start(dev, rx_params->dma_channel);
 			async_evt_rx_buf_request(uart_dev);
 		} else {
@@ -1600,9 +1635,23 @@ static int uart_ns16550_tx(const struct device *dev, const uint8_t *buf, size_t 
 		goto out;
 	}
 
+	/* keep original virtual address for callback */
 	tx_params->buf = buf;
 	tx_params->buf_len = len;
-	tx_params->active_dma_block.source_address = (uintptr_t)buf;
+
+	/* Convert virtual address to physical address for DMA */
+#ifdef CONFIG_MMU
+	uintptr_t src_phys_addr = k_mem_phys_addr((void *)buf);
+#else
+	uintptr_t src_phys_addr = (uintptr_t)buf;
+#endif
+
+	/* Clean cache before DMA operation */
+#ifdef CONFIG_DCACHE
+	sys_cache_data_flush_range((void *)buf, len);
+#endif
+
+	tx_params->active_dma_block.source_address = src_phys_addr;
 	tx_params->active_dma_block.dest_address = data->phys_addr;
 	tx_params->active_dma_block.block_size = len;
 	tx_params->active_dma_block.next_block = NULL;
@@ -1679,6 +1728,8 @@ static int uart_ns16550_rx_enable(const struct device *dev, uint8_t *buf, const 
 	rx_dma_params->timeout_us = timeout_us;
 	rx_dma_params->buf = buf;
 	rx_dma_params->buf_len = len;
+	rx_dma_params->offset = 0;
+	rx_dma_params->counter = 0;
 
 #if defined(CONFIG_UART_NS16550_INTEL_LPSS_DMA)
 	ns16550_outword(config, MST(dev), UNMASK_LPSS_INT(rx_dma_params->dma_channel));
@@ -1692,6 +1743,7 @@ static int uart_ns16550_rx_enable(const struct device *dev, uint8_t *buf, const 
 		   rx_dma_params->dma_channel,
 		   (struct dma_config *)&rx_dma_params->dma_cfg);
 	dma_start(rx_dma_params->dma_dev, rx_dma_params->dma_channel);
+	async_timer_start(&rx_dma_params->timeout_work, timeout_us);
 	async_evt_rx_buf_request(dev);
 out:
 	k_spin_unlock(&data->lock, key);
@@ -1849,55 +1901,47 @@ static const struct uart_driver_api uart_ns16550_driver_api = {
 #endif /* CONFIG_UART_INTERRUPT_DRIVEN */
 
 #ifdef CONFIG_UART_ASYNC_API
-#define DMA_PARAMS(n)								\
-	.async.tx_dma_params = {						\
-		.dma_dev =							\
-			DEVICE_DT_GET(DT_INST_DMAS_CTLR_BY_NAME(n, tx)),	\
-		.dma_channel =							\
-			DT_INST_DMAS_CELL_BY_NAME(n, tx, channel),		\
-		.dma_cfg = {							\
-			.source_burst_length = 1,				\
-			.dest_burst_length = 1,					\
-			.source_data_size = 1,					\
-			.dest_data_size = 1,					\
-			.complete_callback_en = 0,				\
-			.error_callback_dis = 1,				\
-			.block_count = 1,					\
-			.channel_direction = MEMORY_TO_PERIPHERAL,		\
-			.dma_slot = DT_INST_DMAS_CELL_BY_NAME(n, tx, channel),	\
-			.dma_callback = dma_callback,				\
-			.user_data = (void *)DEVICE_DT_INST_GET(n)		\
-		},								\
-	},									\
-	.async.rx_dma_params = {						\
-		.dma_dev =							\
-			DEVICE_DT_GET(DT_INST_DMAS_CTLR_BY_NAME(n, rx)),	\
-		.dma_channel =							\
-			DT_INST_DMAS_CELL_BY_NAME(n, rx, channel),		\
-		.dma_cfg = {							\
-			.source_burst_length = 1,				\
-			.dest_burst_length = 1,					\
-			.source_data_size = 1,					\
-			.dest_data_size = 1,					\
-			.complete_callback_en = 0,				\
-			.error_callback_dis = 1,				\
-			.block_count = 1,					\
-			.channel_direction = PERIPHERAL_TO_MEMORY,		\
-			.dma_slot = DT_INST_DMAS_CELL_BY_NAME(n, rx, channel),	\
-			.dma_callback = dma_callback,				\
-			.user_data = (void *)DEVICE_DT_INST_GET(n)		\
-		},								\
-	},									\
-	COND_CODE_0(DT_INST_ON_BUS(n, pcie),					\
-			(.phys_addr = DT_INST_REG_ADDR(n),), ())
+#define DMA_PARAMS(n)                                                                              \
+	.async.tx_dma_params =                                                                     \
+		{                                                                                  \
+			.dma_dev = DEVICE_DT_GET(DT_INST_DMAS_CTLR_BY_NAME(n, tx)),                \
+			.dma_channel = DT_INST_DMAS_CELL_BY_NAME(n, tx, channel),                  \
+			.dma_cfg = {.source_burst_length = 1,                                      \
+				    .dest_burst_length = 1,                                        \
+				    .source_data_size = 1,                                         \
+				    .dest_data_size = 1,                                           \
+				    .complete_callback_en = 0,                                     \
+				    .error_callback_dis = 1,                                       \
+				    .block_count = 1,                                              \
+				    .channel_direction = MEMORY_TO_PERIPHERAL,                     \
+				    .dma_slot = DT_INST_DMAS_CELL_BY_NAME(n, tx, slot),            \
+				    .dest_handshake = 0,                                           \
+				    .source_handshake = 0,                                         \
+				    .dma_callback = dma_callback,                                  \
+				    .user_data = (void *)DEVICE_DT_INST_GET(n)},                   \
+		},                                                                                 \
+	.async.rx_dma_params =                                                                     \
+		{                                                                                  \
+			.dma_dev = DEVICE_DT_GET(DT_INST_DMAS_CTLR_BY_NAME(n, rx)),                \
+			.dma_channel = DT_INST_DMAS_CELL_BY_NAME(n, rx, channel),                  \
+			.dma_cfg = {.source_burst_length = 1,                                      \
+				    .dest_burst_length = 1,                                        \
+				    .source_data_size = 1,                                         \
+				    .dest_data_size = 1,                                           \
+				    .complete_callback_en = 0,                                     \
+				    .error_callback_dis = 1,                                       \
+				    .block_count = 1,                                              \
+				    .channel_direction = PERIPHERAL_TO_MEMORY,                     \
+				    .dma_slot = DT_INST_DMAS_CELL_BY_NAME(n, rx, slot),            \
+				    .dest_handshake = 0,                                           \
+				    .source_handshake = 0,                                         \
+				    .dma_callback = dma_callback,                                  \
+				    .user_data = (void *)DEVICE_DT_INST_GET(n)},                   \
+		},                                                                                 \
+	COND_CODE_0(DT_INST_ON_BUS(n, pcie), (.phys_addr = DT_INST_REG_ADDR(n), ), ())
 
-#define DMA_PARAMS_NULL(n)							\
-	.async.tx_dma_params = {						\
-		.dma_dev = NULL							\
-	},									\
-	.async.rx_dma_params = {						\
-		.dma_dev = NULL							\
-	},									\
+#define DMA_PARAMS_NULL(n)                                                                         \
+	.async.tx_dma_params = {.dma_dev = NULL}, .async.rx_dma_params = {.dma_dev = NULL},
 
 #define DEV_DATA_ASYNC(n)							\
 	COND_CODE_0(DT_INST_PROP(n, io_mapped),					\

@@ -1,0 +1,27 @@
+/*
+ * Copyright (c) 2025 SYSTech Co.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+/ {
+	model = "UART DMA Test overlay";
+	compatible = "fmsh,rbs2530-uart-dma";
+
+	chosen {
+		zephyr,console = &rtt0;
+		zephyr,shell-uart = &rtt0;
+	};
+
+	/* RTT console node */
+	rtt0: rtt_console {
+		compatible = "segger,rtt-uart";
+		status = "okay";
+	};
+};
+&uart1 {
+	status = "okay";
+};
+
+&dma0 {
+	status = "okay";
+};
