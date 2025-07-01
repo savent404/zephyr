@@ -44,3 +44,22 @@ properties:
     enum:
       - 16
       - 32
+
+  dmas:
+    description: |
+      Optional TX & RX dma specifiers. Each specifier will have a phandle
+      reference to the dma controller, the channel number, and the slot number
+      for hardware handshake.
+
+      For example dmas for TX and RX may look like
+         dmas = <&dma0 0 2>, <&dma0 1 3>;
+      where the first entry is for TX with channel 0 and slot 2,
+      and the second for RX with channel 1 and slot 3.
+
+  dma-names:
+    description: |
+      Required if the dmas property exists. This should be "tx" and "rx"
+      to match the dmas property.
+
+      For example
+         dma-names = "tx", "rx";

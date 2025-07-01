@@ -221,7 +221,7 @@
 			#address-cells = <1>;
 			#size-cells = <0>;
 			reg = <0xe0021000 0x1000>;
-			fifo-depth = <128>;
+			fifo-depth = <32>;
 			max-xfer-size = <32>;
 			interrupts = <GIC_SPI 43 IRQ_TYPE_LEVEL IRQ_DEFAULT_PRIORITY>;
 			clock-frequency = <166666666>;

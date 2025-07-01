@@ -66,6 +66,10 @@ DEFINE_MM_REG_WRITE(ser, DW_SPI_REG_SER, 8)
 DEFINE_TEST_BIT_OP(icr, DW_SPI_REG_ICR, DW_SPI_SR_ICR_BIT)
 #define clear_interrupts(dev) test_bit_icr(dev)
 
+DEFINE_MM_REG_WRITE(dmacr, DW_SPI_REG_DMACR, 32)
+DEFINE_MM_REG_WRITE(dmatdlr, DW_SPI_REG_DMATDLR, 32)
+DEFINE_MM_REG_WRITE(dmardlr, DW_SPI_REG_DMARDLR, 32)
+
 #ifdef __cplusplus
 }
 #endif

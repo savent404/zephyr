@@ -31,6 +31,15 @@ config SPI_DW_LOW_SPEED_WORKAROUND
 	help
 	  If the bus speed is too low, writing register needs to wait for a while.
 
+config SPI_DW_DMA
+	bool "DesignWare SPI DMA Support"
+	select DMA
+	select SPI_DW_ACCESS_WORD_ONLY
+	help
+	  Enable DMA support for DesignWare SPI controller.
+	  This allows for high performance SPI transfers using DMA
+	  for devices that have DMA channels defined in their device tree.
+
 config SPI_DW_FMQL_EMIO_CS
 	bool "FMQL EMIO chip select support"
 	depends on SPI_DW

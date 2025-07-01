@@ -17,6 +17,10 @@
 
 #include "spi_context.h"
 
+#ifdef CONFIG_SPI_DW_DMA
+#include <zephyr/drivers/dma.h>
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -28,6 +32,21 @@ typedef void (*spi_dw_set_bit_t)(uint8_t bit, mm_reg_t addr, uint32_t off);
 typedef void (*spi_dw_clear_bit_t)(uint8_t bit, mm_reg_t addr, uint32_t off);
 typedef int (*spi_dw_test_bit_t)(uint8_t bit, mm_reg_t addr, uint32_t off);
 
+#ifdef CONFIG_SPI_DW_DMA
+/* DMA config */
+struct spi_dw_dma_config {
+	const struct device *dma_dev;
+	uint32_t channel;
+	struct dma_config dma_cfg;
+	struct dma_block_config dma_blk_cfg;
+};
+
+#define SPI_DW_DMA_ERROR_FLAG   0x01
+#define SPI_DW_DMA_RX_DONE_FLAG 0x02
+#define SPI_DW_DMA_TX_DONE_FLAG 0x04
+#define SPI_DW_DMA_DONE_FLAG    (SPI_DW_DMA_RX_DONE_FLAG | SPI_DW_DMA_TX_DONE_FLAG)
+#endif
+
 /* Private structures */
 struct spi_dw_config {
 	DEVICE_MMIO_ROM;
@@ -38,6 +57,10 @@ struct spi_dw_config {
 	uint8_t max_xfer_size;
 #ifdef CONFIG_PINCTRL
 	const struct pinctrl_dev_config *pcfg;
+#endif
+#ifdef CONFIG_SPI_DW_DMA
+	struct spi_dw_dma_config dma_tx;
+	struct spi_dw_dma_config dma_rx;
 #endif
 	spi_dw_read_t read_func;
 	spi_dw_write_t write_func;
@@ -51,6 +74,14 @@ struct spi_dw_data {
 	struct spi_context ctx;
 	uint8_t dfs;       /* dfs in bytes: 1,2 or 4 */
 	uint8_t fifo_diff; /* cannot be bigger than FIFO depth */
+#ifdef CONFIG_SPI_DW_DMA
+	volatile uint8_t dma_stat;
+	struct k_sem dma_sem;
+	struct dma_block_config tx_blk_cfg;
+	struct dma_block_config rx_blk_cfg;
+	struct dma_config tx_dma_cfg;
+	struct dma_config rx_dma_cfg;
+#endif
 };
 
 /* Register operation functions */
