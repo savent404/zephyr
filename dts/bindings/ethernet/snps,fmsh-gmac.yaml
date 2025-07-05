@@ -84,3 +84,19 @@ properties:
     type: string
     required: true
     description: "Gateway address"
+
+  partner-mdio-addr:
+    type: int
+    description: "Partner PHY MDIO address"
+
+  partner-phy-mode:
+    type: string
+    enum:
+      - "fiber"
+      - "utp"
+      - "none"
+    description: "Partner PHY interface mode selection"
+
+  partner-phy-delay:
+    type: int
+    description: "Partner PHY delay configuration value (hex)"

@@ -41,6 +41,9 @@
 #define GMAC_CSR_CLK              5
 #define GMAC_POLL_MAX             512
 
+/* MDIO address sentinel value for invalid/undefined addresses */
+#define FMSH_GMAC_MDIO_INVALID_ADDR 0xff
+
 /* return code */
 #define GMAC_RETURN_CODE_OK              0
 #define GMAC_RETURN_CODE_ERR             1
@@ -290,6 +293,12 @@ typedef struct _ethernet_link_status {
  */
 typedef struct _gmac_instance_s FGmacPs_Instance_T;
 
+typedef struct partner_phy_config {
+	u8 mdio_address;
+	u32 phy_delay;
+	char *phy_mode;
+} partner_phy_config_T;
+
 /* phy */
 typedef struct _phy_config {
 	u8 phy_device;
@@ -310,6 +319,7 @@ typedef struct _phy_config {
 	u8 is_duplex;
 
 	FGmacPs_ITF_Type interface;
+	partner_phy_config_T partner_phy_config;
 
 	u8 (*phy_op_init)(FGmacPs_Instance_T *pGmac);
 	u8 (*phy_op_cfg)(FGmacPs_Instance_T *pGmac);

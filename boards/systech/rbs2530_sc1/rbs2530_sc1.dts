@@ -16,6 +16,9 @@
 	gmii2rgmii-addr2 = <0x9>;
 	phy-mode = "fiber";  /* fiber or utp */
 	phy-delay = <0x30f6>;
+	partner-mdio-addr = <1>;
+	partner-phy-mode = "fiber";
+	partner-phy-delay = <0x10f8>;
 	local-ip-address = "192.168.10.16";
 	local-netmask = "255.255.255.0";
 	local-gateway = "192.168.10.1";

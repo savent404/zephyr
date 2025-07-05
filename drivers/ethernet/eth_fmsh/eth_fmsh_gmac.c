@@ -4,6 +4,7 @@
  */
 #include <zephyr/kernel.h>
 #include <zephyr/device.h>
+#include <zephyr/devicetree.h>
 #include <zephyr/net/ethernet.h>
 #include <zephyr/net/net_pkt.h>
 #include <zephyr/net/net_if.h>
@@ -699,6 +700,13 @@ static const struct ethernet_api eth_fmsh_api = {
 		.phy_delay = DT_INST_PROP(n, phy_delay),                                           \
 		.auto_nag_en = DT_INST_PROP_OR(n, auto_negotiation, 1),                            \
 		.interface = FPAR_GMACPS_0_INTERFACE,                                              \
+		.partner_phy_config =                                                              \
+			{                                                                          \
+				.mdio_address = DT_INST_PROP_OR(n, partner_mdio_addr,              \
+								FMSH_GMAC_MDIO_INVALID_ADDR),      \
+				.phy_delay = DT_INST_PROP_OR(n, partner_phy_delay, 0),             \
+				.phy_mode = DT_INST_PROP_OR(n, partner_phy_mode, NULL),            \
+			},                                                                         \
 	};                                                                                         \
                                                                                                    \
 	static FGmacPs_Instance_T s_GMAC_Instance_##n = {                                          \
