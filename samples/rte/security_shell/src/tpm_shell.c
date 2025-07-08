@@ -180,7 +180,7 @@ static int tpm_nv_define_undefine_common(const struct shell *sh, word32 nvIndex,
 			dataSize = sizeof(struct TCM_NV_INDEX_TPCM2);
 		} else {
 			shell_error(sh, "Unknown NV index: 0x%08X", nvIndex);
-			tmp_cleanup_common(&dev);
+			tpm_cleanup_common(&dev);
 			return -EINVAL;
 		}
 
@@ -220,21 +220,17 @@ static int tpm_nv_define_undefine_common(const struct shell *sh, word32 nvIndex,
 	return 0;
 }
 
-/**
- * @brief Define NV indexes for secure boot with fixed addresses
- *
- * Usage: tpm nvdefine NV1
- *        tpm nvdefine NV2
- */
-static int cmd_tpm_nvdefine(const struct shell *sh, size_t argc, char **argv)
+static int cmd_tpm_nvdefine_undefine(const struct shell *sh, size_t argc, char **argv,
+				     bool is_define)
 {
 	word32 nvIndex;
+	const char *cmd_name = is_define ? "nvdefine" : "nvundefine";
 
 	/* Check parameter count */
 	if (argc != 2) {
 		shell_error(sh, "Usage:");
-		shell_error(sh, "  tpm nvdefine NV1");
-		shell_error(sh, "  tpm nvdefine NV2");
+		shell_error(sh, "  tpm %s NV1", cmd_name);
+		shell_error(sh, "  tpm %s NV2", cmd_name);
 		return -EINVAL;
 	}
 
@@ -249,39 +245,17 @@ static int cmd_tpm_nvdefine(const struct shell *sh, size_t argc, char **argv)
 		return -EINVAL;
 	}
 
-	return tpm_nv_define_undefine_common(sh, nvIndex, argv[1], true);
+	return tpm_nv_define_undefine_common(sh, nvIndex, argv[1], is_define);
 }
 
-/**
- * @brief Undefine NV indexes for secure boot with fixed addresses
- *
- * Usage: tpm nvundefine NV1
- *        tpm nvundefine NV2
- */
+static int cmd_tpm_nvdefine(const struct shell *sh, size_t argc, char **argv)
+{
+	return cmd_tpm_nvdefine_undefine(sh, argc, argv, true);
+}
+
 static int cmd_tpm_nvundefine(const struct shell *sh, size_t argc, char **argv)
 {
-	word32 nvIndex;
-
-	/* Check parameter count */
-	if (argc != 2) {
-		shell_error(sh, "Usage:");
-		shell_error(sh, "  tpm nvundefine NV1");
-		shell_error(sh, "  tpm nvundefine NV2");
-		return -EINVAL;
-	}
-
-	/* Parse and validate parameters */
-	if (strcasecmp(argv[1], "NV1") == 0) {
-		nvIndex = 0x013ffffe;
-	} else if (strcasecmp(argv[1], "NV2") == 0) {
-		nvIndex = 0x013fffff;
-	} else {
-		shell_error(sh, "Invalid index type: %s", argv[1]);
-		shell_error(sh, "Must be 'NV1' or 'NV2'");
-		return -EINVAL;
-	}
-
-	return tpm_nv_define_undefine_common(sh, nvIndex, argv[1], false);
+	return cmd_tpm_nvdefine_undefine(sh, argc, argv, false);
 }
 /**
  * @brief Debug and print NV index TPCM1 structure
@@ -650,81 +624,6 @@ static int cmd_tpm_nvread(const struct shell *sh, size_t argc, char **argv)
 }
 
 /**
- * @brief Perform TPM startup
- *
- * This function implements TPM startup shell command for secure boot
- */
-static int cmd_tpm_startup(const struct shell *sh, size_t argc, char **argv)
-{
-	int rc;
-	WOLFTPM2_DEV dev;
-
-	shell_print(sh, "TPM Startup");
-
-	/* Initialize TPM */
-	rc = tpm_init_common(sh, &dev);
-	if (rc != 0) {
-		return rc;
-	}
-
-	/* Perform startup */
-	Startup_In p = {
-		.startupType = TPM_SU_CLEAR,
-	};
-
-	rc = TPM2_Startup(&p);
-	if (rc == TPM_RC_INITIALIZE) {
-		shell_print(sh, "TPM already initialized");
-	} else if (rc != TPM_RC_SUCCESS) {
-		shell_error(sh, "wolfTPM2_Startup failed: 0x%x", rc);
-		goto exit;
-	}
-
-	shell_print(sh, "TPM Startup successful");
-	tpm_cleanup_common(&dev);
-	return 0;
-exit:
-	tpm_cleanup_common(&dev);
-	return -EIO;
-}
-
-/**
- * @brief Perform TPM self-test
- *
- * This function implements TPM self-test shell command for secure boot
- */
-static int cmd_tpm_selftest(const struct shell *sh, size_t argc, char **argv)
-{
-	int rc;
-	WOLFTPM2_DEV dev;
-
-	shell_print(sh, "TPM Self Test");
-
-	/* Initialize TPM */
-	rc = tpm_init_common(sh, &dev);
-	if (rc != 0) {
-		return rc;
-	}
-
-	/* Perform self test */
-	SelfTest_In p = {
-		.fullTest = 1,
-	};
-	rc = TPM2_SelfTest(&p);
-	if (rc != TPM_RC_SUCCESS) {
-		shell_error(sh, "wolfTPM2_SelfTest failed: 0x%x", rc);
-		goto exit;
-	}
-
-	shell_print(sh, "TPM Self Test successful");
-	tpm_cleanup_common(&dev);
-	return 0;
-exit:
-	tpm_cleanup_common(&dev);
-	return -EIO;
-}
-
-/**
  * @brief Perform TPM Clear operation
  *
  * This function implements TPM Clear shell command for secure boot
@@ -866,30 +765,25 @@ static int cmd_tpm_updatemeasure(const struct shell *sh, size_t argc, char **arg
 
 	/* Check parameter count - support 4 or 5 parameters */
 	if (argc != 4 && argc != 5) {
-		shell_error(sh, "Usage: tpm updatemeasure <flash addr> <flash size> "
-				"<policy=goon|hang> [hash_value]");
-		shell_error(sh, "  flash addr: Flash start address (hex format, e.g. 0x00100000)");
-		shell_error(sh, "  flash size: Flash size (hex format, e.g. 0x00080000)");
+		shell_error(sh, "Command Usage Examples:");
+		shell_error(sh, "  Auto-calculate: tpm updatemeasure <u-boot addr> <u-boot size>"
+				" <policy=goon|hang>");
+		shell_error(sh, "  Custom hash: tpm updatemeasure <u-boot addr> <u-boot size>"
+				" <policy=goon|hang> [hash_value]");
+		shell_error(sh, "  u-boot addr: The starting address of U-Boot "
+				" (in hexadecimal format, e.g., 0x00100000)");
+		shell_error(sh, "  u-boot size: The size of U-Boot "
+				" (in hexadecimal format, e.g., 0x00080000)");
 		shell_error(sh, "  policy: Security policy (policy=goon or policy=hang)");
-		shell_error(
-			sh,
-			"  hash_value (optional): User-provided hash value (64-bit hex string)");
-		shell_error(sh, "");
-		shell_error(sh, "Policy values:");
-		shell_error(sh,
-			    "  policy=goon (0x%08X) - Continue execution on verification failure",
-			    GOON);
-		shell_error(sh, "  policy=hang (0x%08X) - Halt system on verification failure",
-			    HANG);
-		shell_error(sh, "");
+		shell_error(sh, "  hash_value (optional): User-provided hash value "
+				" (64-character hexadecimal string)");
 		shell_error(sh, "Examples:");
-		shell_error(sh, "  tpm updatemeasure 0x100000 0x80000 policy=goon");
-		shell_error(sh, "  tpm updatemeasure 0x100000 0x80000 policy=hang "
-				"1234567890123456789012345678901234567890123456789012345678901234");
+		shell_error(sh, "  tpm updatemeasure 0x00100000 0x00080000 policy=goon");
+		shell_error(sh,
+			    "  tpm updatemeasure 0x00100000 0x00080000 policy=hang "
+			    " 1234567890123456789012345678901234567890123456789012345678901234");
 		return -EINVAL;
 	}
-
-	shell_print(sh, "=== TPM Measure Boot ===");
 
 	/* Parse U-Boot address */
 	flash_addr = strtoul(argv[1], NULL, 0);
@@ -951,14 +845,13 @@ static int cmd_tpm_updatemeasure(const struct shell *sh, size_t argc, char **arg
 	/* Display policy information */
 	if (policy == GOON) {
 		shell_print(sh,
-			    "  Security Policy: GOON (0x%08X) - Continue execution on verification "
+			    "Security Policy: GOON (0x%08X) - Continue execution on verification "
 			    "failure",
 			    policy);
 	} else if (policy == HANG) {
-		shell_print(
-			sh,
-			"  Security Policy: HANG (0x%08X) - Halt system on verification failure",
-			policy);
+		shell_print(sh,
+			    "Security Policy: HANG (0x%08X) - Halt system on verification failure",
+			    policy);
 	}
 
 	/* Display hash source */
@@ -985,10 +878,6 @@ static int cmd_tpm_updatemeasure(const struct shell *sh, size_t argc, char **arg
 	/* Calculate or use hash value */
 	if (!use_user_hash) {
 		/* Calculate SM3 hash of U-Boot region */
-		shell_print(sh, "Calculating SM3 hash for U-Boot region...");
-		shell_print(sh, "Reading %u bytes from flash offset 0x%08X...", flash_size,
-			    flash_addr);
-
 		rc = calculate_uboot_hash_sm3(flash_addr, flash_size, calculated_hash);
 		if (rc != 0) {
 			shell_error(sh, "Failed to calculate U-Boot hash: %d", rc);
@@ -1008,13 +897,12 @@ static int cmd_tpm_updatemeasure(const struct shell *sh, size_t argc, char **arg
 		shell_print(sh, "Using user-provided hash value (skipping flash calculation)");
 	}
 
-	/* Create TPCM1 structure and update configuration */
-	shell_print(sh, "Creating TPCM1 structure with U-Boot measure boot configuration...");
 	initial_tpcm1(&tpcm1);
 
 	/* Update TPCM1 configuration with Boot measure boot parameters */
 	tpcm1.spiRom[0].spiRomsub[0].startAddr = flash_addr;
 	tpcm1.spiRom[0].spiRomsub[0].len = flash_size;
+	tpcm1.spiRom[0].spiRomsub[0].hashAlg = TPM2_ALG_SM3_256;
 
 	/* Set security policy */
 	tpcm1.spiRom[0].spiRomsub[0].policy[0] = (policy >> 24) & 0xFF;
@@ -1023,16 +911,9 @@ static int cmd_tpm_updatemeasure(const struct shell *sh, size_t argc, char **arg
 	tpcm1.spiRom[0].spiRomsub[0].policy[3] = (policy) & 0xFF;
 
 	/* Set final hash value to TPCM1 structure */
+	tpcm1.spiRom[0].spiRomsub[0].digest.size = SM3_DIGEST_SIZE;
 	XMEMCPY(tpcm1.spiRom[0].spiRomsub[0].digest.digest.sm3_256, final_hash, SM3_DIGEST_SIZE);
-
-	if (use_user_hash) {
-		shell_print(sh, "User-provided hash written to TPCM1 structure");
-	} else {
-		shell_print(sh, "Calculated hash written to TPCM1 structure");
-	}
-
 	/* Initialize TPM */
-	shell_print(sh, "Initializing TPM for measure boot update...");
 	rc = tpm_init_common(sh, &dev);
 	if (rc != 0) {
 		return rc;
@@ -1051,8 +932,6 @@ static int cmd_tpm_updatemeasure(const struct shell *sh, size_t argc, char **arg
 	/* Prepare to write TPCM1 data */
 	bytesRead = sizeof(tpcm1);
 	XMEMCPY(buffer, &tpcm1, bytesRead);
-
-	shell_print(sh, "Writing TPCM1 measure boot configuration to NV index 0x%08X...", nvIndex);
 
 	XMEMSET(&input, 0, sizeof(input));
 	input.authHandle = TPM_RH_OWNER;
@@ -1079,58 +958,6 @@ static int cmd_tpm_updatemeasure(const struct shell *sh, size_t argc, char **arg
 	shell_print(sh, "Flash measure boot configuration updated successfully");
 	shell_print(sh, "Monitored region: 0x%08X - 0x%08X (%u bytes)", flash_addr,
 		    flash_addr + flash_size - 1, flash_size);
-
-	/* Display different information based on policy value */
-	if (policy == GOON) {
-		shell_print(sh,
-			    "Security policy: GOON (0x%08X) - System will continue on verification "
-			    "failure",
-			    policy);
-		shell_print(sh, "  Note: This allows system boot even if hash verification fails");
-	} else if (policy == HANG) {
-		shell_print(
-			sh,
-			"Security policy: HANG (0x%08X) - System will halt on verification failure",
-			policy);
-		shell_print(sh, "  Warning: System will stop booting if hash verification fails");
-	}
-
-	/* Display hash information */
-	if (use_user_hash) {
-		shell_print(sh, "✓ User-provided hash written to TPCM1 NV storage");
-	} else {
-		shell_print(sh, "✓ Calculated SM3 hash written to TPCM1 NV storage");
-	}
-
-	/* Display configuration summary */
-	shell_print(sh, "Configuration Summary:");
-	shell_print(sh, "  NV Index: 0x%08X (TPCM1)", nvIndex);
-	shell_print(sh, "  Hash Algorithm: SM3_256 (0x%04X)", TPM2_ALG_SM3_256);
-	shell_print(sh, "  Data Written: %zu bytes", bytesRead);
-	shell_print(sh, "  Policy Constants Used:");
-	shell_print(sh, "    GOON = 0x%08X", GOON);
-	shell_print(sh, "    HANG = 0x%08X", HANG);
-	shell_print(sh, "    Selected Policy = 0x%08X", policy);
-
-	/* Display final used hash value */
-	shell_print(sh, "");
-	if (use_user_hash) {
-		shell_print(sh, "User-provided Hash (written to TPCM1):");
-	} else {
-		shell_print(sh, "Calculated Hash (written to TPCM1):");
-	}
-
-	for (int i = 0; i < SM3_DIGEST_SIZE; i++) {
-		shell_fprintf(sh, SHELL_NORMAL, "%02x", final_hash[i]);
-		if ((i + 1) % 16 == 0) {
-			shell_print(sh, "");
-		} else if ((i + 1) % 8 == 0) {
-			shell_fprintf(sh, SHELL_NORMAL, " ");
-		}
-	}
-	if (SM3_DIGEST_SIZE % 16 != 0) {
-		shell_print(sh, "");
-	}
 
 	return 0;
 }
@@ -1223,10 +1050,7 @@ int TPM2_Zephyr_IoCb(TPM2_CTX *ctx, const byte *txBuf, byte *rxBuf, word16 xferS
 /* Define the subcommands for the 'tpm' command */
 /* Subcommand set for 'tpm' */
 SHELL_STATIC_SUBCMD_SET_CREATE(
-	tpm_cmds,
-	SHELL_CMD_ARG(startup, NULL, "TPM Startup\nUsage: tpm startup", cmd_tpm_startup, 1, 0),
-	SHELL_CMD_ARG(selftest, NULL, "TPM Self Test\nUsage: tpm selftest", cmd_tpm_selftest, 1, 0),
-	SHELL_CMD_ARG(clear, NULL, "TPM Clear\nUsage:tpm clear", cmd_tpm_clear, 1, 0),
+	tpm_cmds, SHELL_CMD_ARG(clear, NULL, "TPM Clear\nUsage:tpm clear", cmd_tpm_clear, 1, 0),
 	SHELL_CMD_ARG(nvdefine, NULL, "Define dual NV indexes for secure boot\nUsage: tpm nvdefine",
 		      cmd_tpm_nvdefine, 2, 0),
 	SHELL_CMD_ARG(nvundefine, NULL,
