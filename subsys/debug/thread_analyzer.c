@@ -158,6 +158,13 @@ static void thread_analyze_cb(const struct k_thread *cthread, void *user_data)
 	if (ret == 0) {
 		info.utilization = (info.usage.execution_cycles * 100U) /
 			rt_stats_all.execution_cycles;
+
+#ifdef CONFIG_THREAD_RUNTIME_STATS_OVERFLOW_PROTECTION
+		/* CPU usage = (single thread / all CPU cores) × 100% */
+		printk("dubug:%-14s :thread_cycles=%llu, system_cycles=%llu, utilization=%u%%\n",
+		       info.name, info.usage.execution_cycles, rt_stats_all.execution_cycles,
+		       info.utilization);
+#endif
 	}
 #endif
 

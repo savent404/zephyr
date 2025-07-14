@@ -552,6 +552,18 @@ config SCHED_THREAD_USAGE_AUTO_ENABLE
 	  When set, this option automatically enables the gathering of both
 	  the thread and CPU usage statistics.
 
+config THREAD_RUNTIME_STATS_OVERFLOW_PROTECTION
+	bool "thread runtime statistics overflow protection"
+	default n
+	depends on SCHED_THREAD_USAGE
+	help
+	  Enable protection against 32-bit counter overflow and corruption in
+	  thread runtime statistics. This adds overflow detection and correction
+	  logic to prevent incorrect CPU usage calculations. When enabled, the
+	  system will detect counter overflows and apply corrections, and also
+	  detect and reset corrupted accumulated statistics that exceed reasonable
+	  limits. This feature is particularly useful for long-running systems
+	  where cycle counters may overflow.
 endif # THREAD_RUNTIME_STATS
 
 endmenu

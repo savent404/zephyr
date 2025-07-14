@@ -11,12 +11,72 @@
 #include <zephyr/spinlock.h>
 #include <zephyr/sys/check.h>
 
+#if CONFIG_THREAD_RUNTIME_STATS_OVERFLOW_PROTECTION
+/* Forward declaration */
+void z_usage_stats_reset_if_corrupted(void);
+
+/* Magic numbers for overflow and corruption detection */
+#define CYCLES_OVERFLOW_THRESHOLD     100000000U
+#define CYCLES_RESET_DEFAULT          1000U
+#define TOTAL_CYCLES_CORRUPTION_LIMIT 1000000000000ULL
+
+#endif /* CONFIG_THREAD_RUNTIME_STATS_OVERFLOW_PROTECTION */
+
 /* Need one of these for this to work */
 #if !defined(CONFIG_USE_SWITCH) && !defined(CONFIG_INSTRUMENT_THREAD_SWITCHING)
 #error "No data backend configured for CONFIG_SCHED_THREAD_USAGE"
 #endif /* !CONFIG_USE_SWITCH && !CONFIG_INSTRUMENT_THREAD_SWITCHING */
 
 static struct k_spinlock usage_lock;
+
+#if CONFIG_THREAD_RUNTIME_STATS_OVERFLOW_PROTECTION
+/**
+ * @brief Check and correct counter overflow in cycle calculations
+ *
+ * @param u0 Previous counter value
+ * @param now Current counter value
+ * @param func_name Function name for logging (can be NULL)
+ * @return Corrected cycle count, or 0 if overflow is too large
+ */
+static uint32_t check_and_correct_overflow(uint32_t u0, uint32_t now, const char *func_name)
+{
+	uint32_t cycles = now - u0;
+
+	if (cycles > UINT32_MAX / 2) {
+		if (func_name) {
+			printk("INFO: Counter overflow in %s, u0=%u, now=%u, correcting...\n",
+			       func_name, u0, now);
+		}
+		cycles = (UINT32_MAX - u0) + now + 1;
+
+		if (cycles > CYCLES_OVERFLOW_THRESHOLD) {
+			if (func_name) {
+				printk("WARN: Corrected cycles still too large (%u), using "
+				       "default\n",
+				       cycles);
+			}
+			cycles = CYCLES_RESET_DEFAULT;
+		}
+	}
+
+	return cycles;
+}
+
+/**
+ * @brief Check if total cycles indicate corruption and reset if needed
+ *
+ * @param total Pointer to total cycles value
+ * @return true if corruption was detected and reset
+ */
+static bool check_and_reset_corruption(uint64_t *total)
+{
+	if (*total > TOTAL_CYCLES_CORRUPTION_LIMIT) {
+		*total = 0;
+		return true;
+	}
+	return false;
+}
+#endif /* CONFIG_THREAD_RUNTIME_STATS_OVERFLOW_PROTECTION */
 
 static uint32_t usage_now(void)
 {
@@ -35,9 +95,23 @@ static uint32_t usage_now(void)
 #ifdef CONFIG_SCHED_THREAD_USAGE_ALL
 static void sched_cpu_update_usage(struct _cpu *cpu, uint32_t cycles)
 {
+#if CONFIG_THREAD_RUNTIME_STATS_OVERFLOW_PROTECTION
+	if (!cpu->usage || !cpu->usage->track_usage) {
+		return;
+	}
+#else
 	if (!cpu->usage->track_usage) {
 		return;
 	}
+#endif /* CONFIG_THREAD_RUNTIME_STATS_OVERFLOW_PROTECTION */
+
+#if CONFIG_THREAD_RUNTIME_STATS_OVERFLOW_PROTECTION && CONFIG_SCHED_THREAD_USAGE_ANALYSIS
+	if (check_and_reset_corruption(&cpu->usage->total)) {
+		cpu->usage->current = 0;
+		cpu->usage->longest = 0;
+		cpu->usage->num_windows = 1;
+	}
+#endif /* CONFIG_THREAD_RUNTIME_STATS_OVERFLOW_PROTECTION */
 
 	if (cpu->current != cpu->idle_thread) {
 		cpu->usage->total += cycles;
@@ -55,11 +129,20 @@ static void sched_cpu_update_usage(struct _cpu *cpu, uint32_t cycles)
 	}
 }
 #else
-#define sched_cpu_update_usage(cpu, cycles)   do { } while (0)
+#define sched_cpu_update_usage(cpu, cycles)                                                        \
+	do {                                                                                       \
+	} while (0)
 #endif /* CONFIG_SCHED_THREAD_USAGE_ALL */
 
 static void sched_thread_update_usage(struct k_thread *thread, uint32_t cycles)
 {
+#if CONFIG_THREAD_RUNTIME_STATS_OVERFLOW_PROTECTION && CONFIG_SCHED_THREAD_USAGE_ANALYSIS
+	if (check_and_reset_corruption(&thread->base.usage.total)) {
+		thread->base.usage.current = 0;
+		thread->base.usage.longest = 0;
+	}
+#endif /* CONFIG_THREAD_RUNTIME_STATS_OVERFLOW_PROTECTION */
+
 	thread->base.usage.total += cycles;
 
 #ifdef CONFIG_SCHED_THREAD_USAGE_ANALYSIS
@@ -74,11 +157,11 @@ static void sched_thread_update_usage(struct k_thread *thread, uint32_t cycles)
 void z_sched_usage_start(struct k_thread *thread)
 {
 #ifdef CONFIG_SCHED_THREAD_USAGE_ANALYSIS
-	k_spinlock_key_t  key;
+	k_spinlock_key_t key;
 
 	key = k_spin_lock(&usage_lock);
 
-	_current_cpu->usage0 = usage_now();   /* Always update */
+	_current_cpu->usage0 = usage_now(); /* Always update */
 
 	if (thread->base.usage.track_usage) {
 		thread->base.usage.num_windows++;
@@ -98,14 +181,18 @@ void z_sched_usage_start(struct k_thread *thread)
 
 void z_sched_usage_stop(void)
 {
-	k_spinlock_key_t k   = k_spin_lock(&usage_lock);
+	k_spinlock_key_t k = k_spin_lock(&usage_lock);
 
-	struct _cpu     *cpu = _current_cpu;
+	struct _cpu *cpu = _current_cpu;
 
 	uint32_t u0 = cpu->usage0;
-
 	if (u0 != 0) {
+#if CONFIG_THREAD_RUNTIME_STATS_OVERFLOW_PROTECTION
+		uint32_t now = usage_now();
+		uint32_t cycles = check_and_correct_overflow(u0, now, "usage_stop");
+#else
 		uint32_t cycles = usage_now() - u0;
+#endif
 
 		if (cpu->current->base.usage.track_usage) {
 			sched_thread_update_usage(cpu->current, cycles);
@@ -121,16 +208,19 @@ void z_sched_usage_stop(void)
 #ifdef CONFIG_SCHED_THREAD_USAGE_ALL
 void z_sched_cpu_usage(uint8_t cpu_id, struct k_thread_runtime_stats *stats)
 {
-	k_spinlock_key_t  key;
+	k_spinlock_key_t key;
 	struct _cpu *cpu;
 
 	key = k_spin_lock(&usage_lock);
 	cpu = _current_cpu;
 
-
 	if (&_kernel.cpus[cpu_id] == cpu) {
-		uint32_t  now = usage_now();
+		uint32_t now = usage_now();
+#if CONFIG_THREAD_RUNTIME_STATS_OVERFLOW_PROTECTION
+		uint32_t cycles = check_and_correct_overflow(cpu->usage0, now, "cpu_usage");
+#else
 		uint32_t cycles = now - cpu->usage0;
+#endif
 
 		/*
 		 * Getting stats for the current CPU. Update both its
@@ -148,21 +238,55 @@ void z_sched_cpu_usage(uint8_t cpu_id, struct k_thread_runtime_stats *stats)
 		cpu->usage0 = now;
 	}
 
-	stats->total_cycles     = cpu->usage->total;
+#if CONFIG_THREAD_RUNTIME_STATS_OVERFLOW_PROTECTION
+	stats->total_cycles = 0;
 #ifdef CONFIG_SCHED_THREAD_USAGE_ANALYSIS
-	stats->current_cycles   = cpu->usage->current;
-	stats->peak_cycles      = cpu->usage->longest;
+	stats->current_cycles = 0;
+	stats->peak_cycles = 0;
+	stats->average_cycles = 0;
+#endif
+#else
+	stats->total_cycles = cpu->usage->total;
+#endif
+
+#ifdef CONFIG_SCHED_THREAD_USAGE_ANALYSIS
+	stats->current_cycles = cpu->usage->current;
+	stats->peak_cycles = cpu->usage->longest;
 
 	if (cpu->usage->num_windows == 0) {
 		stats->average_cycles = 0;
 	} else {
-		stats->average_cycles = stats->total_cycles /
-					cpu->usage->num_windows;
+		stats->average_cycles = stats->total_cycles / cpu->usage->num_windows;
 	}
 #endif /* CONFIG_SCHED_THREAD_USAGE_ANALYSIS */
 
-	stats->idle_cycles =
-		_kernel.cpus[cpu_id].idle_thread->base.usage.total;
+#if CONFIG_THREAD_RUNTIME_STATS_OVERFLOW_PROTECTION
+	if (cpu->usage) {
+		stats->total_cycles = cpu->usage->total;
+#ifdef CONFIG_SCHED_THREAD_USAGE_ANALYSIS
+		stats->current_cycles = cpu->usage->current;
+		stats->peak_cycles = cpu->usage->longest;
+
+		if (cpu->usage->num_windows == 0) {
+			stats->average_cycles = 0;
+		} else {
+			stats->average_cycles = stats->total_cycles / cpu->usage->num_windows;
+		}
+#endif /* CONFIG_SCHED_THREAD_USAGE_ANALYSIS */
+	}
+
+	stats->idle_cycles = 0;
+	if (_kernel.cpus[cpu_id].idle_thread) {
+		stats->idle_cycles = _kernel.cpus[cpu_id].idle_thread->base.usage.total;
+
+		if (check_and_reset_corruption(&stats->idle_cycles)) {
+			_kernel.cpus[cpu_id].idle_thread->base.usage.total = 0;
+			stats->idle_cycles = 0;
+		}
+	}
+#else
+	stats->idle_cycles = _kernel.cpus[cpu_id].idle_thread->base.usage.total;
+#endif /* CONFIG_THREAD_RUNTIME_STATS_OVERFLOW_PROTECTION && CONFIG_SCHED_THREAD_USAGE_ANALYSIS */
 
 	stats->execution_cycles = stats->total_cycles + stats->idle_cycles;
 
@@ -170,19 +294,21 @@ void z_sched_cpu_usage(uint8_t cpu_id, struct k_thread_runtime_stats *stats)
 }
 #endif /* CONFIG_SCHED_THREAD_USAGE_ALL */
 
-void z_sched_thread_usage(struct k_thread *thread,
-			  struct k_thread_runtime_stats *stats)
+void z_sched_thread_usage(struct k_thread *thread, struct k_thread_runtime_stats *stats)
 {
 	struct _cpu *cpu;
-	k_spinlock_key_t  key;
+	k_spinlock_key_t key;
 
 	key = k_spin_lock(&usage_lock);
 	cpu = _current_cpu;
 
-
 	if (thread == cpu->current) {
 		uint32_t now = usage_now();
+#if CONFIG_THREAD_RUNTIME_STATS_OVERFLOW_PROTECTION
+		uint32_t cycles = check_and_correct_overflow(cpu->usage0, now, "thread_usage");
+#else
 		uint32_t cycles = now - cpu->usage0;
+#endif
 
 		/*
 		 * Getting stats for the current thread. Update both the
@@ -201,19 +327,18 @@ void z_sched_thread_usage(struct k_thread *thread,
 	}
 
 	stats->execution_cycles = thread->base.usage.total;
-	stats->total_cycles     = thread->base.usage.total;
+	stats->total_cycles = thread->base.usage.total;
 
 	/* Copy-out the thread's usage stats */
 
 #ifdef CONFIG_SCHED_THREAD_USAGE_ANALYSIS
 	stats->current_cycles = thread->base.usage.current;
-	stats->peak_cycles    = thread->base.usage.longest;
+	stats->peak_cycles = thread->base.usage.longest;
 
 	if (thread->base.usage.num_windows == 0) {
 		stats->average_cycles = 0;
 	} else {
-		stats->average_cycles = stats->total_cycles /
-					thread->base.usage.num_windows;
+		stats->average_cycles = stats->total_cycles / thread->base.usage.num_windows;
 	}
 #endif /* CONFIG_SCHED_THREAD_USAGE_ANALYSIS */
 
@@ -225,9 +350,9 @@ void z_sched_thread_usage(struct k_thread *thread,
 }
 
 #ifdef CONFIG_SCHED_THREAD_USAGE_ANALYSIS
-int k_thread_runtime_stats_enable(k_tid_t  thread)
+int k_thread_runtime_stats_enable(k_tid_t thread)
 {
-	k_spinlock_key_t  key;
+	k_spinlock_key_t key;
 
 	CHECKIF(thread == NULL) {
 		return -EINVAL;
@@ -246,7 +371,7 @@ int k_thread_runtime_stats_enable(k_tid_t  thread)
 	return 0;
 }
 
-int k_thread_runtime_stats_disable(k_tid_t  thread)
+int k_thread_runtime_stats_disable(k_tid_t thread)
 {
 	k_spinlock_key_t key;
 
@@ -261,7 +386,13 @@ int k_thread_runtime_stats_disable(k_tid_t  thread)
 		thread->base.usage.track_usage = false;
 
 		if (thread == cpu->current) {
-			uint32_t cycles = usage_now() - cpu->usage0;
+			uint32_t now = usage_now();
+#if CONFIG_THREAD_RUNTIME_STATS_OVERFLOW_PROTECTION
+			uint32_t cycles =
+				check_and_correct_overflow(cpu->usage0, now, "stats_disable");
+#else
+			uint32_t cycles = now - cpu->usage0;
+#endif
 
 			sched_thread_update_usage(thread, cycles);
 			sched_cpu_update_usage(cpu, cycles);
@@ -277,11 +408,11 @@ int k_thread_runtime_stats_disable(k_tid_t  thread)
 #ifdef CONFIG_SCHED_THREAD_USAGE_ALL
 void k_sys_runtime_stats_enable(void)
 {
-	k_spinlock_key_t  key;
+	k_spinlock_key_t key;
 
 	key = k_spin_lock(&usage_lock);
 
-	if (_current_cpu->usage->track_usage) {
+	if (_current_cpu->usage && _current_cpu->usage->track_usage) {
 
 		/*
 		 * Usage tracking is already enabled on the current CPU
@@ -306,6 +437,10 @@ void k_sys_runtime_stats_enable(void)
 	}
 
 	k_spin_unlock(&usage_lock, key);
+
+#if CONFIG_THREAD_RUNTIME_STATS_OVERFLOW_PROTECTION
+	z_usage_stats_reset_if_corrupted();
+#endif
 }
 
 void k_sys_runtime_stats_disable(void)
@@ -315,7 +450,7 @@ void k_sys_runtime_stats_disable(void)
 
 	key = k_spin_lock(&usage_lock);
 
-	if (!_current_cpu->usage->track_usage) {
+	if (!_current_cpu->usage || !_current_cpu->usage->track_usage) {
 
 		/*
 		 * Usage tracking is already disabled on the current CPU
@@ -334,7 +469,14 @@ void k_sys_runtime_stats_disable(void)
 	for (uint8_t i = 0; i < num_cpus; i++) {
 		cpu = &_kernel.cpus[i];
 		if (cpu->usage0 != 0) {
-			sched_cpu_update_usage(cpu, now - cpu->usage0);
+#if CONFIG_THREAD_RUNTIME_STATS_OVERFLOW_PROTECTION
+			uint32_t cycles =
+				check_and_correct_overflow(cpu->usage0, now, "sys_stats_disable");
+#else
+			uint32_t cycles = now - cpu->usage0;
+#endif
+
+			sched_cpu_update_usage(cpu, cycles);
 		}
 		cpu->usage->track_usage = false;
 	}
@@ -346,7 +488,7 @@ void k_sys_runtime_stats_disable(void)
 #ifdef CONFIG_OBJ_CORE_STATS_THREAD
 int z_thread_stats_raw(struct k_obj_core *obj_core, void *stats)
 {
-	k_spinlock_key_t  key;
+	k_spinlock_key_t key;
 
 	key = k_spin_lock(&usage_lock);
 	memcpy(stats, obj_core->stats, sizeof(struct k_cycle_stats));
@@ -368,8 +510,8 @@ int z_thread_stats_query(struct k_obj_core *obj_core, void *stats)
 
 int z_thread_stats_reset(struct k_obj_core *obj_core)
 {
-	k_spinlock_key_t  key;
-	struct k_cycle_stats  *stats;
+	k_spinlock_key_t key;
+	struct k_cycle_stats *stats;
 	struct k_thread *thread;
 
 	thread = CONTAINER_OF(obj_core, struct k_thread, obj_core);
@@ -380,7 +522,7 @@ int z_thread_stats_reset(struct k_obj_core *obj_core)
 #ifdef CONFIG_SCHED_THREAD_USAGE_ANALYSIS
 	stats->current = 0ULL;
 	stats->longest = 0ULL;
-	stats->num_windows = (thread->base.usage.track_usage) ?  1U : 0U;
+	stats->num_windows = (thread->base.usage.track_usage) ? 1U : 0U;
 #endif /* CONFIG_SCHED_THREAD_USAGE_ANALYSIS */
 
 	if (thread != _current_cpu->current) {
@@ -401,7 +543,12 @@ int z_thread_stats_reset(struct k_obj_core *obj_core)
 	/* Update the current CPU stats. */
 
 	uint32_t now = usage_now();
+#if CONFIG_THREAD_RUNTIME_STATS_OVERFLOW_PROTECTION
+	uint32_t cycles =
+		check_and_correct_overflow(_current_cpu->usage0, now, "thread_stats_reset");
+#else
 	uint32_t cycles = now - _current_cpu->usage0;
+#endif
 
 	sched_cpu_update_usage(_current_cpu, cycles);
 
@@ -442,7 +589,7 @@ int z_thread_stats_enable(struct k_obj_core *obj_core)
 #ifdef CONFIG_OBJ_CORE_STATS_SYSTEM
 int z_cpu_stats_raw(struct k_obj_core *obj_core, void *stats)
 {
-	k_spinlock_key_t  key;
+	k_spinlock_key_t key;
 
 	key = k_spin_lock(&usage_lock);
 	memcpy(stats, obj_core->stats, sizeof(struct k_cycle_stats));
@@ -453,7 +600,7 @@ int z_cpu_stats_raw(struct k_obj_core *obj_core, void *stats)
 
 int z_cpu_stats_query(struct k_obj_core *obj_core, void *stats)
 {
-	struct _cpu  *cpu;
+	struct _cpu *cpu;
 
 	cpu = CONTAINER_OF(obj_core, struct _cpu, obj_core);
 
@@ -466,11 +613,10 @@ int z_cpu_stats_query(struct k_obj_core *obj_core, void *stats)
 #ifdef CONFIG_OBJ_CORE_STATS_SYSTEM
 int z_kernel_stats_raw(struct k_obj_core *obj_core, void *stats)
 {
-	k_spinlock_key_t  key;
+	k_spinlock_key_t key;
 
 	key = k_spin_lock(&usage_lock);
-	memcpy(stats, obj_core->stats,
-	       CONFIG_MP_MAX_NUM_CPUS * sizeof(struct k_cycle_stats));
+	memcpy(stats, obj_core->stats, CONFIG_MP_MAX_NUM_CPUS * sizeof(struct k_cycle_stats));
 	k_spin_unlock(&usage_lock, key);
 
 	return 0;
@@ -483,3 +629,35 @@ int z_kernel_stats_query(struct k_obj_core *obj_core, void *stats)
 	return k_thread_runtime_stats_all_get(stats);
 }
 #endif /* CONFIG_OBJ_CORE_STATS_SYSTEM */
+
+void z_usage_stats_reset_if_corrupted(void)
+{
+	k_spinlock_key_t key = k_spin_lock(&usage_lock);
+
+	unsigned int num_cpus = arch_num_cpus();
+
+	for (uint8_t i = 0; i < num_cpus; i++) {
+		struct _cpu *cpu = &_kernel.cpus[i];
+
+#if CONFIG_THREAD_RUNTIME_STATS_OVERFLOW_PROTECTION
+		if (cpu->usage && check_and_reset_corruption(&cpu->usage->total)) {
+#ifdef CONFIG_SCHED_THREAD_USAGE_ANALYSIS
+			cpu->usage->current = 0;
+			cpu->usage->longest = 0;
+			cpu->usage->num_windows = 1;
+#endif
+		}
+
+		if (cpu->idle_thread &&
+		    check_and_reset_corruption(&cpu->idle_thread->base.usage.total)) {
+#ifdef CONFIG_SCHED_THREAD_USAGE_ANALYSIS
+			cpu->idle_thread->base.usage.current = 0;
+			cpu->idle_thread->base.usage.longest = 0;
+			cpu->idle_thread->base.usage.num_windows = 1;
+#endif
+		}
+#endif /* CONFIG_THREAD_RUNTIME_STATS_OVERFLOW_PROTECTION */
+	}
+
+	k_spin_unlock(&usage_lock, key);
+}
