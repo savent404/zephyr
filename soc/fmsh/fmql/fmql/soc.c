@@ -99,6 +99,11 @@ static const struct arm_mmu_region mmu_regions[] = {
 			      DT_REG_SIZE_BY_IDX(DT_NODELABEL(spi1), 0), M_DEVICE),
 #endif
 
+#if DT_NODE_HAS_STATUS(DT_NODELABEL(i2c0), okay)
+	MMU_REGION_FLAT_ENTRY("i2c0", DT_REG_ADDR_BY_IDX(DT_NODELABEL(i2c0), 0),
+			      DT_REG_SIZE_BY_IDX(DT_NODELABEL(i2c0), 0), M_DEVICE),
+#endif
+
 #if DT_NODE_HAS_STATUS(DT_NODELABEL(arch_timer), okay)
 	MMU_REGION_FLAT_ENTRY("arch_timer", DT_REG_ADDR(DT_NODELABEL(arch_timer)),
 			      DT_REG_SIZE(DT_NODELABEL(arch_timer)), M_DEVICE),

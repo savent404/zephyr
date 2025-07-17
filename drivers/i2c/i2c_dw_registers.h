@@ -144,6 +144,7 @@ union ic_comp_param_1_register {
 #define DW_IC_REG_STATUS			(0x70)
 #define DW_IC_REG_TXFLR				(0x74)
 #define DW_IC_REG_RXFLR				(0x78)
+#define DW_IC_REG_TX_ABRT_SOURCE                (0x80)
 #define DW_IC_REG_DMA_CR                        (0x88)
 #define DW_IC_REG_TDLR                          (0x8C)
 #define DW_IC_REG_RDLR                          (0x90)
@@ -226,6 +227,7 @@ DEFINE_TEST_BIT_OP(status_sa, DW_IC_REG_STATUS, DW_IC_STATUS_SA_BIT)
 
 DEFINE_MM_REG_READ(txflr, DW_IC_REG_TXFLR, 32)
 DEFINE_MM_REG_READ(rxflr, DW_IC_REG_RXFLR, 32)
+DEFINE_MM_REG_READ(tx_abrt_source, DW_IC_REG_TX_ABRT_SOURCE, 32)
 
 DEFINE_MM_REG_READ(dma_cr, DW_IC_REG_DMA_CR, 32)
 DEFINE_MM_REG_WRITE(dma_cr, DW_IC_REG_DMA_CR, 32)

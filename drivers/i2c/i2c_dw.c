@@ -46,6 +46,9 @@
 #include <zephyr/irq.h>
 LOG_MODULE_REGISTER(i2c_dw);
 
+/* Delay in microseconds for I2C bus to settle in polling mode */
+#define DW_I2C_POLL_DELAY_US 50
+
 #include "i2c-priv.h"
 
 static inline uint32_t get_regs(const struct device *dev)
@@ -335,9 +338,23 @@ static int i2c_dw_data_send(const struct device *dev)
 		dw->xfr_len--;
 		dw->xfr_buf++;
 
+#if CONFIG_I2C_DW_POLLING
+		/* Note: Add a small delay to allow the I2C bus to settle */
+		k_busy_wait(DW_I2C_POLL_DELAY_US);
+		/* In polling mode, check TX_ABRT_SOURCE register directly */
+		uint32_t abort_source = read_tx_abrt_source(reg_base);
+
+		if (abort_source != 0) {
+			/* Clear the abort by reading CLR_TX_ABRT register */
+			read_clr_tx_abrt(reg_base);
+			return -EIO;
+		}
+#else
+		/* In interrupt mode, use interrupt status register */
 		if (test_bit_intr_stat_tx_abrt(reg_base)) {
 			return -EIO;
 		}
+#endif
 	}
 
 	return 0;
@@ -710,6 +727,10 @@ static int i2c_dw_transfer_poll(const struct device *dev, struct i2c_msg *msgs, 
 			dw->state |= I2C_DW_CMD_SEND;
 			dw->request_bytes = 0U;
 			ret = i2c_dw_data_send(dev);
+			/* Check for immediate error from i2c_dw_data_send */
+			if (ret < 0) {
+				break;
+			}
 			/* wait for cmd to be done */
 			i2c_dw_busy_wait(dev);
 		} else {
