@@ -46,6 +46,9 @@ enum fw_global_key_e {
 	FW_CHECK,
 	FW_BOOT_CNT,
 	FW_MAX_BOOT,
+	FW_SECURITY_MODE,        /* security mode, e.g. "cert", "hash", "none" */
+	FW_SECURITY_POLICY,      /* security policy, e.g. "goon", "hang", "fallback" */
+	FW_SECURITY_TRUST_CHAIN, /* trust chain in hex, splited by ' ' */
 };
 
 /* NOTE: this is the prefix for the metadata partition,
@@ -61,12 +64,15 @@ const char *fw_global_keys[] = {
 	[FW_CHECK] = "check_boot",
 	[FW_BOOT_CNT] = "boot_count",
 	[FW_MAX_BOOT] = "max_boot",
+	[FW_SECURITY_MODE] = "security_mode",
+	[FW_SECURITY_POLICY] = "security_policy",
+	[FW_SECURITY_TRUST_CHAIN] = "trust_chain",
 };
 
 struct fw_metadata {
 	/* firmware header, offset 44 */
-	uint8_t fw_digest[32];
-	uint8_t fw_signature[32];
+	uint8_t fw_digest[32];     /* SHA256 digest */
+	uint8_t fw_signature[512]; /* RSA4096 signature */
 	uint32_t fw_size;
 	char fw_tag[64];
 	char fw_hash_algo[16]; /* e.g. "SHA256" */
@@ -154,7 +160,7 @@ static inline int fw_set_global(enum fw_global_key_e key, const char *val)
 
 static void fw_load_meta_from_env(uboot_env_t env, enum partition_e part, struct fw_metadata *meta)
 {
-	char val[64 + 1];
+	char val[sizeof(meta->fw_signature) * 2 + 1];
 
 	ARG_UNUSED(env);
 
@@ -165,13 +171,14 @@ static void fw_load_meta_from_env(uboot_env_t env, enum partition_e part, struct
 		size_t len = strnlen(val, sizeof(val));
 
 		if (len == 2 * sizeof(meta->fw_digest)) { /* hex is 2 chars per byte */
-			for (size_t i = 0; i < 32; i++) {
+			for (size_t i = 0; i < sizeof(meta->fw_digest); i++) {
 				char hex[3] = {val[i * 2], val[i * 2 + 1], '\0'};
 
 				meta->fw_digest[i] = strtoul(hex, NULL, 16);
 			}
 		} else {
-			LOG_WRN("Invalid digest length: %zu (expected 64)", len);
+			LOG_WRN("Invalid digest length: %zu (expected %zu)", len,
+				2 * sizeof(meta->fw_digest));
 		}
 	}
 	if (!fw_query_metadata(val, sizeof(val), FW_SIGNATURE, part)) {
@@ -179,13 +186,14 @@ static void fw_load_meta_from_env(uboot_env_t env, enum partition_e part, struct
 		size_t len = strnlen(val, sizeof(val));
 
 		if (len == 2 * sizeof(meta->fw_signature)) { /* hex is 2 chars per byte */
-			for (size_t i = 0; i < 32; i++) {
+			for (size_t i = 0; i < sizeof(meta->fw_signature); i++) {
 				char hex[3] = {val[i * 2], val[i * 2 + 1], '\0'};
 
 				meta->fw_signature[i] = strtoul(hex, NULL, 16);
 			}
 		} else {
-			LOG_WRN("Invalid signature length: %zu (expected 64)", len);
+			LOG_WRN("Invalid signature length: %zu (expected %zu)", len,
+				2 * sizeof(meta->fw_signature));
 		}
 	}
 
@@ -209,14 +217,19 @@ static void fw_load_meta_from_env(uboot_env_t env, enum partition_e part, struct
 static void fw_save_meta_to_env(uboot_env_t env, enum partition_e part, struct fw_metadata *meta)
 {
 	char key[64];
-	char val[64 + 1];
+	char val[sizeof(meta->fw_signature) * 2 + 1];
 	int rc;
 
 	/* set digest */
 	snprintf(key, sizeof(key), "%s_%c", fw_metadata_keys[FW_DIGEST],
 		 part == PART_A ? 'a' : 'b');
-	for (size_t i = 0; i < 32; i++) {
+	for (size_t i = 0; i < sizeof(meta->fw_digest); i++) {
 		snprintf(&val[i * 2], 3, "%02x", meta->fw_digest[i]);
+
+		if (i * 2 + 2 >= sizeof(val)) {
+			LOG_ERR("Digest too long for uboot env, truncating");
+			break;
+		}
 	}
 	rc = uboot_env_set(env, key, val);
 	if (rc) {
@@ -226,8 +239,13 @@ static void fw_save_meta_to_env(uboot_env_t env, enum partition_e part, struct f
 	/* set signature */
 	snprintf(key, sizeof(key), "%s_%c", fw_metadata_keys[FW_SIGNATURE],
 		 part == PART_A ? 'a' : 'b');
-	for (size_t i = 0; i < 32; i++) {
+	for (size_t i = 0; i < sizeof(meta->fw_signature); i++) {
 		snprintf(&val[i * 2], 3, "%02x", meta->fw_signature[i]);
+
+		if (i * 2 + 2 >= sizeof(val)) {
+			LOG_ERR("Signature too long for uboot env, truncating");
+			break;
+		}
 	}
 	rc = uboot_env_set(env, key, val);
 	if (rc) {
@@ -364,7 +382,6 @@ bool fw_is_valid(uint8_t slot)
 		return inst->is_valid;
 	}
 
-
 	return true;
 }
 
@@ -431,9 +448,14 @@ int fw_start(uint8_t slot, bool erase, struct stream_flash_ctx **stream)
 	return 0;
 }
 
-int fw_finish(uint8_t slot, const char *tag, size_t tag_len, const char *hash_algo)
+int fw_finish(uint8_t slot, const char *tag, size_t tag_len, const char *hash_algo,
+	      const char *hash, const char *signature, const char *trust_chain)
 {
 	int rc;
+	bool has_hash = false;
+	bool has_signature = false;
+	bool has_hash_algo = false;
+	bool has_trust_chain = false;
 
 	if (slot >= ARRAY_SIZE(fw_instance)) {
 		return -EINVAL;
@@ -459,20 +481,56 @@ int fw_finish(uint8_t slot, const char *tag, size_t tag_len, const char *hash_al
 	LOG_DBG("Start to prepare metadata...");
 	meta->fw_size = (uint32_t)bytes_written;
 
-	/* FIXME: assign digest and signature */
-	memset(meta->fw_digest, 0, sizeof(meta->fw_digest));
-	memset(meta->fw_signature, 0, sizeof(meta->fw_signature));
+	/* Update digest */
+	if (hash && strnlen(hash, 2 * sizeof(meta->fw_digest)) >= 2 * sizeof(meta->fw_digest)) {
+		for (size_t i = 0; i < sizeof(meta->fw_digest); i++) {
+			char hex[3] = {hash[i * 2], hash[i * 2 + 1], '\0'};
+
+			meta->fw_digest[i] = strtoul(hex, NULL, 16);
+		}
+		has_hash = true;
+	} else {
+		LOG_WRN("No hash provided (or invalid), using zero digest");
+		if (hash) {
+			LOG_WRN("Hash length: %zu (expected %zu)",
+				strnlen(hash, 2 * sizeof(meta->fw_digest) + 1),
+				2 * sizeof(meta->fw_digest));
+		}
+		memset(meta->fw_digest, 0, sizeof(meta->fw_digest));
+	}
+
+	/* Update signature */
+	if (signature &&
+	    strnlen(signature, 2 * sizeof(meta->fw_signature)) >= 2 * sizeof(meta->fw_signature)) {
+		for (size_t i = 0; i < sizeof(meta->fw_signature); i++) {
+			char hex[3] = {signature[i * 2], signature[i * 2 + 1], '\0'};
+
+			meta->fw_signature[i] = strtoul(hex, NULL, 16);
+		}
+		has_signature = true;
+	} else {
+		LOG_WRN("No signature provided (or invalid), using zero signature");
+
+		if (signature) {
+			LOG_WRN("Signature length: %zu (expected %zu)",
+				strnlen(signature, 2 * sizeof(meta->fw_signature) + 1),
+				2 * sizeof(meta->fw_signature));
+		}
+		memset(meta->fw_signature, 0, sizeof(meta->fw_signature));
+	}
+
 	/* Set hash algorithm from parameter */
 	if (hash_algo && strnlen(hash_algo, sizeof(meta->fw_hash_algo)) > 0) {
 		snprintf(meta->fw_hash_algo, sizeof(meta->fw_hash_algo), "%s", hash_algo);
+		has_hash_algo = true;
 	}
 
 	memcpy(meta->fw_tag, tag, tag_len);
 
 	LOG_DBG("Firmware size: %u, tag: %s, hash_algo: %s", meta->fw_size, meta->fw_tag,
 		meta->fw_hash_algo);
-	LOG_HEXDUMP_DBG(meta->fw_digest, 32, "digest");
-	LOG_HEXDUMP_DBG(meta->fw_signature, 32, "signature");
+	LOG_HEXDUMP_DBG(meta->fw_digest, sizeof(meta->fw_digest), "digest");
+	LOG_HEXDUMP_DBG(meta->fw_signature, sizeof(meta->fw_signature), "signature");
 	inst->is_valid = true;
 	inst->is_streaming = false;
 
@@ -480,6 +538,20 @@ int fw_finish(uint8_t slot, const char *tag, size_t tag_len, const char *hash_al
 	fw_set_global(FW_ACTIVE, slot == PART_A ? "A" : "B");
 	fw_set_global(FW_CHECK, "1");
 	fw_set_global(FW_BOOT_CNT, "0");
+
+	if (trust_chain && strnlen(trust_chain, 256) > 0 &&
+	    strnlen(trust_chain, 32 * 1024) < 32 * 1024) {
+		LOG_DBG("Setting trust chain... len: %zu", strnlen(trust_chain, 32 * 1024));
+		fw_set_global(FW_SECURITY_TRUST_CHAIN, trust_chain);
+		has_trust_chain = true;
+	}
+
+	/*
+	 * NOTE: change security mode and policy by
+	 *  fw_set_global(FW_SECURITY_MODE, "cert");
+	 *  fw_set_global(FW_SECURITY_POLICY, "goon");
+	 *  or you can change those in u-boot env directly
+	 */
 
 	rc = uboot_env_save(env[0]);
 	if (rc) {

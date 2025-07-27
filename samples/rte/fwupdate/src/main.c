@@ -38,11 +38,14 @@ static struct fs_mount_t mp = {
 #error "This demo is only work with SD card"
 #endif
 
-static bool user_has_fw_update_job(void);
-static int user_deal_with_fw_update_job(void);
+static bool get_filecontent(const char *file, void **buf, size_t *size);
+static bool user_has_fw_update_job(size_t *firmware_size);
+static int user_deal_with_fw_update_job(size_t firmware_size);
 
 int main(void)
 {
+	size_t firmware_size = 0;
+
 	mp.mnt_point = DISK_MOUNT_PT;
 
 	int rc = fs_mount(&mp);
@@ -53,25 +56,27 @@ int main(void)
 		LOG_ERR("Error mounting disk.");
 	}
 
-	if (user_has_fw_update_job()) {
-		rc = user_deal_with_fw_update_job();
+	if (user_has_fw_update_job(&firmware_size)) {
+		rc = user_deal_with_fw_update_job(firmware_size);
 		LOG_INF("Firmware update job completed with rc=%d", rc);
 	}
 
 	return 0;
 }
 
-static bool user_has_fw_update_job(void)
+static bool user_has_fw_update_job(size_t *firmware_size)
 {
 	struct fs_file_t job_file;
 	char buf[16];
 	ssize_t bytes_read;
+	int ret = 0;
 
 	/* Initialize file object */
 	fs_file_t_init(&job_file);
 
+#if CONFIG_FWUPDATE_JOBFILE
 	/* Try to open job.txt */
-	int ret = fs_open(&job_file, DISK_MOUNT_PT "/job.txt", FS_O_READ);
+	ret = fs_open(&job_file, DISK_MOUNT_PT "/job.txt", FS_O_READ);
 
 	if (ret != 0) {
 		LOG_DBG("job.txt not found (err %d)", ret);
@@ -97,83 +102,28 @@ static bool user_has_fw_update_job(void)
 
 	LOG_INF("Found FWUPDATE directive in job.txt");
 	fs_close(&job_file);
+#endif
 
 	/* Check if fw.elf exists */
-	struct fs_dirent fw_file;
+	struct fs_dirent dirent;
 
-	ret = fs_stat(DISK_MOUNT_PT "/fw.elf", &fw_file);
-	if (ret != 0 || fw_file.type != FS_DIR_ENTRY_FILE) {
+	ret = fs_stat(DISK_MOUNT_PT "/fw.elf", &dirent);
+	if (ret != 0 || dirent.type != FS_DIR_ENTRY_FILE) {
 		LOG_WRN("fw.elf not found or not a regular file (rc=%d, errno=%d, type=%d)", ret,
-			errno, fw_file.type);
+			errno, dirent.type);
 		return false;
 	}
 
-	LOG_INF("Found fw.elf file (size: %u bytes)", fw_file.size);
+	LOG_INF("Found fw.elf file (size: %u bytes)", dirent.size);
+	*firmware_size = dirent.size;
 	return true;
 }
 
-static int user_deal_with_fw_update_job(void)
+static int user_deal_with_fw_update_job(size_t firmware_size)
 {
 	int rc;
-	uint8_t *firmware_buffer = NULL;
-	char hash_algorithm[16];
 
 	LOG_INF("Pending firmware update found.");
-
-	/* Get firmware file size */
-	struct fs_dirent fw_file_stat;
-
-	rc = fs_stat(DISK_MOUNT_PT "/fw.elf", &fw_file_stat);
-	if (rc != 0) {
-		LOG_ERR("Failed to get fw.elf file info (rc=%d)", rc);
-		return rc;
-	}
-	size_t firmware_size = fw_file_stat.size;
-
-	/* Try to read and parse hash file for algorithm */
-	struct fs_file_t hash_file;
-
-	fs_file_t_init(&hash_file);
-
-	rc = fs_open(&hash_file, DISK_MOUNT_PT "/hash.txt", FS_O_READ);
-	if (rc != 0) {
-		LOG_WRN("hash.txt not found (rc=%d)", rc);
-		return rc;
-	}
-
-	char hash_content[128];
-	ssize_t bytes_read = fs_read(&hash_file, hash_content, sizeof(hash_content) - 1);
-
-	fs_close(&hash_file);
-
-	if (bytes_read > 0) {
-		hash_content[bytes_read] = '\0';
-
-		/* Parse algorithm from hash.txt (format: ALGORITHM:HASH) */
-		const char *colon_pos = strchr(hash_content, ':');
-
-		if (!colon_pos) {
-			LOG_WRN("hash.txt does not contain a valid algorithm:hash format");
-			return -EINVAL;
-		}
-		size_t algo_len = colon_pos - hash_content;
-
-		if (algo_len < sizeof(hash_algorithm)) {
-			memcpy(hash_algorithm, hash_content, algo_len);
-			hash_algorithm[algo_len] = '\0';
-
-			/* Convert to uppercase */
-			size_t hash_len = strnlen(hash_algorithm, sizeof(hash_algorithm));
-
-			for (int i = 0; i < hash_len; i++) {
-				hash_algorithm[i] = (char)toupper((unsigned char)hash_algorithm[i]);
-			}
-
-			LOG_INF("Parsed hash algorithm: %s", hash_algorithm);
-		} else {
-			LOG_WRN("Parsed hash algorithm failed.");
-		}
-	}
 
 	/* Perform firmware update */
 	rc = fw_init();
@@ -186,12 +136,6 @@ static int user_deal_with_fw_update_job(void)
 	struct stream_flash_ctx *stream = NULL;
 	struct fs_file_t fw_file;
 
-	rc = fw_start(secondary_slot, true, &stream);
-	if (rc != 0) {
-		LOG_ERR("Failed to start firmware update (rc=%d)", rc);
-		return rc;
-	}
-
 	fs_file_t_init(&fw_file);
 	rc = fs_open(&fw_file, DISK_MOUNT_PT "/fw.elf", FS_O_READ);
 	if (rc != 0) {
@@ -199,17 +143,15 @@ static int user_deal_with_fw_update_job(void)
 		return rc;
 	}
 
-	/* Allocate buffer for firmware data */
-	firmware_buffer = k_malloc(firmware_size);
-	if (!firmware_buffer) {
-		LOG_ERR("Failed to allocate memory for firmware buffer");
-		fs_close(&fw_file);
-		return -ENOMEM;
+	rc = fw_start(secondary_slot, true, &stream);
+	if (rc != 0) {
+		LOG_ERR("Failed to start firmware update (rc=%d)", rc);
+		return rc;
 	}
-
 	/* Write firmware to flash and collect data */
 	static uint8_t buf[256];
 	size_t total_read = 0;
+	ssize_t bytes_read = 0;
 
 	while (total_read < firmware_size) {
 		size_t to_read = MIN(sizeof(buf), firmware_size - total_read);
@@ -218,13 +160,8 @@ static int user_deal_with_fw_update_job(void)
 
 		if (bytes_read <= 0) {
 			LOG_ERR("Failed to read firmware file (rc=%d)", bytes_read);
-			k_free(firmware_buffer);
-			fs_close(&fw_file);
-			return bytes_read;
+			break;
 		}
-
-		/* Copy to buffer */
-		memcpy(firmware_buffer + total_read, buf, bytes_read);
 
 		LOG_DBG("Write %d bytes to flash, percentage: %d%%", bytes_read,
 			(total_read + bytes_read) * 100 / firmware_size);
@@ -232,21 +169,60 @@ static int user_deal_with_fw_update_job(void)
 		rc = stream_flash_buffered_write(stream, buf, bytes_read, true);
 		if (rc != 0) {
 			LOG_ERR("Failed to write firmware to flash (rc=%d)", rc);
-			k_free(firmware_buffer);
-			fs_close(&fw_file);
-			return rc;
+			break;
 		}
 
 		total_read += bytes_read;
 	}
 
+	/* Free the firmware buffer */
 	fs_close(&fw_file);
 
-	/* Free the firmware buffer */
-	k_free(firmware_buffer);
+	if (bytes_read <= 0 || rc != 0) {
+		LOG_ERR("Firmware update failed, rc=%d", rc);
+		return rc;
+	}
+
+	/* Try to read and parse hash file for algorithm */
+	const char *hash_content = NULL;
+	size_t hash_size = 0;
+
+	if (!get_filecontent(DISK_MOUNT_PT "/hash.txt", (void **)&hash_content, &hash_size)) {
+		LOG_WRN("hash.txt not found or empty");
+	} else {
+		LOG_INF("Found hash.txt, size: %zu bytes", hash_size);
+	}
+
+	/* Try to read and parse signature file */
+	const char *signature_content = NULL;
+	size_t signature_size = 0;
+
+	if (!get_filecontent(DISK_MOUNT_PT "/signature.txt", (void **)&signature_content,
+			     &signature_size)) {
+		LOG_WRN("signature.txt not found or empty");
+	} else {
+		LOG_INF("Found signature.txt, size: %zu bytes", signature_size);
+	}
+
+	/* Try to read and parse trust chain file */
+	const char *trust_chain_content = NULL;
+	size_t trust_chain_size = 0;
+
+	if (!get_filecontent(DISK_MOUNT_PT "/trust_chain.txt", (void **)&trust_chain_content,
+			     &trust_chain_size)) {
+		LOG_WRN("trust_chain.txt not found or empty");
+	} else {
+		LOG_INF("Found trust_chain.txt, size: %zu bytes", trust_chain_size);
+	}
 
 	/* Hash verification will be handled automatically in fw_finish() */
-	rc = fw_finish(secondary_slot, "FWUPDATE", 8, hash_algorithm);
+	rc = fw_finish(secondary_slot, "FWUPDATE", 8, "SHA256", hash_content, signature_content,
+		       trust_chain_content);
+
+	k_free((void *)hash_content);
+	k_free((void *)signature_content);
+	k_free((void *)trust_chain_content);
+
 	if (rc != 0) {
 		LOG_ERR("Failed to finish firmware update (rc=%d)", rc);
 		return rc;
@@ -260,6 +236,7 @@ static int user_deal_with_fw_update_job(void)
 
 	LOG_INF("Firmware update and validation completed successfully (slot %d)", secondary_slot);
 
+#if CONFIG_FWUPDATE_JOBFILE
 	/* Clean up files */
 	rc = fs_unlink(DISK_MOUNT_PT "/job.txt");
 	if (rc != 0) {
@@ -267,6 +244,57 @@ static int user_deal_with_fw_update_job(void)
 		return rc;
 	}
 	LOG_INF("job.txt removed");
+#endif
 
 	return 0;
+}
+
+static bool get_filecontent(const char *file, void **buf, size_t *size)
+{
+	struct fs_dirent dirent;
+	struct fs_file_t file_obj;
+	int rc;
+
+	/* get file size */
+	rc = fs_stat(file, &dirent);
+	if (rc != 0 || dirent.type != FS_DIR_ENTRY_FILE) {
+		LOG_ERR("File %s not found or not a regular file (rc=%d, type=%d)", file, rc,
+			dirent.type);
+		return false;
+	}
+	if (dirent.size == 0) {
+		LOG_WRN("File %s is empty", file);
+		return false;
+	}
+	*size = dirent.size;
+
+	/* Allocate buffer and read file content */
+	fs_file_t_init(&file_obj);
+
+	rc = fs_open(&file_obj, file, FS_O_READ);
+	if (rc != 0) {
+		LOG_ERR("Failed to open file %s (rc=%d)", file, rc);
+		return false;
+	}
+
+	*buf = k_malloc(*size + 1);
+	if (!*buf) {
+		LOG_ERR("Failed to allocate memory for file content");
+		fs_close(&file_obj);
+		return false;
+	}
+
+	ssize_t bytes_read = fs_read(&file_obj, *buf, *size);
+
+	if (bytes_read < 0) {
+		LOG_ERR("Failed to read file %s (rc=%zd)", file, bytes_read);
+		k_free(*buf);
+		fs_close(&file_obj);
+		return false;
+	}
+
+	((char *)(*buf))[bytes_read] = '\0';
+
+	fs_close(&file_obj);
+	return true;
 }

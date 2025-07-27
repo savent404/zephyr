@@ -60,11 +60,19 @@ int fw_start(uint8_t slot, bool erase, struct stream_flash_ctx **stream);
  * @param tag Firmware tag
  * @param tag_len Firmware tag length
  * @param hash_algo Hash algorithm name (e.g., "SHA256"), can be NULL for default
+ * @param hash Hash value, can be NULL if not available
+ * @param signature Signature value (hex), can be NULL if not available
+ * @param trust_chain Trust chain (DER in hex, splited by ' '), can be NULL if not available
+ * @note This function will set security_mode based on the hash_algo and signature
+ *       - certificate: signature and trust_chain are used
+ *       - hash: hash_algo and hash are used
+ *       - none: no security.
  * @return 0 on success
  * @return -EINVAL if slot is invalid or tag is invalid
  * @return other negative errno codes on flash operation failure
  */
-int fw_finish(uint8_t slot, const char *tag, size_t tag_len, const char *hash_algo);
+int fw_finish(uint8_t slot, const char *tag, size_t tag_len, const char *hash_algo,
+	      const char *hash, const char *signature, const char *trust_chain);
 
 /**
  * @brief Check if the firmware slot is valid

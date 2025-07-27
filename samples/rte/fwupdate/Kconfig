@@ -14,4 +14,10 @@ config FWUPDATE_AUTO_COMMIT
 	  It will start a background task and commit fwupdate changes if
 	  no system crash happens.
 
+config FWUPDATE_JOBFILE
+	bool "check job.txt to trigger FWUPDATE"
+	default y
+	help
+	  It will start FWUPDATE whether job.txt exists.
+
 source "Kconfig.zephyr"
