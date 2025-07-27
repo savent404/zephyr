@@ -7,15 +7,6 @@ module = FWUPDATE
 module-str = FWUPDATE
 source "subsys/logging/Kconfig.template.log_config"
 
-config FWUPDATE_STRICT_STRATEGY
-	int "FW Update stric mode"
-	default 0
-	help
-	  Check partition invalid using digest or signature
-	  0 - No check
-	  1 - digest
-	  2 - signature
-
 config FWUPDATE_AUTO_COMMIT
 	bool "Auto commit fwupdate changes"
 	default y

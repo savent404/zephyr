@@ -11,19 +11,9 @@
 #include <zephyr/logging/log.h>
 #include <zephyr/storage/flash_map.h>
 #include <zephyr/storage/stream_flash.h>
-#include <mbedtls/sha256.h>
 
 #include <string.h>
 #include <ctype.h>
-
-/* Strict strategy for firmware update
- * 0 - Ignore invalid checksum and signature
- * 1 - Reject invalid checksum
- * 2 - Reject invalid checksum or signature
- */
-#ifndef CONFIG_FWUPDATE_STRICT_STRATEGY
-#define CONFIG_FWUPDATE_STRICT_STRATEGY 0
-#endif
 
 LOG_MODULE_REGISTER(fwupdate, CONFIG_FWUPDATE_LOG_LEVEL);
 
@@ -113,44 +103,6 @@ static bool fw_autocommit_cancel; /* default to false */
 
 static uboot_env_t env[1];
 
-static int fw_digest_calculate_flash(const struct flash_area *fa, uint32_t offset, uint32_t size,
-				     uint8_t *digest)
-{
-	int rc;
-	uint8_t buf[256];
-	mbedtls_sha256_context sha256_ctx;
-
-	LOG_DBG("Calculating SHA256 digest from flash..., fa %p, offset %u, size %u", fa, offset,
-		size);
-
-	mbedtls_sha256_init(&sha256_ctx);
-
-	mbedtls_sha256_starts(&sha256_ctx, 0);
-
-	while (size > 0) {
-		size_t len = MIN(sizeof(buf), size);
-
-		rc = flash_area_read(fa, offset, buf, len);
-		if (rc) {
-			LOG_WRN("Failed to read flash area, rc %d", rc);
-			mbedtls_sha256_free(&sha256_ctx);
-			return rc;
-		}
-
-		mbedtls_sha256_update(&sha256_ctx, buf, len);
-
-		offset += len;
-		size -= len;
-	}
-
-	mbedtls_sha256_finish(&sha256_ctx, digest);
-
-	LOG_HEXDUMP_DBG(digest, 32, "SHA256 digest");
-	LOG_DBG("Calculating SHA256 digest from flash...done");
-
-	return 0;
-}
-
 static inline bool prepare_key(char *buf, size_t len, enum fw_metadata_key_e key,
 			       enum partition_e part)
 {
@@ -212,7 +164,7 @@ static void fw_load_meta_from_env(uboot_env_t env, enum partition_e part, struct
 		/* Each byte in digest is represented by 2 hex characters */
 		size_t len = strnlen(val, sizeof(val));
 
-		if (len == 64) { /* SHA-256 is 32 bytes, 64 hex chars */
+		if (len == 2 * sizeof(meta->fw_digest)) { /* hex is 2 chars per byte */
 			for (size_t i = 0; i < 32; i++) {
 				char hex[3] = {val[i * 2], val[i * 2 + 1], '\0'};
 
@@ -226,7 +178,7 @@ static void fw_load_meta_from_env(uboot_env_t env, enum partition_e part, struct
 		/* Each byte in signature is represented by 2 hex characters */
 		size_t len = strnlen(val, sizeof(val));
 
-		if (len == 64) { /* SHA-256 is 32 bytes, 64 hex chars */
+		if (len == 2 * sizeof(meta->fw_signature)) { /* hex is 2 chars per byte */
 			for (size_t i = 0; i < 32; i++) {
 				char hex[3] = {val[i * 2], val[i * 2 + 1], '\0'};
 
@@ -310,7 +262,6 @@ int fw_init(void)
 {
 	static bool initialized;
 	int rc;
-	uint8_t fw_digest[32];
 
 	if (!initialized) {
 		initialized = true;
@@ -340,8 +291,8 @@ int fw_init(void)
 		fw_load_meta_from_env(env, (enum partition_e)i, ptr_m);
 		LOG_INF("Firmware partition %d(%s) size: %u", i, i == 0 ? "A" : "B",
 			ptr_m->fw_size);
-		LOG_HEXDUMP_DBG(ptr_m->fw_digest, 32, "digest");
-		LOG_HEXDUMP_DBG(ptr_m->fw_signature, 32, "signature");
+		LOG_HEXDUMP_DBG(ptr_m->fw_digest, sizeof(ptr_m->fw_digest), "digest");
+		LOG_HEXDUMP_DBG(ptr_m->fw_signature, sizeof(ptr_m->fw_signature), "signature");
 		size_t tag_len = strnlen(ptr_m->fw_tag, sizeof(ptr_m->fw_tag));
 
 		if (tag_len != 0 && tag_len < sizeof(ptr_m->fw_tag)) {
@@ -360,28 +311,6 @@ int fw_init(void)
 		}
 		LOG_DBG("Firmware partition %d: %08lx-%08lx", i, inst->fa_fw->fa_off,
 			inst->fa_fw->fa_off + inst->fa_fw->fa_size);
-
-		/* Check metadata.fw_digest */
-		rc = fw_digest_calculate_flash(inst->fa_fw, 0, ptr_m->fw_size, fw_digest);
-		if (rc) {
-			LOG_ERR("Cannot calculate firmware digest");
-			continue;
-		}
-		if (memcmp(fw_digest, ptr_m->fw_digest, sizeof(fw_digest)) != 0) {
-			LOG_WRN("firmware digest unmatched !!!");
-			LOG_HEXDUMP_INF(fw_digest, 32, "calculated digest");
-			LOG_HEXDUMP_INF(ptr_m->fw_digest, 32, "metadata digest");
-#if CONFIG_FWUPDATE_STRICT_STRATEGY > 0
-			continue;
-#endif
-		}
-
-#if CONFIG_FWUPDATE_STRICT_STRATEGY > 1
-		/* TODO: Check metadata.fw_signature */
-		continue;
-#endif
-
-		LOG_DBG("Metadata verified successfully");
 
 		/* Set default valid state - should be determined by validation */
 		inst->is_valid = true;
@@ -435,22 +364,6 @@ bool fw_is_valid(uint8_t slot)
 		return inst->is_valid;
 	}
 
-	/* Perform hash verification */
-	uint8_t calculated_digest[32];
-	int rc = fw_digest_calculate_flash(inst->fa_fw, 0, inst->metadata.fw_size,
-					   calculated_digest);
-	if (rc != 0) {
-		LOG_WRN("Failed to calculate digest for slot %d", slot);
-		return false;
-	}
-
-	/* Compare hashes */
-	if (memcmp(calculated_digest, inst->metadata.fw_digest, sizeof(calculated_digest)) != 0) {
-		LOG_WRN("Hash mismatch for slot %d", slot);
-		LOG_HEXDUMP_WRN(calculated_digest, 32, "Calculated digest");
-		LOG_HEXDUMP_WRN(inst->metadata.fw_digest, 32, "Expected digest");
-		return false;
-	}
 
 	return true;
 }
@@ -545,15 +458,10 @@ int fw_finish(uint8_t slot, const char *tag, size_t tag_len, const char *hash_al
 
 	LOG_DBG("Start to prepare metadata...");
 	meta->fw_size = (uint32_t)bytes_written;
-	/* Calculate metadata.fw_digest */
-	rc = fw_digest_calculate_flash(inst->fa_fw, 0, meta->fw_size, (uint8_t *)meta->fw_digest);
-	if (rc) {
-		LOG_ERR("Cannot calculate firmware digest");
-		return rc;
-	}
-	/* TODO: Calculate metadata.fw_signature */
-	memset(meta->fw_signature, 0, sizeof(meta->fw_signature));
 
+	/* FIXME: assign digest and signature */
+	memset(meta->fw_digest, 0, sizeof(meta->fw_digest));
+	memset(meta->fw_signature, 0, sizeof(meta->fw_signature));
 	/* Set hash algorithm from parameter */
 	if (hash_algo && strnlen(hash_algo, sizeof(meta->fw_hash_algo)) > 0) {
 		snprintf(meta->fw_hash_algo, sizeof(meta->fw_hash_algo), "%s", hash_algo);
