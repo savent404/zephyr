@@ -652,6 +652,18 @@ static inline void i2c_dw_busy_wait(const struct device *dev)
 	}
 }
 
+/* Wait for I2C master to be inactive (transfer completely done) */
+static inline void i2c_dw_wait_master_inactive(const struct device *dev)
+{
+	uint32_t reg_base = get_regs(dev);
+	uint32_t timeout = 10000; /* 10ms timeout for complete transfer */
+
+	/* Wait for master to become inactive (MA bit = 0) */
+	while (test_bit_status_ma(reg_base) && timeout--) {
+		k_busy_wait(1);
+	}
+}
+
 static int i2c_dw_transfer_poll(const struct device *dev, struct i2c_msg *msgs, uint8_t num_msgs,
 				uint16_t slave_address)
 {
@@ -742,6 +754,9 @@ static int i2c_dw_transfer_poll(const struct device *dev, struct i2c_msg *msgs, 
 				i2c_dw_data_read(dev);
 			} while (dw->state & I2C_DW_CMD_RECV);
 		}
+
+		/* wait for the actual I2C transfer to complete */
+		i2c_dw_wait_master_inactive(dev);
 
 		/* flush rx fifo if needed */
 		while (test_bit_status_rfne(reg_base)) {
