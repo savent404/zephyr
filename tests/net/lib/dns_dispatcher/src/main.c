@@ -36,26 +36,26 @@ LOG_MODULE_REGISTER(net_test, CONFIG_DNS_RESOLVER_LOG_LEVEL);
 #define DBG(fmt, ...)
 #endif
 
-#define NAME4 "4.zephyr.test"
-#define NAME6 "6.zephyr.test"
+#define NAME4     "4.zephyr.test"
+#define NAME6     "6.zephyr.test"
 #define NAME_IPV4 "192.0.2.1"
 #define NAME_IPV6 "2001:db8::1"
 
-#define DNS_NAME_IPV4 "192.0.2.4"
+#define DNS_NAME_IPV4  "192.0.2.4"
 #define DNS2_NAME_IPV4 "192.0.2.5"
-#define DNS_NAME_IPV6 "2001:db8::4"
+#define DNS_NAME_IPV6  "2001:db8::4"
 
 #define DNS_TIMEOUT 500 /* ms */
 
 #if defined(CONFIG_NET_IPV6)
 /* Interface 1 addresses */
-static struct in6_addr my_addr1 = { { { 0x20, 0x01, 0x0d, 0xb8, 1, 0, 0, 0,
-					0, 0, 0, 0, 0, 0, 0, 0x1 } } };
+static struct in6_addr my_addr1 = {
+	{{0x20, 0x01, 0x0d, 0xb8, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x1}}};
 #endif
 
 #if defined(CONFIG_NET_IPV4)
 /* Interface 1 addresses */
-static struct in_addr my_addr2 = { { { 192, 0, 2, 1 } } };
+static struct in_addr my_addr2 = {{{192, 0, 2, 1}}};
 #endif
 
 static struct net_if *iface1;
@@ -89,8 +89,7 @@ static void net_iface_init(struct net_if *iface)
 {
 	uint8_t *mac = net_iface_get_mac(net_if_get_device(iface));
 
-	net_if_set_link_addr(iface, mac, sizeof(struct net_eth_addr),
-			     NET_LINK_ETHERNET);
+	net_if_set_link_addr(iface, mac, sizeof(struct net_eth_addr), NET_LINK_ETHERNET);
 }
 
 static int sender_iface(const struct device *dev, struct net_pkt *pkt)
@@ -110,21 +109,12 @@ static struct dummy_api net_iface_api = {
 	.send = sender_iface,
 };
 
-#define _ETH_L2_LAYER DUMMY_L2
+#define _ETH_L2_LAYER    DUMMY_L2
 #define _ETH_L2_CTX_TYPE NET_L2_GET_CTX_TYPE(DUMMY_L2)
 
-NET_DEVICE_INIT_INSTANCE(net_iface1_test,
-			 "iface1",
-			 iface1,
-			 NULL,
-			 NULL,
-			 &net_iface1_data,
-			 NULL,
-			 CONFIG_KERNEL_INIT_PRIORITY_DEFAULT,
-			 &net_iface_api,
-			 _ETH_L2_LAYER,
-			 _ETH_L2_CTX_TYPE,
-			 127);
+NET_DEVICE_INIT_INSTANCE(net_iface1_test, "iface1", iface1, NULL, NULL, &net_iface1_data, NULL,
+			 CONFIG_KERNEL_INIT_PRIORITY_DEFAULT, &net_iface_api, _ETH_L2_LAYER,
+			 _ETH_L2_CTX_TYPE, 127);
 
 static void *test_init(void)
 {
@@ -135,15 +125,12 @@ static void *test_init(void)
 
 	iface1 = net_if_get_by_index(1);
 
-	((struct net_if_test *) net_if_get_device(iface1)->data)->idx =
-		net_if_get_by_iface(iface1);
+	((struct net_if_test *)net_if_get_device(iface1)->data)->idx = net_if_get_by_iface(iface1);
 
 #if defined(CONFIG_NET_IPV6)
-	ifaddr = net_if_ipv6_addr_add(iface1, &my_addr1,
-				      NET_ADDR_MANUAL, 0);
+	ifaddr = net_if_ipv6_addr_add(iface1, &my_addr1, NET_ADDR_MANUAL, 0);
 	if (!ifaddr) {
-		DBG("Cannot add IPv6 address %s\n",
-		       net_sprint_ipv6_addr(&my_addr1));
+		DBG("Cannot add IPv6 address %s\n", net_sprint_ipv6_addr(&my_addr1));
 		zassert_not_null(ifaddr, "addr1");
 
 		return NULL;
@@ -154,11 +141,9 @@ static void *test_init(void)
 #endif
 
 #if defined(CONFIG_NET_IPV4)
-	ifaddr = net_if_ipv4_addr_add(iface1, &my_addr2,
-				      NET_ADDR_MANUAL, 0);
+	ifaddr = net_if_ipv4_addr_add(iface1, &my_addr2, NET_ADDR_MANUAL, 0);
 	if (!ifaddr) {
-		DBG("Cannot add IPv4 address %s\n",
-		       net_sprint_ipv4_addr(&my_addr2));
+		DBG("Cannot add IPv4 address %s\n", net_sprint_ipv4_addr(&my_addr2));
 		zassert_not_null(ifaddr, "addr2");
 
 		return NULL;

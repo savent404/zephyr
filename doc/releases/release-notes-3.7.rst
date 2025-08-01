@@ -78,8 +78,8 @@ These GitHub issues were addressed since the previous 3.7.0 tagged release:
 * :github:`75257` - [Coverity CID: 394232] Division or modulo by zero in drivers/sensor/tdk/icm42688/icm42688.h
 * :github:`75265` - display: stm32-ltdc: incorrect return value for blanking on/off calls when panel controller is not passed in DT
 * :github:`75318` - Zephyr 3.7 RC2 BLE on STM32 Nucleo WB55 does not work
-* :github:`75319` - `fatal error: sys/_timespec.h: No such file or directory` with v3.7.0-rc2
-* :github:`75427` - `CONFIG_MBEDTLS_PEM_CERTIFICATE_FORMAT` is misleading as it only enables PEM parsing
+* :github:`75319` - ``fatal error: sys/_timespec.h: No such file or directory`` with v3.7.0-rc2
+* :github:`75427` - ``CONFIG_MBEDTLS_PEM_CERTIFICATE_FORMAT`` is misleading as it only enables PEM parsing
 * :github:`75676` - tests: dma: chan_blen_transfer: test breakage on Nucleo-H743ZI
 * :github:`75686` - ST LIS2DUX12 driver: temperature is not converted to Celsius and raw values are returned
 * :github:`75736` - Logging stops on all backend when overloaded for a time
@@ -146,8 +146,8 @@ These GitHub issues were addressed since the previous 3.7.0 tagged release:
 * :github:`77952` - ESP32: Interrupts with ISRs in flash are not disabled during flash operations
 * :github:`78138` - riscv: plic: IRQs may not be enabled in non-zero HART
 * :github:`78146` - mDNS reponder might fail to serve if mDNS resolver is enabled
-* :github:`78244` - arch: riscv: IRQ stacks of secondary cores are not initialized to `0xAA` when `CONFIG_INIT_STACKS=y`
-* :github:`78263` - building samples/cpp/hello_world reports "undefined reference to `_impure_ptr` error
+* :github:`78244` - arch: riscv: IRQ stacks of secondary cores are not initialized to ``0xAA`` when ``CONFIG_INIT_STACKS=y``
+* :github:`78263` - building samples/cpp/hello_world reports ``undefined reference to `_impure_ptr``` error
 * :github:`78268` - LPC55xx USB not working with SPEED_OPTIMIZATIONS=y
 * :github:`78490` - net: l2: ieee802154: IEEE-802.15.4 packets dropped when CONFIG_NET_L2_IEEE802154_SECURITY is enabled
 * :github:`78494` - subsys: net: socket_tls: Connection vanishes -> Caller blocked forever
@@ -160,23 +160,23 @@ These GitHub issues were addressed since the previous 3.7.0 tagged release:
 * :github:`78927` - doc: mcumgr: Wrong license for mcumgr-client
 * :github:`79208` - sysbuild: ExternalZephyrProject_Add() cannot cope with hwmv2 board and revision
 * :github:`79288` - driver: clock-control: imx-ccm-rev2: get_rate(FLEXSPI2) returns FLEXSPI1 clock rate
-* :github:`79298` - arch: riscv: the `s0` dumped during a fatal error is not correct
-* :github:`79301` - arch: irq: multilevel: the value return from `irq_parent_level_3()` is wrong
+* :github:`79298` - arch: riscv: the ``s0`` dumped during a fatal error is not correct
+* :github:`79301` - arch: irq: multilevel: the value return from ``irq_parent_level_3()`` is wrong
 * :github:`79518` - Temporary Modbus Client "Soft Lock"
-* :github:`79576` - Dependencies for `SOC_FLASH_MCUX` are incorrect on LPC55xxx platforms
+* :github:`79576` - Dependencies for ``SOC_FLASH_MCUX`` are incorrect on LPC55xxx platforms
 * :github:`79788` - net: ip: igmp: IGMPv2 does not work when IGMPv3 is enabled
 * :github:`79800` - stream_flash: stream_flash_erase_page does not check whether requested offset is in range of stream flash owned area
 * :github:`79947` - ESP32 touch_sensor not working
 * :github:`80005` - doc: Documentation issue in 'contribute/documentation/guidelines'
 * :github:`80134` - up_squared: tests/arch/x86/info/arch.x86.info.userspace [timeout]
 * :github:`80200` - CMake: Find package with version ranges are ignored for Zephyr SDK
-* :github:`80383` - drivers: flash: spi_nor: values vom DT not correctly used, when `CONFIG_SPI_NOR_SFDP_RUNTIME=y`
+* :github:`80383` - drivers: flash: spi_nor: values vom DT not correctly used, when ``CONFIG_SPI_NOR_SFDP_RUNTIME=y``
 * :github:`80429` - Bug in ACD implementation RFC5227
 * :github:`80476` - mgmt: mcumgr: stat_mgmt: stat_mgmt_list always send legacy behavior
 * :github:`80541` - Incorrect part number LPC55S69 in Konfig.soc
 * :github:`80593` - Not possible to write beyond 16MB using flash sample on FRDM_RW612
 * :github:`80701` - Changes to cortex_m swap code have major impact on kernel context switching times.
-* :github:`80723` - testsuite: coverage: application unable to include `coverage.h`
+* :github:`80723` - testsuite: coverage: application unable to include ``coverage.h``
 * :github:`80750` - drivers: can: sam: wrong MRBA configuration
 * :github:`80810` - samples: subsys: mgmt: mcumgr: smp_svr: UDP overlay missing random selection
 * :github:`80818` - shell: shell_help: terminal offset of subcommands' help text isn't aligned
@@ -1041,15 +1041,15 @@ Drivers and Sensors
   * Added support for Ambiq Apollo3 series.
   * Added support for multiple instances of the SPI NOR driver (spi_nor.c).
   * Added preliminary support for non-erase devices with introduction of
-    device capabilities to c:struct:`flash_parameters` and the utility function
-    c:func:`flash_params_get_erase_cap` that allows to obtain the erase type
-    provided by a device; added c:macro:`FLASH_ERASE_C_EXPLICIT`, which is
+    device capabilities to :c:struct:`flash_parameters` and the utility function
+    :c:func:`flash_params_get_erase_cap` that allows to obtain the erase type
+    provided by a device; added :c:macro:`FLASH_ERASE_C_EXPLICIT`, which is
     currently the only supported erase type and is set by all flash devices.
-  * Added the c:func:`flash_flatten` function that can be used on devices,
+  * Added the c:func: ``flash_flatten`` function that can be used on devices,
     with or without erase requirement, when erase has been used not for preparing
     a device for a random data write, but rather to remove/scramble data from
     that device.
-  * Added the c:func:`flash_fill` utility function which allows to write
+  * Added the c:func: ``flash_fill`` utility function which allows to write
     a single value across a provided range in a selected device.
   * Added support for RRAM on nrf54l15 devices.
   * Added support of non busy wait polling in STM32 OSPI driver.
@@ -1075,7 +1075,7 @@ Drivers and Sensors
 
   * Added support for Ambiq Apollo3 series.
   * Added Broadcom Set-top box(brcmstb) SoC GPIO driver.
-  * Added c:macro:`STM32_GPIO_WKUP` flag which allows to configure specific pins as wakeup source
+  * Added :c:macro:`STM32_GPIO_WKUP` flag which allows to configure specific pins as wakeup source
     from Power Off state on STM32 L4, U5, WB, & WL SoC series.
   * Added driver for Analog Devices MAX32 SoC series.
   * Added support for Nuvoton Numaker M2L31X series.
@@ -1254,7 +1254,7 @@ Drivers and Sensors
   * Added support for STM32H7R/S series.
   * Added a Add QTMR PWM driver for NXP imxrt11xx
   * Made the NXP MCUX PWM driver thread safe
-  * Fix zephyr:code-sample:`pwm-blinky` code sample to demonstrate PWM support for
+  * Fix :zephyr:code-sample:`pwm-blinky` code sample to demonstrate PWM support for
     :ref:`beagleconnect_freedom`.
   * Added driver for ENE KB1200.
   * Added support for Nordic nRF54H and nRF54L Series SoCs.
@@ -1610,7 +1610,7 @@ Networking
   * Implemented IPv6 Privacy Extensions according to RFC 8981.
   * Added :c:func:`net_ipv6_is_private_addr` API function.
   * Implemented reachability hint for IPv6. Upper layers can use
-    c:func:`net_if_nbr_reachability_hint` to report Neighbor reachability and
+    :c:func:`net_if_nbr_reachability_hint` to report Neighbor reachability and
     avoid unnecessary Neighbor Discovery solicitations.
   * Added :kconfig:option:`CONFIG_NET_IPV6_MTU` allowing to set custom IPv6 MTU.
   * Added :kconfig:option:`CONFIG_NET_MCAST_ROUTE_MAX_IFACES` which allows to set
