@@ -8,6 +8,11 @@
 #define CAD_QSPI_NOR_LL_H
 
 #include <zephyr/device.h>
+#ifdef CONFIG_QSPI_DW_DMA
+#include <zephyr/drivers/dma.h>
+#include <zephyr/sys/sys_io.h>
+#include <zephyr/cache.h>
+#endif
 
 #define CAD_QSPI_MICRON_N25Q_SUPPORT CONFIG_CAD_QSPI_MICRON_N25Q_SUPPORT
 #define FLASH_CAD_FLASH_QSPI_NOR     CONFIG_FLASH_CAD_FLASH_QSPI_NOR
@@ -142,6 +147,38 @@
 
 #define CAD_QSPI_IRQMSK 0x44
 
+/* DMA related register definitions based on qspi-flash.md */
+#define CAD_QSPI_DMA_CFG        0x20 /* DMA peripheral Configuration Register */
+#define CAD_QSPI_INDRDWATERMARK 0x64 /* Indirect Read Transfer Watermark Register */
+#define CAD_QSPI_INDWRWATERMARK 0x74 /* Indirect Write Transfer Watermark Register */
+
+/* DMA configuration register bits */
+#define CAD_QSPI_DMA_CFG_SINGLE_BURST_MASK 0x0F
+#define CAD_QSPI_DMA_CFG_BURST_TYPE_MASK   0x0F00
+#define CAD_QSPI_DMA_CFG_BURST_TYPE_SHIFT  8
+
+/* DMA enable bit in QSPI configuration register (bit 15) */
+#define CAD_QSPI_CFG_ENDMA BIT(15)
+
+/* DMA status flags */
+#define CAD_QSPI_DMA_ERROR_FLAG   0x01
+#define CAD_QSPI_DMA_RX_DONE_FLAG 0x02
+#define CAD_QSPI_DMA_TX_DONE_FLAG 0x04
+#define CAD_QSPI_DMA_DONE_FLAG    (CAD_QSPI_DMA_RX_DONE_FLAG | CAD_QSPI_DMA_TX_DONE_FLAG)
+
+/* DMA transfer threshold (bytes) - use DMA for transfers >= 64 bytes */
+#define CAD_QSPI_DMA_THRESHOLD 64
+
+/* For testing: lower threshold to test DMA with smaller blocks */
+#ifdef CONFIG_FLASH_LOG_LEVEL_DBG
+#define CAD_QSPI_DMA_TEST_THRESHOLD 256
+#else
+#define CAD_QSPI_DMA_TEST_THRESHOLD CAD_QSPI_DMA_THRESHOLD
+#endif
+
+/* DMA timeout in milliseconds */
+#define CAD_QSPI_DMA_TIMEOUT_MS 1000
+
 #define CAD_QSPI_SUBSECTOR_SIZE CONFIG_CAD_QSPI_NOR_SUBSECTOR_SIZE
 #define QSPI_ADDR_BYTES         CONFIG_QSPI_ADDR_BYTES
 #define QSPI_BYTES_PER_DEV      CONFIG_QSPI_BYTES_PER_DEV
@@ -169,6 +206,21 @@ struct cad_qspi_params {
 	int cpol;
 	int cpha;
 	int sram_fifo_size;
+#ifdef CONFIG_QSPI_DW_DMA
+	const struct device *dma_tx_dev;
+	const struct device *dma_rx_dev;
+	uint32_t dma_tx_channel;
+	uint32_t dma_rx_channel;
+	uint32_t dma_tx_slot;
+	uint32_t dma_rx_slot;
+	volatile uint8_t dma_stat;
+	struct k_sem dma_sem;
+	struct dma_config tx_dma_cfg;
+	struct dma_config rx_dma_cfg;
+	struct dma_block_config tx_blk_cfg;
+	struct dma_block_config rx_blk_cfg;
+	bool dma_disabled;
+#endif
 };
 
 int cad_qspi_init(struct cad_qspi_params *cad_params, uint32_t clk_phase, uint32_t clk_pol,
@@ -181,5 +233,21 @@ int cad_qspi_write(struct cad_qspi_params *cad_params, void *buffer, uint32_t of
 int cad_qspi_read(struct cad_qspi_params *cad_params, void *buffer, uint32_t offset, uint32_t size);
 int cad_qspi_update(struct cad_qspi_params *cad_params, void *buffer, uint32_t offset,
 		    uint32_t size);
+
+#ifdef CONFIG_QSPI_DW_DMA
+/* DMA related function declarations */
+int cad_qspi_dma_init(struct cad_qspi_params *cad_params);
+int cad_qspi_dma_read(struct cad_qspi_params *cad_params, void *buffer, uint32_t offset,
+		      uint32_t size);
+int cad_qspi_dma_write(struct cad_qspi_params *cad_params, void *buffer, uint32_t offset,
+		       uint32_t size);
+/* Internal helper functions used by DMA implementation */
+int cad_qspi_device_bank_select(struct cad_qspi_params *cad_params, uint32_t bank);
+int cad_qspi_indirect_read_start_bank(struct cad_qspi_params *cad_params, uint32_t flash_addr,
+				      uint32_t num_bytes);
+int cad_qspi_indirect_write_start_bank(struct cad_qspi_params *cad_params, uint32_t flash_addr,
+				       uint32_t num_bytes);
+int cad_qspi_indirect_write_finish(struct cad_qspi_params *cad_params);
+#endif
 
 #endif

@@ -122,6 +122,12 @@ static int verify_block(const uint8_t *expected, const uint8_t *actual, uint32_t
 static void print_test_info(void)
 {
 	printk("=== QSPI Flash Test Description ===\n");
+#ifdef CONFIG_QSPI_DW_DMA
+	printk("Using DMA for QSPI operations\n");
+#else
+	printk("Using polling for QSPI operations\n");
+#endif
+	printk("==================================\n");
 	printk("Test Mechanism:\n");
 	printk("1. Sequential Block Testing\n");
 	printk("   - Start Address: 0x%x\n", START_OFFSET);

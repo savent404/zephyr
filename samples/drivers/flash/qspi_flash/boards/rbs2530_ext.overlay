@@ -24,3 +24,7 @@
 		flash = &qspi0_flash;
 	};
 };
+
+&dma0 {
+	status = "okay";
+};

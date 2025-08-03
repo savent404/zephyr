@@ -28,6 +28,16 @@ config FLASH_CAD_FLASH_QSPI_NOR
 		This driver extends the Cadence QSPI Micron N25Q support with FMQL
 		platform specific configurations and optimizations.
 
+config QSPI_DW_DMA
+	bool "DMA support for Cadence QSPI"
+	default y
+	depends on FLASH_CAD_QSPI_NOR && DMA
+	help
+		DMA support for Cadence QSPI controller.
+		This option enables DMA transfers for improved performance.
+		When DMA is not available or fails, the driver will automatically
+		fall back to polling mode.
+
 config FLASH_PAGE_LAYOUT
 	default y
 

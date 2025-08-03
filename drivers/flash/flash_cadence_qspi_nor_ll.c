@@ -977,3 +977,653 @@ void cad_qspi_reset(struct cad_qspi_params *cad_params)
 	cad_qspi_stig_cmd(cad_params, CAD_QSPI_STIG_OPCODE_RESET_EN, 0);
 	cad_qspi_stig_cmd(cad_params, CAD_QSPI_STIG_OPCODE_RESET_MEM, 0);
 }
+
+#ifdef CONFIG_QSPI_DW_DMA
+/* Wrapper function for DMA compatibility */
+static int cad_qspi_indirect_write_start(struct cad_qspi_params *cad_params, uint32_t flash_addr,
+					 uint32_t num_bytes)
+{
+	return cad_qspi_indirect_write_start_bank(cad_params, flash_addr, num_bytes);
+}
+
+/* DMA callback function */
+static void cad_qspi_dma_callback(const struct device *dma_dev, void *user_data, uint32_t channel,
+				  int status)
+{
+	struct cad_qspi_params *cad_params = (struct cad_qspi_params *)user_data;
+
+	LOG_DBG("DMA callback from %s: channel %d, status %d", dma_dev->name, channel, status);
+
+	if (status != DMA_STATUS_COMPLETE) {
+		LOG_ERR("DMA transfer failed with status %d", status);
+		cad_params->dma_stat |= CAD_QSPI_DMA_ERROR_FLAG;
+	} else {
+		if (channel == cad_params->dma_tx_channel) {
+			cad_params->dma_stat |= CAD_QSPI_DMA_TX_DONE_FLAG;
+			LOG_DBG("DMA TX channel done");
+		} else if (channel == cad_params->dma_rx_channel) {
+			cad_params->dma_stat |= CAD_QSPI_DMA_RX_DONE_FLAG;
+			LOG_DBG("DMA RX channel done");
+		}
+	}
+
+	/* When both TX and RX are done or error occurred, release semaphore */
+	if (((cad_params->dma_stat & CAD_QSPI_DMA_DONE_FLAG) == CAD_QSPI_DMA_DONE_FLAG) ||
+	    (cad_params->dma_stat & CAD_QSPI_DMA_ERROR_FLAG)) {
+		LOG_DBG("DMA transfer completed, releasing semaphore");
+		k_sem_give(&cad_params->dma_sem);
+	}
+}
+
+/* Initialize DMA support */
+int cad_qspi_dma_init(struct cad_qspi_params *cad_params)
+{
+	if (!cad_params) {
+		return -EINVAL;
+	}
+
+	/* Initialize DMA disabled flag */
+	cad_params->dma_disabled = false;
+
+	/* Initialize DMA semaphore */
+	k_sem_init(&cad_params->dma_sem, 0, 1);
+
+	/* Check if DMA devices are ready */
+	if (cad_params->dma_tx_dev && !device_is_ready(cad_params->dma_tx_dev)) {
+		LOG_ERR("TX DMA device not ready");
+		return -ENODEV;
+	}
+
+	if (cad_params->dma_rx_dev && !device_is_ready(cad_params->dma_rx_dev)) {
+		LOG_ERR("RX DMA device not ready");
+		return -ENODEV;
+	}
+
+	/* Configure TX DMA channel */
+	if (cad_params->dma_tx_dev) {
+		cad_params->tx_dma_cfg.channel_direction = MEMORY_TO_PERIPHERAL;
+		cad_params->tx_dma_cfg.dma_callback = cad_qspi_dma_callback;
+		cad_params->tx_dma_cfg.user_data = cad_params;
+		cad_params->tx_dma_cfg.source_burst_length = 1; /* Single transfers */
+		cad_params->tx_dma_cfg.dest_burst_length = 1;
+		cad_params->tx_dma_cfg.source_data_size = 4; /* 32-bit transfers */
+		cad_params->tx_dma_cfg.dest_data_size = 4;
+		cad_params->tx_dma_cfg.block_count = 1;
+		cad_params->tx_dma_cfg.dma_slot = cad_params->dma_tx_slot;
+		cad_params->tx_dma_cfg.source_handshake = 0; /* Memory side no handshake */
+		cad_params->tx_dma_cfg.dest_handshake = 0;   /* Peripheral side with handshake */
+	}
+
+	/* Configure RX DMA channel */
+	if (cad_params->dma_rx_dev) {
+		cad_params->rx_dma_cfg.channel_direction = PERIPHERAL_TO_MEMORY;
+		cad_params->rx_dma_cfg.dma_callback = cad_qspi_dma_callback;
+		cad_params->rx_dma_cfg.user_data = cad_params;
+		cad_params->rx_dma_cfg.source_burst_length = 1; /* Single transfers */
+		cad_params->rx_dma_cfg.dest_burst_length = 1;
+		cad_params->rx_dma_cfg.source_data_size = 4; /* 32-bit transfers */
+		cad_params->rx_dma_cfg.dest_data_size = 4;
+		cad_params->rx_dma_cfg.block_count = 1;
+		cad_params->rx_dma_cfg.dma_slot = cad_params->dma_rx_slot;
+		cad_params->rx_dma_cfg.source_handshake = 0; /* Peripheral side with handshake */
+		cad_params->rx_dma_cfg.dest_handshake = 0;   /* Memory side no handshake */
+	}
+
+	return 0;
+}
+
+/* Debug function to print QSPI register status */
+static void cad_qspi_debug_regs(struct cad_qspi_params *cad_params, const char *context)
+{
+	uint32_t indrd_reg = sys_read32(cad_params->reg_base + CAD_QSPI_INDRD);
+	uint32_t indwr_reg = sys_read32(cad_params->reg_base + CAD_QSPI_INDWR);
+	uint32_t cfg_reg = sys_read32(cad_params->reg_base + CAD_QSPI_CFG);
+
+	LOG_DBG("%s: INDRD=0x%x (RD_STAT=%d,DONE=%d), INDWR=0x%x (WR_STAT=%d,DONE=%d), CFG=0x%x, "
+		"IDLE=%s",
+		context, indrd_reg, CAD_QSPI_INDRD_RD_STAT(indrd_reg),
+		(indrd_reg & CAD_QSPI_INDRD_IND_OPS_DONE) ? 1 : 0, indwr_reg,
+		CAD_QSPI_INDWR_RDSTAT(indwr_reg), (indwr_reg & CAD_QSPI_INDWR_INDDONE) ? 1 : 0,
+		cfg_reg, cad_qspi_idle(cad_params) ? "YES" : "NO");
+}
+
+/* Enable DMA mode for QSPI controller */
+static void cad_qspi_enable_dma_mode(struct cad_qspi_params *cad_params)
+{
+	uint32_t reg_val;
+
+	/* Debug: Check initial state */
+	cad_qspi_debug_regs(cad_params, "Before DMA enable");
+
+	/* Enable DMA mode in QSPI configuration register (bit 15) */
+	reg_val = sys_read32(cad_params->reg_base + CAD_QSPI_CFG);
+	reg_val |= CAD_QSPI_CFG_ENDMA;
+	sys_write32(reg_val, cad_params->reg_base + CAD_QSPI_CFG);
+
+	/* Set DMA peripheral configuration - single transfers */
+	sys_write32(0x00000000, cad_params->reg_base + CAD_QSPI_DMA_CFG);
+
+	/* Set watermark levels for DMA triggers - adjusted for single transfers */
+	sys_write32(0x00000001,
+		    cad_params->reg_base + CAD_QSPI_INDRDWATERMARK); /* RX watermark = 1 word */
+	sys_write32(0x00000001,
+		    cad_params->reg_base + CAD_QSPI_INDWRWATERMARK); /* TX watermark = 1 word */
+
+	LOG_DBG("DMA mode enabled in QSPI controller with watermarks");
+}
+
+/* Disable DMA mode for QSPI controller */
+static void cad_qspi_disable_dma_mode(struct cad_qspi_params *cad_params)
+{
+	uint32_t reg_val;
+
+	/* Disable DMA mode in QSPI configuration register */
+	reg_val = sys_read32(cad_params->reg_base + CAD_QSPI_CFG);
+	reg_val &= ~CAD_QSPI_CFG_ENDMA;
+	sys_write32(reg_val, cad_params->reg_base + CAD_QSPI_CFG);
+
+	LOG_DBG("DMA mode disabled in QSPI controller");
+}
+
+/* Configure DMA for read operation */
+static int cad_qspi_configure_dma_read(struct cad_qspi_params *cad_params, void *buffer,
+				       uint32_t size)
+{
+	uintptr_t qspi_phys_addr, buffer_phys_addr;
+	int ret;
+
+	/* Get QSPI data FIFO register physical address
+	 * For QSPI DMA, we need to use the actual data FIFO register, not the memory-mapped region
+	 * The QSPI data FIFO is typically at offset 0x0 in some controllers, but let's use
+	 * the memory-mapped data base since that's what the hardware is configured for
+	 */
+	qspi_phys_addr = cad_params->data_base;
+
+	/* Validate QSPI data base address */
+	if (qspi_phys_addr == 0) {
+		LOG_ERR("Invalid QSPI data base address");
+		return -EINVAL;
+	}
+
+	/* For debugging: print the addresses being used */
+	LOG_DBG("QSPI reg_base=0x%lx, data_base=0x%lx", cad_params->reg_base,
+		cad_params->data_base);
+
+	/* Get buffer physical address */
+#ifdef CONFIG_MMU
+	buffer_phys_addr = k_mem_phys_addr(buffer);
+#else
+	buffer_phys_addr = (uintptr_t)buffer;
+#endif
+
+	/* Ensure size is 32-bit aligned for DMA */
+	if (size & 0x3) {
+		LOG_ERR("DMA size must be 4-byte aligned, got %d", size);
+		return -EINVAL;
+	}
+
+	/* Invalidate cache before DMA operation */
+#ifdef CONFIG_DCACHE
+	sys_cache_data_invd_range(buffer, size);
+#endif
+
+	/* Configure RX DMA block parameters */
+	cad_params->rx_blk_cfg.source_address = (uint32_t)qspi_phys_addr;
+	cad_params->rx_blk_cfg.dest_address = (uint32_t)buffer_phys_addr;
+	cad_params->rx_blk_cfg.block_size = size / 4; /* Transfer size in 32-bit words */
+	cad_params->rx_blk_cfg.source_addr_adj = DMA_ADDR_ADJ_NO_CHANGE;
+	cad_params->rx_blk_cfg.dest_addr_adj = DMA_ADDR_ADJ_INCREMENT;
+
+	cad_params->rx_dma_cfg.head_block = &cad_params->rx_blk_cfg;
+
+	ret = dma_config(cad_params->dma_rx_dev, cad_params->dma_rx_channel,
+			 &cad_params->rx_dma_cfg);
+	if (ret) {
+		LOG_ERR("Failed to configure RX DMA: %d", ret);
+		return ret;
+	}
+
+	LOG_DBG("RX DMA configured: src=0x%x, dst=0x%x, words=%d",
+		cad_params->rx_blk_cfg.source_address, cad_params->rx_blk_cfg.dest_address,
+		cad_params->rx_blk_cfg.block_size);
+
+	return 0;
+}
+
+/* Configure DMA for write operation */
+static int cad_qspi_configure_dma_write(struct cad_qspi_params *cad_params, void *buffer,
+					uint32_t size)
+{
+	uintptr_t qspi_phys_addr, buffer_phys_addr;
+	int ret;
+
+	/* Get QSPI data FIFO register physical address
+	 * For QSPI DMA, we need to use the actual data FIFO register, not the memory-mapped region
+	 */
+	qspi_phys_addr = cad_params->data_base;
+
+	/* Validate QSPI data base address */
+	if (qspi_phys_addr == 0) {
+		LOG_ERR("Invalid QSPI data base address");
+		return -EINVAL;
+	}
+
+	/* For debugging: print the addresses being used */
+	LOG_DBG("QSPI reg_base=0x%lx, data_base=0x%lx", cad_params->reg_base,
+		cad_params->data_base);
+
+	/* Get buffer physical address */
+#ifdef CONFIG_MMU
+	buffer_phys_addr = k_mem_phys_addr(buffer);
+#else
+	buffer_phys_addr = (uintptr_t)buffer;
+#endif
+
+	/* Ensure size is 32-bit aligned for DMA */
+	if (size & 0x3) {
+		LOG_ERR("DMA size must be 4-byte aligned, got %d", size);
+		return -EINVAL;
+	}
+
+	/* Flush cache before DMA operation */
+#ifdef CONFIG_DCACHE
+	sys_cache_data_flush_range(buffer, size);
+#endif
+
+	/* Debug: Print first few bytes of write buffer */
+	uint8_t *debug_buf = (uint8_t *)buffer;
+
+	LOG_DBG("TX buffer first 32 bytes:");
+	for (int i = 0; i < 32 && i < size; i += 4) {
+		LOG_DBG("  [%02d]: 0x%02x 0x%02x 0x%02x 0x%02x", i, debug_buf[i], debug_buf[i + 1],
+			debug_buf[i + 2], debug_buf[i + 3]);
+	}
+
+	/* Configure TX DMA block parameters */
+	cad_params->tx_blk_cfg.source_address = (uint32_t)buffer_phys_addr;
+	cad_params->tx_blk_cfg.dest_address = (uint32_t)qspi_phys_addr;
+	cad_params->tx_blk_cfg.block_size = size / 4; /* Transfer size in 32-bit words */
+	cad_params->tx_blk_cfg.source_addr_adj = DMA_ADDR_ADJ_INCREMENT;
+	cad_params->tx_blk_cfg.dest_addr_adj = DMA_ADDR_ADJ_NO_CHANGE;
+
+	cad_params->tx_dma_cfg.head_block = &cad_params->tx_blk_cfg;
+
+	ret = dma_config(cad_params->dma_tx_dev, cad_params->dma_tx_channel,
+			 &cad_params->tx_dma_cfg);
+	if (ret) {
+		LOG_ERR("Failed to configure TX DMA: %d", ret);
+		return ret;
+	}
+
+	LOG_DBG("TX DMA configured: src=0x%x, dst=0x%x, words=%d",
+		cad_params->tx_blk_cfg.source_address, cad_params->tx_blk_cfg.dest_address,
+		cad_params->tx_blk_cfg.block_size);
+
+	return 0;
+}
+
+/* Start DMA transfer */
+static int cad_qspi_start_dma(struct cad_qspi_params *cad_params, bool is_read)
+{
+	int ret;
+
+	cad_params->dma_stat = 0;
+
+	if (is_read) {
+		/* For read operations, start RX DMA */
+		ret = dma_start(cad_params->dma_rx_dev, cad_params->dma_rx_channel);
+		if (ret) {
+			LOG_ERR("Failed to start RX DMA: %d", ret);
+			return ret;
+		}
+		/* Mark TX as done since we're only doing RX */
+		cad_params->dma_stat |= CAD_QSPI_DMA_TX_DONE_FLAG;
+		LOG_DBG("RX DMA started successfully");
+	} else {
+		/* For write operations, start TX DMA */
+		ret = dma_start(cad_params->dma_tx_dev, cad_params->dma_tx_channel);
+		if (ret) {
+			LOG_ERR("Failed to start TX DMA: %d", ret);
+			return ret;
+		}
+		/* Mark RX as done since we're only doing TX */
+		cad_params->dma_stat |= CAD_QSPI_DMA_RX_DONE_FLAG;
+		LOG_DBG("TX DMA started successfully");
+	}
+
+	return 0;
+}
+
+/* Wait for DMA transfer to complete */
+static int cad_qspi_wait_dma_complete(struct cad_qspi_params *cad_params)
+{
+	int ret;
+
+	ret = k_sem_take(&cad_params->dma_sem, K_MSEC(CAD_QSPI_DMA_TIMEOUT_MS));
+	if (ret) {
+		LOG_DBG("DMA transfer timeout");
+		return -ETIMEDOUT;
+	}
+
+	/* Check for DMA errors */
+	if (cad_params->dma_stat & CAD_QSPI_DMA_ERROR_FLAG) {
+		LOG_ERR("DMA transfer error");
+		return -EIO;
+	}
+
+	LOG_DBG("DMA transfer completed successfully");
+	return 0;
+}
+
+/* Stop DMA channels */
+static void cad_qspi_stop_dma(struct cad_qspi_params *cad_params, bool is_read)
+{
+	if (is_read && cad_params->dma_rx_dev) {
+		dma_stop(cad_params->dma_rx_dev, cad_params->dma_rx_channel);
+	}
+	if (!is_read && cad_params->dma_tx_dev) {
+		dma_stop(cad_params->dma_tx_dev, cad_params->dma_tx_channel);
+	}
+}
+
+/* Check if DMA should be used for the transfer */
+static bool cad_qspi_should_use_dma(struct cad_qspi_params *cad_params, uint32_t size)
+{
+	/* Don't use DMA if it has been disabled due to previous failures */
+	if (cad_params->dma_disabled) {
+		LOG_DBG("DMA disabled due to previous failures, using polling");
+		return false;
+	}
+
+	/* Don't use DMA if devices are not available */
+	if (!cad_params->dma_tx_dev || !cad_params->dma_rx_dev) {
+		LOG_DBG("DMA devices not available, using polling");
+		return false;
+	}
+
+	/* Use DMA for larger transfers (threshold: CAD_QSPI_DMA_TEST_THRESHOLD bytes) */
+	if (size >= CAD_QSPI_DMA_TEST_THRESHOLD) {
+		LOG_DBG("Using DMA for %d byte transfer", size);
+		return true;
+	}
+
+	LOG_DBG("Using polling for small %d byte transfer", size);
+	return false;
+}
+
+/* DMA-based read implementation for single bank */
+static int cad_qspi_dma_read_bank(struct cad_qspi_params *cad_params, uint8_t *buffer,
+				  uint32_t offset, uint32_t size)
+{
+	int ret;
+
+	LOG_DBG("DMA read bank: offset=0x%x, size=%d", offset, size);
+
+	/* Pre-invalidate cache to ensure fresh read data */
+#ifdef CONFIG_DCACHE
+	sys_cache_data_invd_range(buffer, size);
+#endif
+
+	/* Configure DMA for read */
+	ret = cad_qspi_configure_dma_read(cad_params, buffer, size);
+	if (ret) {
+		LOG_ERR("Failed to configure DMA read: %d", ret);
+		return ret;
+	}
+
+	/* Enable DMA mode */
+	cad_qspi_enable_dma_mode(cad_params);
+
+	/* Start DMA transfer */
+	ret = cad_qspi_start_dma(cad_params, true);
+	if (ret) {
+		LOG_ERR("Failed to start DMA: %d", ret);
+		goto cleanup;
+	}
+
+	/* Start indirect read operation */
+	ret = cad_qspi_indirect_read_start_bank(cad_params, offset, size);
+	if (ret) {
+		LOG_ERR("Failed to start indirect read: %d", ret);
+		cad_qspi_stop_dma(cad_params, true);
+		goto cleanup;
+	}
+
+	/* Wait for DMA completion */
+	ret = cad_qspi_wait_dma_complete(cad_params);
+	if (ret) {
+		LOG_ERR("DMA read timeout: %d", ret);
+		cad_qspi_stop_dma(cad_params, true);
+		goto cleanup;
+	}
+
+	/* Simple status clearing */
+	sys_write32(CAD_QSPI_INDRD_IND_OPS_DONE, cad_params->reg_base + CAD_QSPI_INDRD);
+
+	/* Invalidate cache after DMA completion */
+#ifdef CONFIG_DCACHE
+	sys_cache_data_invd_range(buffer, size);
+#endif
+
+	LOG_DBG("DMA read completed successfully");
+	ret = 0;
+
+cleanup:
+	cad_qspi_disable_dma_mode(cad_params);
+	return ret;
+}
+
+/* DMA-based write implementation for single bank */
+static int cad_qspi_dma_write_bank(struct cad_qspi_params *cad_params, uint32_t offset,
+				   uint8_t *buffer, uint32_t size)
+{
+	int ret;
+
+	LOG_DBG("DMA write bank: offset=0x%x, size=%d", offset, size);
+
+	/* Configure DMA for write */
+	ret = cad_qspi_configure_dma_write(cad_params, buffer, size);
+	if (ret) {
+		LOG_ERR("Failed to configure DMA write: %d", ret);
+		return ret;
+	}
+
+	/* Enable DMA mode */
+	cad_qspi_enable_dma_mode(cad_params);
+
+	/* Start DMA transfer */
+	ret = cad_qspi_start_dma(cad_params, false);
+	if (ret) {
+		LOG_ERR("Failed to start DMA: %d", ret);
+		goto cleanup;
+	}
+
+	/* Start indirect write operation */
+	ret = cad_qspi_indirect_write_start(cad_params, offset, size);
+	if (ret) {
+		LOG_ERR("Failed to start indirect write: %d", ret);
+		cad_qspi_stop_dma(cad_params, false);
+		goto cleanup;
+	}
+
+	/* Wait for DMA completion */
+	ret = cad_qspi_wait_dma_complete(cad_params);
+	if (ret) {
+		LOG_DBG("DMA write timeout: %d", ret);
+		cad_qspi_stop_dma(cad_params, false);
+		goto cleanup;
+	}
+
+	/* Simple status clearing */
+	sys_write32(CAD_QSPI_INDWR_INDDONE, cad_params->reg_base + CAD_QSPI_INDWR);
+
+	/* Finish indirect write */
+	cad_qspi_indirect_write_finish(cad_params);
+	LOG_DBG("DMA write completed successfully");
+	ret = 0;
+
+cleanup:
+	cad_qspi_disable_dma_mode(cad_params);
+	return ret;
+}
+
+int cad_qspi_dma_read(struct cad_qspi_params *cad_params, void *buffer, uint32_t offset,
+		      uint32_t size)
+{
+	uint32_t bank_count, bank_addr, bank_offset, copy_len;
+	uint8_t *read_data;
+	int i, status;
+	bool use_dma;
+
+	if (!cad_params || !buffer) {
+		LOG_ERR("Invalid parameters");
+		return -EINVAL;
+	}
+
+	if ((offset >= cad_params->qspi_device_size) ||
+	    (offset + size - 1 >= cad_params->qspi_device_size) || (size == 0)) {
+		LOG_ERR("Invalid read parameter");
+		return -EINVAL;
+	}
+
+	/* Check if DMA should be used */
+	use_dma = cad_qspi_should_use_dma(cad_params, size);
+
+	LOG_DBG("Reading %d bytes at offset 0x%x using %s mode", size, offset,
+		use_dma ? "DMA" : "polling");
+
+	/* Calculate bank parameters for multi-bank operations */
+	bank_count = CAD_QSPI_BANK_ADDR(offset + size - 1) - CAD_QSPI_BANK_ADDR(offset) + 1;
+	bank_addr = offset & CAD_QSPI_BANK_ADDR_MSK;
+	bank_offset = offset & (CAD_QSPI_BANK_SIZE - 1);
+
+	read_data = (uint8_t *)buffer;
+	copy_len = MIN(size, CAD_QSPI_BANK_SIZE - bank_offset);
+
+	for (i = 0; i < bank_count; ++i) {
+		status = cad_qspi_device_bank_select(cad_params, CAD_QSPI_BANK_ADDR(bank_addr));
+		if (status != 0) {
+			break;
+		}
+
+		if (use_dma) {
+			/* Try DMA first */
+			status = cad_qspi_dma_read_bank(cad_params, read_data, bank_offset,
+							copy_len);
+
+			if (status != 0) {
+				LOG_DBG("DMA read failed, disabling DMA and falling back to "
+					"polling");
+				cad_params->dma_disabled = true;
+				use_dma = false;
+
+				status = cad_qspi_read_bank(cad_params, read_data, bank_offset,
+							    copy_len);
+			}
+		} else {
+			status = cad_qspi_read_bank(cad_params, read_data, bank_offset, copy_len);
+		}
+
+		if (status != 0) {
+			break;
+		}
+
+		bank_addr += CAD_QSPI_BANK_SIZE;
+		read_data += copy_len;
+		size -= copy_len;
+		bank_offset = 0;
+		copy_len = MIN(size, CAD_QSPI_BANK_SIZE);
+	}
+
+	return status;
+}
+
+/* DMA-enhanced write function with fallback to polling */
+int cad_qspi_dma_write(struct cad_qspi_params *cad_params, void *buffer, uint32_t offset,
+		       uint32_t size)
+{
+	uint32_t bank_count, bank_addr, bank_offset, copy_len;
+	uint8_t *write_data;
+	int i, status;
+	bool use_dma;
+
+	if (!cad_params || !buffer) {
+		LOG_ERR("Invalid parameters");
+		return -EINVAL;
+	}
+
+	if ((offset >= cad_params->qspi_device_size) ||
+	    (offset + size - 1 >= cad_params->qspi_device_size) || (size == 0)) {
+		LOG_ERR("Invalid write parameter");
+		return -EINVAL;
+	}
+
+	/* Check if DMA should be used */
+	use_dma = cad_qspi_should_use_dma(cad_params, size);
+
+	LOG_DBG("Writing %d bytes at offset 0x%x using %s mode", size, offset,
+		use_dma ? "DMA" : "polling");
+
+	/* Calculate bank parameters for multi-bank operations */
+	bank_count = CAD_QSPI_BANK_ADDR(offset + size - 1) - CAD_QSPI_BANK_ADDR(offset) + 1;
+	bank_addr = offset & CAD_QSPI_BANK_ADDR_MSK;
+	bank_offset = offset & (CAD_QSPI_BANK_SIZE - 1);
+
+	write_data = (uint8_t *)buffer;
+	copy_len = MIN(size, CAD_QSPI_BANK_SIZE - bank_offset);
+
+	for (i = 0; i < bank_count; ++i) {
+		status = cad_qspi_device_bank_select(cad_params, CAD_QSPI_BANK_ADDR(bank_addr));
+		if (status != 0) {
+			break;
+		}
+
+		if (use_dma) {
+			/* Try DMA first */
+			status = cad_qspi_dma_write_bank(cad_params, bank_offset, write_data,
+							 copy_len);
+
+			if (status != 0) {
+				LOG_DBG("DMA write failed, disabling DMA and falling back to "
+					"polling");
+				cad_params->dma_disabled = true;
+				use_dma = false;
+			} else {
+				LOG_DBG("DMA write completed successfully");
+				continue;
+			}
+		}
+		if (copy_len >= CAD_QSPI_PAGE_SIZE) {
+			uint32_t last_256_offset = bank_offset + copy_len - CAD_QSPI_PAGE_SIZE;
+			uint8_t *last_256_data = write_data + copy_len - CAD_QSPI_PAGE_SIZE;
+
+			LOG_DBG("Writing %d bytes, will rewrite last CAD_QSPI_PAGE_SIZE bytes",
+				copy_len);
+
+			status = cad_qspi_write_bank(cad_params, bank_offset, write_data, copy_len);
+
+			if (status == 0) {
+				LOG_DBG("Rewriting last CAD_QSPI_PAGE_SIZE bytes at offset 0x%x",
+					last_256_offset);
+				status = cad_qspi_write_bank(cad_params, last_256_offset,
+							     last_256_data, CAD_QSPI_PAGE_SIZE);
+			}
+		} else {
+			status = cad_qspi_write_bank(cad_params, bank_offset, write_data, copy_len);
+		}
+
+		if (status != 0) {
+			break;
+		}
+
+		bank_addr += CAD_QSPI_BANK_SIZE;
+		write_data += copy_len;
+		size -= copy_len;
+		bank_offset = 0;
+		copy_len = MIN(size, CAD_QSPI_BANK_SIZE);
+	}
+
+	return status;
+}
+
+#endif /* CONFIG_QSPI_DW_DMA */

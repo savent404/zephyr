@@ -25,6 +25,14 @@ struct flash_cad_priv {
 struct flash_cad_config {
 	DEVICE_MMIO_NAMED_ROM(qspi_reg);
 	DEVICE_MMIO_NAMED_ROM(qspi_data);
+#ifdef CONFIG_QSPI_DW_DMA
+	const struct device *dma_tx_dev;
+	const struct device *dma_rx_dev;
+	uint32_t dma_tx_channel;
+	uint32_t dma_rx_channel;
+	uint32_t dma_tx_slot;
+	uint32_t dma_rx_slot;
+#endif
 #if defined(CONFIG_FLASH_PAGE_LAYOUT)
 	const struct flash_pages_layout *pages_layout;
 	size_t pages_layout_size;
@@ -50,7 +58,16 @@ static int flash_cad_read(const struct device *dev, off_t offset, void *data, si
 		return -EINVAL;
 	}
 
+#ifdef CONFIG_QSPI_DW_DMA
+	/* Try DMA read first if available */
+	if (cad_params->dma_rx_dev && cad_params->dma_tx_dev) {
+		rc = cad_qspi_dma_read(cad_params, data, (uint32_t)offset, len);
+	} else {
+		rc = cad_qspi_read(cad_params, data, (uint32_t)offset, len);
+	}
+#else
 	rc = cad_qspi_read(cad_params, data, (uint32_t)offset, len);
+#endif
 
 	if (rc < 0) {
 		LOG_ERR("Cadence QSPI Flash Read Failed");
@@ -92,7 +109,16 @@ static int flash_cad_write(const struct device *dev, off_t offset, const void *d
 		return -EINVAL;
 	}
 
+#ifdef CONFIG_QSPI_DW_DMA
+	/* Try DMA write first if available */
+	if (cad_params->dma_rx_dev && cad_params->dma_tx_dev) {
+		rc = cad_qspi_dma_write(cad_params, (void *)data, (uint32_t)offset, len);
+	} else {
+		rc = cad_qspi_write(cad_params, (void *)data, (uint32_t)offset, len);
+	}
+#else
 	rc = cad_qspi_write(cad_params, (void *)data, (uint32_t)offset, len);
+#endif
 
 	if (rc < 0) {
 		LOG_ERR("Cadence QSPI Flash Write Failed!");
@@ -133,6 +159,9 @@ static int flash_cad_init(const struct device *dev)
 {
 	struct flash_cad_priv *priv = dev->data;
 	struct cad_qspi_params *cad_params = &priv->params;
+#ifdef CONFIG_QSPI_DW_DMA
+	const struct flash_cad_config *config = dev->config;
+#endif
 	int rc;
 
 	DEVICE_MMIO_NAMED_MAP(dev, qspi_reg, K_MEM_CACHE_NONE);
@@ -140,6 +169,28 @@ static int flash_cad_init(const struct device *dev)
 
 	cad_params->reg_base = DEVICE_MMIO_NAMED_GET(dev, qspi_reg);
 	cad_params->data_base = DEVICE_MMIO_NAMED_GET(dev, qspi_data);
+
+#ifdef CONFIG_QSPI_DW_DMA
+	/* Initialize DMA configuration */
+	cad_params->dma_tx_dev = config->dma_tx_dev;
+	cad_params->dma_rx_dev = config->dma_rx_dev;
+	cad_params->dma_tx_channel = config->dma_tx_channel;
+	cad_params->dma_rx_channel = config->dma_rx_channel;
+	cad_params->dma_tx_slot = config->dma_tx_slot;
+	cad_params->dma_rx_slot = config->dma_rx_slot;
+
+	/* Initialize DMA if devices are available */
+	if (cad_params->dma_tx_dev && cad_params->dma_rx_dev) {
+		rc = cad_qspi_dma_init(cad_params);
+		if (rc < 0) {
+			LOG_WRN("DMA initialization failed, DMA disabled: %d", rc);
+		} else {
+			LOG_INF("DMA support enabled - TX: %s ch%d, RX: %s ch%d",
+				cad_params->dma_tx_dev->name, cad_params->dma_tx_channel,
+				cad_params->dma_rx_dev->name, cad_params->dma_rx_channel);
+		}
+	}
+#endif
 
 	rc = cad_qspi_init(cad_params, cad_params->cpha, cad_params->cpol, QSPI_CONFIG_CSDA,
 			   QSPI_CONFIG_CSDADS, QSPI_CONFIG_CSEOT, QSPI_CONFIG_CSSOT, 0);
@@ -152,11 +203,27 @@ static int flash_cad_init(const struct device *dev)
 	return 0;
 }
 
+#ifdef CONFIG_QSPI_DW_DMA
+#define QSPI_DMA_CONFIG(inst)                                                                      \
+	COND_CODE_1(DT_INST_DMAS_HAS_NAME(inst, tx),                                               \
+		    (.dma_tx_dev = DEVICE_DT_GET(DT_INST_DMAS_CTLR_BY_NAME(inst, tx)),             \
+		     .dma_tx_channel = DT_INST_DMAS_CELL_BY_NAME(inst, tx, channel),               \
+		     .dma_tx_slot = DT_INST_DMAS_CELL_BY_NAME(inst, tx, slot), ),                  \
+		    (.dma_tx_dev = NULL, .dma_tx_channel = 0, .dma_tx_slot = 0, ))                 \
+	COND_CODE_1(DT_INST_DMAS_HAS_NAME(inst, rx),                                               \
+		    (.dma_rx_dev = DEVICE_DT_GET(DT_INST_DMAS_CTLR_BY_NAME(inst, rx)),             \
+		     .dma_rx_channel = DT_INST_DMAS_CELL_BY_NAME(inst, rx, channel),               \
+		     .dma_rx_slot = DT_INST_DMAS_CELL_BY_NAME(inst, rx, slot)),                    \
+		    (.dma_rx_dev = NULL, .dma_rx_channel = 0, .dma_rx_slot = 0))
+#else
+#define QSPI_DMA_CONFIG(inst)
+#endif
+
 #define CREATE_FLASH_CONFIG(inst)                                                                  \
 	static struct flash_cad_config flash_cad_config_##inst = {                                 \
 		DEVICE_MMIO_NAMED_ROM_INIT_BY_NAME(qspi_reg, DT_DRV_INST(inst)),                   \
 		DEVICE_MMIO_NAMED_ROM_INIT_BY_NAME(qspi_data, DT_DRV_INST(inst)),                  \
-	};
+		QSPI_DMA_CONFIG(inst)};
 
 #define CREATE_FLASH_CONFIG_WITH_PAGES_LAYOUT(inst)                                                \
 	const static struct flash_pages_layout flash_pages_layout_##inst[] = {                     \
@@ -167,7 +234,7 @@ static int flash_cad_init(const struct device *dev)
 		DEVICE_MMIO_NAMED_ROM_INIT_BY_NAME(qspi_data, DT_DRV_INST(inst)),                  \
 		.pages_layout = flash_pages_layout_##inst,                                         \
 		.pages_layout_size = ARRAY_SIZE(flash_pages_layout_##inst),                        \
-	};
+		QSPI_DMA_CONFIG(inst)};
 
 #define CREATE_FLASH_CADENCE_QSPI_DEVICE(inst)                                                     \
 	static struct flash_cad_priv flash_cad_priv_##inst = {                                     \
