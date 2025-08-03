@@ -398,6 +398,7 @@ void gpio_callback_function(const struct device *dev, struct gpio_callback *cb,
 
 #endif
 
+#ifdef CONFIG_RTC_ALARM
 static int pcf8563_alarm_set_callback(const struct device *dev, uint16_t id,
 				      rtc_alarm_callback callback, void *user_data)
 {
@@ -448,6 +449,7 @@ static int pcf8563_alarm_set_callback(const struct device *dev, uint16_t id,
 	return 0;
 #endif
 }
+#endif
 
 static const struct rtc_driver_api pcf8563_driver_api = {
 	.set_time = pcf8563_set_time,

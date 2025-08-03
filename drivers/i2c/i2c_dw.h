@@ -43,6 +43,27 @@ typedef void (*i2c_isr_cb_t)(const struct device *port);
 #define I2C_DW_CMD_ERROR                   (1 << 2)
 #define I2C_DW_BUSY                        (1 << 3)
 
+#ifdef CONFIG_I2C_DW_DMA
+/* DMA state flags */
+#define I2C_DW_DMA_ERROR_FLAG   0x01
+#define I2C_DW_DMA_RX_DONE_FLAG 0x02
+#define I2C_DW_DMA_TX_DONE_FLAG 0x04
+#define I2C_DW_DMA_DONE_FLAG    (I2C_DW_DMA_RX_DONE_FLAG | I2C_DW_DMA_TX_DONE_FLAG)
+
+/* DMA transfer threshold */
+#ifndef CONFIG_I2C_DW_DMA_THRESHOLD
+#define I2C_DW_DMA_THRESHOLD 8
+#else
+#define I2C_DW_DMA_THRESHOLD CONFIG_I2C_DW_DMA_THRESHOLD
+#endif
+
+/* DMA timeout */
+#ifndef CONFIG_I2C_DW_DMA_TIMEOUT_MS
+#define I2C_DW_DMA_TIMEOUT K_MSEC(1000)
+#else
+#define I2C_DW_DMA_TIMEOUT K_MSEC(CONFIG_I2C_DW_DMA_TIMEOUT_MS)
+#endif
+#endif
 
 #define DW_ENABLE_TX_INT_I2C_MASTER		(DW_INTR_STAT_TX_OVER |  \
 						 DW_INTR_STAT_TX_EMPTY | \
@@ -108,6 +129,15 @@ struct i2c_dw_rom_config {
 #ifdef CONFIG_I2C_DW_LPSS_DMA
 	const struct device *dma_dev;
 #endif
+
+#ifdef CONFIG_I2C_DW_DMA
+	struct {
+		const struct device *dma_dev;
+		uint32_t channel;
+		struct dma_config dma_cfg;
+		struct dma_block_config dma_blk_cfg;
+	} dma_tx, dma_rx;
+#endif
 };
 
 struct i2c_dw_dev_config {
@@ -135,6 +165,16 @@ struct i2c_dw_dev_config {
 #endif
 
 	struct i2c_target_config *slave_cfg;
+
+#ifdef CONFIG_I2C_DW_DMA
+	/* DMA state flags */
+	volatile uint8_t dma_state;
+	struct k_sem dma_sem;
+	struct dma_block_config tx_blk_cfg;
+	struct dma_block_config rx_blk_cfg;
+	struct dma_config tx_dma_cfg;
+	struct dma_config rx_dma_cfg;
+#endif
 };
 
 #define Z_REG_READ(__sz) sys_read##__sz

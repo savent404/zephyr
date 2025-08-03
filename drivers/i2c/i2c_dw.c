@@ -35,6 +35,13 @@
 #include <zephyr/drivers/dma/dma_intel_lpss.h>
 #endif
 
+#if defined(CONFIG_I2C_DW_DMA)
+#include <zephyr/drivers/dma.h>
+#ifdef CONFIG_DCACHE
+#include <zephyr/cache.h>
+#endif
+#endif
+
 #ifdef CONFIG_IOAPIC
 #include <zephyr/drivers/interrupt_controller/ioapic.h>
 #endif
@@ -48,6 +55,8 @@ LOG_MODULE_REGISTER(i2c_dw);
 
 /* Delay in microseconds for I2C bus to settle in polling mode */
 #define DW_I2C_POLL_DELAY_US 50
+#define DW_I2C_WAIT_US       1
+#define ALIGNMENT_MASK_32BIT 0x3
 
 #include "i2c-priv.h"
 
@@ -299,6 +308,384 @@ static void i2c_dw_data_read(const struct device *dev)
 	}
 }
 
+#ifdef CONFIG_I2C_DW_DMA
+static void i2c_dw_dma_callback(const struct device *dma_dev, void *user_data, uint32_t channel,
+				int status)
+{
+	const struct device *i2c_dev = (const struct device *)user_data;
+	const struct i2c_dw_rom_config *rom = i2c_dev->config;
+	struct i2c_dw_dev_config *dw = i2c_dev->data;
+
+	LOG_DBG("DMA callback from %s: channel %d, status %d", dma_dev->name, channel, status);
+
+	if (status != DMA_STATUS_COMPLETE) {
+		LOG_ERR("DMA transfer failed with status %d", status);
+		dw->dma_state |= I2C_DW_DMA_ERROR_FLAG;
+	} else {
+		if (channel == rom->dma_tx.channel) {
+			dw->dma_state |= I2C_DW_DMA_TX_DONE_FLAG;
+			LOG_DBG("DMA TX channel done");
+		} else if (channel == rom->dma_rx.channel) {
+			dw->dma_state |= I2C_DW_DMA_RX_DONE_FLAG;
+			LOG_DBG("DMA RX channel done");
+		}
+	}
+
+	/* Check if we should release semaphore */
+	bool should_release = ((dw->dma_state & I2C_DW_DMA_DONE_FLAG) == I2C_DW_DMA_DONE_FLAG) ||
+			      (dw->dma_state & I2C_DW_DMA_ERROR_FLAG);
+
+	/* Release semaphore outside of interrupt lock */
+	if (should_release) {
+		LOG_DBG("DMA transfer completed, releasing semaphore");
+		k_sem_give(&dw->dma_sem);
+	}
+}
+
+/* Check if DMA should be used for transfer */
+static bool i2c_dw_should_use_dma(const struct i2c_dw_rom_config *rom, const struct i2c_msg *msg)
+{
+	/* Check if DMA devices are available */
+	if (!rom->dma_tx.dma_dev || !rom->dma_rx.dma_dev) {
+		return false;
+	}
+
+	/* Only use DMA for transfers above threshold */
+	return msg->len >= I2C_DW_DMA_THRESHOLD;
+}
+
+/* Configure DMA for I2C transfer */
+static int i2c_dw_configure_dma(const struct device *dev, const struct i2c_msg *msg, bool is_write)
+{
+	const struct i2c_dw_rom_config *rom = dev->config;
+	struct i2c_dw_dev_config *dw = dev->data;
+	uintptr_t i2c_phys_addr;
+	int ret = 0;
+
+	/* Get I2C peripheral physical base address */
+	i2c_phys_addr = DEVICE_MMIO_ROM_PTR(dev)->phys_addr;
+	LOG_DBG("I2C physical address for DMA: 0x%lx", i2c_phys_addr);
+
+	if (is_write) {
+		/* Configure TX DMA */
+		uintptr_t tx_phys_addr;
+
+#ifdef CONFIG_MMU
+		tx_phys_addr = k_mem_phys_addr(msg->buf);
+#else
+		tx_phys_addr = (uintptr_t)msg->buf;
+#endif
+
+		/* TX direction: flush cache to ensure data is written to memory */
+#ifdef CONFIG_DCACHE
+		sys_cache_data_flush_range(msg->buf, msg->len);
+#endif
+
+		/* Configure TX DMA block parameters */
+		dw->tx_blk_cfg = rom->dma_tx.dma_blk_cfg;
+		dw->tx_blk_cfg.source_address = (uint32_t)tx_phys_addr;
+		dw->tx_blk_cfg.dest_address = i2c_phys_addr + DW_IC_REG_DATA_CMD;
+		dw->tx_blk_cfg.block_size = msg->len;
+		dw->tx_blk_cfg.source_addr_adj = DMA_ADDR_ADJ_INCREMENT;
+		dw->tx_blk_cfg.dest_addr_adj = DMA_ADDR_ADJ_NO_CHANGE;
+
+		dw->tx_dma_cfg = rom->dma_tx.dma_cfg;
+		dw->tx_dma_cfg.head_block = &dw->tx_blk_cfg;
+		dw->tx_dma_cfg.user_data = (void *)dev;
+
+		ret = dma_config(rom->dma_tx.dma_dev, rom->dma_tx.channel, &dw->tx_dma_cfg);
+		if (ret) {
+			LOG_ERR("Failed to configure TX DMA: %d", ret);
+			return ret;
+		}
+	} else {
+		/* Configure RX DMA */
+		uintptr_t rx_phys_addr;
+
+#ifdef CONFIG_MMU
+		rx_phys_addr = k_mem_phys_addr(msg->buf);
+#else
+		rx_phys_addr = (uintptr_t)msg->buf;
+#endif
+
+		/* RX direction: invalidate cache to ensure reading fresh DMA data */
+#ifdef CONFIG_DCACHE
+		sys_cache_data_invd_range(msg->buf, msg->len);
+#endif
+
+		/* Configure RX DMA block parameters */
+		dw->rx_blk_cfg = rom->dma_rx.dma_blk_cfg;
+		dw->rx_blk_cfg.source_address = i2c_phys_addr + DW_IC_REG_DATA_CMD;
+		dw->rx_blk_cfg.dest_address = (uint32_t)rx_phys_addr;
+		dw->rx_blk_cfg.block_size = msg->len;
+		dw->rx_blk_cfg.source_addr_adj = DMA_ADDR_ADJ_NO_CHANGE;
+		dw->rx_blk_cfg.dest_addr_adj = DMA_ADDR_ADJ_INCREMENT;
+
+		dw->rx_dma_cfg = rom->dma_rx.dma_cfg;
+		dw->rx_dma_cfg.head_block = &dw->rx_blk_cfg;
+		dw->rx_dma_cfg.user_data = (void *)dev;
+
+		ret = dma_config(rom->dma_rx.dma_dev, rom->dma_rx.channel, &dw->rx_dma_cfg);
+		if (ret) {
+			LOG_ERR("Failed to configure RX DMA: %d", ret);
+			return ret;
+		}
+	}
+
+	return 0;
+}
+
+/* Check for transfer errors */
+static int i2c_dw_check_errors(const struct device *dev)
+{
+	uint32_t reg_base = get_regs(dev);
+	uint32_t tx_abrt_source;
+	int ret = 0;
+
+	/* Check for TX abort */
+	if (test_bit_intr_stat_tx_abrt(reg_base)) {
+		tx_abrt_source = read_tx_abrt_source(reg_base);
+		LOG_ERR("I2C TX abort: 0x%x", tx_abrt_source);
+
+		/* Clear TX abort interrupt */
+		read_clr_tx_abrt(reg_base);
+		ret = -EIO;
+	}
+
+	/* Check if bus is stuck */
+	if (test_bit_status_activity(reg_base)) {
+		LOG_DBG("I2C bus still active");
+	}
+
+	return ret;
+}
+
+/* DMA transfer function */
+static int i2c_dw_dma_transfer(const struct device *dev, struct i2c_msg *msg)
+{
+	const struct i2c_dw_rom_config *rom = dev->config;
+	struct i2c_dw_dev_config *dw = dev->data;
+	uint32_t reg_base = get_regs(dev);
+	bool is_write = (msg->flags & I2C_MSG_RW_MASK) == I2C_MSG_WRITE;
+	int ret;
+	uint32_t i;
+	uint32_t *cmd_buffer = NULL;
+
+	/* Validate message parameters */
+	if (!msg || !msg->buf || msg->len == 0) {
+		LOG_ERR("Invalid message parameters");
+		return -EINVAL;
+	}
+
+	/* Check buffer alignment for DMA transfers */
+	if ((uintptr_t)msg->buf & ALIGNMENT_MASK_32BIT) {
+		LOG_DBG("Buffer not 32-bit aligned, using byte-level DMA transfers");
+	}
+
+	/* For write operations, we need to prepare command data with control bits */
+	if (is_write) {
+		/* Prepare a buffer with command data including control bits */
+		cmd_buffer = k_malloc(msg->len * sizeof(uint32_t));
+		if (!cmd_buffer) {
+			LOG_ERR("Failed to allocate command buffer");
+			return -ENOMEM;
+		}
+
+		/* Prepare command data for each byte */
+		for (i = 0; i < msg->len; i++) {
+			cmd_buffer[i] = msg->buf[i] & IC_DATA_CMD_DAT_MASK;
+
+			/* Add RESTART for first byte if needed */
+			if (i == 0 && (msg->flags & I2C_MSG_RESTART)) {
+				cmd_buffer[i] |= IC_DATA_CMD_RESTART;
+			}
+
+			/* Add STOP for last byte if needed */
+			if (i == (msg->len - 1) && (msg->flags & I2C_MSG_STOP)) {
+				cmd_buffer[i] |= IC_DATA_CMD_STOP;
+			}
+		}
+
+		/* Configure TX DMA with command buffer */
+		uintptr_t tx_phys_addr;
+
+#ifdef CONFIG_MMU
+		tx_phys_addr = k_mem_phys_addr(cmd_buffer);
+#else
+		tx_phys_addr = (uintptr_t)cmd_buffer;
+#endif
+
+		/* TX direction: flush cache to ensure data is written to memory */
+#ifdef CONFIG_DCACHE
+		if (msg->len > 0 && cmd_buffer != NULL) {
+			sys_cache_data_flush_range(cmd_buffer, msg->len * sizeof(uint32_t));
+		}
+#endif
+
+		/* Configure TX DMA block parameters - use 32-bit transfers for command data */
+		dw->tx_blk_cfg = rom->dma_tx.dma_blk_cfg;
+		dw->tx_blk_cfg.source_address = (uint32_t)tx_phys_addr;
+		dw->tx_blk_cfg.dest_address =
+			DEVICE_MMIO_ROM_PTR(dev)->phys_addr + DW_IC_REG_DATA_CMD;
+		dw->tx_blk_cfg.block_size = msg->len;
+		dw->tx_blk_cfg.source_addr_adj = DMA_ADDR_ADJ_INCREMENT;
+		dw->tx_blk_cfg.dest_addr_adj = DMA_ADDR_ADJ_NO_CHANGE;
+
+		dw->tx_dma_cfg = rom->dma_tx.dma_cfg;
+		dw->tx_dma_cfg.head_block = &dw->tx_blk_cfg;
+		dw->tx_dma_cfg.user_data = (void *)dev;
+		/* Use 32-bit transfers for command buffer */
+		dw->tx_dma_cfg.source_data_size = 4;
+		dw->tx_dma_cfg.dest_data_size = 4;
+
+		ret = dma_config(rom->dma_tx.dma_dev, rom->dma_tx.channel, &dw->tx_dma_cfg);
+		if (ret) {
+			LOG_ERR("Failed to configure TX DMA: %d", ret);
+			goto cleanup_and_exit;
+		}
+
+		dw->dma_state = 0;
+		dw->dma_state |= I2C_DW_DMA_RX_DONE_FLAG; /* Mark RX as done for write operations */
+
+		/* Set DMA TX threshold */
+		write_tdlr(1, reg_base);
+
+		/* Enable TX DMA */
+		write_dma_cr(DW_IC_DMA_TX_ENABLE, reg_base);
+
+		/* Start TX DMA */
+		ret = dma_start(rom->dma_tx.dma_dev, rom->dma_tx.channel);
+		if (ret) {
+			LOG_ERR("Failed to start TX DMA: %d", ret);
+			write_dma_cr(0, reg_base);
+			goto cleanup_and_exit;
+		}
+
+		/* Wait for DMA to complete */
+		ret = k_sem_take(&dw->dma_sem, I2C_DW_DMA_TIMEOUT);
+		if (ret) {
+			LOG_ERR("DMA transfer timeout");
+			dma_stop(rom->dma_tx.dma_dev, rom->dma_tx.channel);
+			write_dma_cr(0, reg_base);
+			ret = -ETIMEDOUT;
+			goto cleanup_and_exit;
+		}
+
+		/* Check for DMA errors */
+		if (dw->dma_state & I2C_DW_DMA_ERROR_FLAG) {
+			LOG_ERR("DMA transfer error");
+			ret = -EIO;
+		} else {
+			ret = 0;
+		}
+
+		/* Stop DMA and cleanup */
+		dma_stop(rom->dma_tx.dma_dev, rom->dma_tx.channel);
+		write_dma_cr(0, reg_base);
+
+		/* Wait for I2C transfer to complete by checking STOP_DET */
+		if (msg->flags & I2C_MSG_STOP) {
+			uint32_t timeout = 10000; /* 10ms timeout for complete transfer */
+
+			while (timeout--) {
+				if (test_bit_intr_stat_stop_det(reg_base)) {
+					read_clr_stop_det(reg_base);
+					break;
+				}
+				k_busy_wait(DW_I2C_WAIT_US);
+			}
+		}
+
+cleanup_and_exit:
+		/* Always free the command buffer */
+		if (cmd_buffer) {
+			k_free(cmd_buffer);
+			cmd_buffer = NULL;
+		}
+
+	} else {
+		/* For read operations, first send read commands, then use DMA for data reception */
+		/* Send read commands first */
+		for (i = 0; i < msg->len; i++) {
+			uint32_t cmd_data = IC_DATA_CMD_CMD;
+
+			/* Add RESTART for first byte if needed */
+			if (i == 0 && (msg->flags & I2C_MSG_RESTART)) {
+				cmd_data |= IC_DATA_CMD_RESTART;
+			}
+
+			/* Add STOP for last byte if needed */
+			if (i == (msg->len - 1) && (msg->flags & I2C_MSG_STOP)) {
+				cmd_data |= IC_DATA_CMD_STOP;
+			}
+
+			write_cmd_data(cmd_data, reg_base);
+		}
+
+		/* Configure RX DMA */
+		ret = i2c_dw_configure_dma(dev, msg, false);
+		if (ret) {
+			LOG_WRN("DMA configuration failed, falling back to interrupt mode");
+			return -ENOTSUP;
+		}
+
+		dw->dma_state = 0;
+		dw->dma_state |= I2C_DW_DMA_TX_DONE_FLAG; /* Mark TX as done for read operations */
+
+		/* Set DMA RX threshold */
+		write_rdlr(0, reg_base);
+
+		/* Enable RX DMA */
+		write_dma_cr(DW_IC_DMA_RX_ENABLE, reg_base);
+
+		/* Start RX DMA */
+		ret = dma_start(rom->dma_rx.dma_dev, rom->dma_rx.channel);
+		if (ret) {
+			LOG_ERR("Failed to start RX DMA: %d", ret);
+			write_dma_cr(0, reg_base);
+			return ret;
+		}
+
+		/* Wait for DMA to complete */
+		ret = k_sem_take(&dw->dma_sem, I2C_DW_DMA_TIMEOUT);
+		if (ret) {
+			LOG_ERR("DMA transfer timeout");
+			dma_stop(rom->dma_rx.dma_dev, rom->dma_rx.channel);
+			write_dma_cr(0, reg_base);
+			return -ETIMEDOUT;
+		}
+
+		/* Check for DMA errors */
+		if (dw->dma_state & I2C_DW_DMA_ERROR_FLAG) {
+			LOG_ERR("DMA transfer error");
+			ret = -EIO;
+		} else {
+			ret = 0;
+		}
+
+		/* Stop DMA */
+		dma_stop(rom->dma_rx.dma_dev, rom->dma_rx.channel);
+		write_dma_cr(0, reg_base);
+
+		/* For RX transfers, invalidate cache to ensure CPU sees DMA data */
+#ifdef CONFIG_DCACHE
+		sys_cache_data_invd_range(msg->buf, msg->len);
+#endif
+	}
+
+	/* Check for I2C transfer errors */
+	int error_ret = i2c_dw_check_errors(dev);
+
+	if (error_ret) {
+		ret = error_ret;
+	}
+
+	/* Reset DMA state to clean state */
+	dw->dma_state = 0;
+
+	return ret;
+}
+#endif
 
 static int i2c_dw_data_send(const struct device *dev)
 {
@@ -648,7 +1035,7 @@ static inline void i2c_dw_busy_wait(const struct device *dev)
 	uint32_t reg_base = get_regs(dev);
 
 	while (!test_bit_status_tfe(reg_base)) {
-		k_busy_wait(1);
+		k_busy_wait(DW_I2C_WAIT_US);
 	}
 }
 
@@ -660,7 +1047,7 @@ static inline void i2c_dw_wait_master_inactive(const struct device *dev)
 
 	/* Wait for master to become inactive (MA bit = 0) */
 	while (test_bit_status_ma(reg_base) && timeout--) {
-		k_busy_wait(1);
+		k_busy_wait(DW_I2C_WAIT_US);
 	}
 }
 
@@ -867,6 +1254,26 @@ static int i2c_dw_transfer(const struct device *dev,
 
 		dw->state &= ~(I2C_DW_CMD_SEND | I2C_DW_CMD_RECV);
 
+#ifdef CONFIG_I2C_DW_DMA
+		/* Try DMA transfer first if conditions are met */
+		const struct i2c_dw_rom_config *rom = dev->config;
+		bool use_dma = i2c_dw_should_use_dma(rom, cur_msg);
+
+		if (use_dma) {
+			LOG_DBG("Using DMA for transfer");
+			ret = i2c_dw_dma_transfer(dev, cur_msg);
+			if (ret == 0) {
+				/* DMA transfer successful, continue to next message */
+				goto next_msg;
+			} else if (ret != -ENOTSUP) {
+				/* DMA transfer failed with real error */
+				LOG_ERR("DMA transfer failed: %d", ret);
+				break;
+			}
+			LOG_WRN("DMA not supported, falling back to interrupt mode");
+		}
+#endif
+
 		if ((dw->xfr_flags & I2C_MSG_RW_MASK) == I2C_MSG_WRITE) {
 			dw->state |= I2C_DW_CMD_SEND;
 			dw->request_bytes = 0U;
@@ -904,6 +1311,9 @@ static int i2c_dw_transfer(const struct device *dev,
 			break;
 		}
 
+#ifdef CONFIG_I2C_DW_DMA
+next_msg:
+#endif
 		cur_msg++;
 		msg_left--;
 	}
@@ -1266,6 +1676,26 @@ static int i2c_dw_initialize(const struct device *dev)
 	k_sem_init(&dw->device_sync_sem, 0, K_SEM_MAX_LIMIT);
 	k_mutex_init(&dw->bus_mutex);
 
+#ifdef CONFIG_I2C_DW_DMA
+	/* Initialize DMA semaphore */
+	k_sem_init(&dw->dma_sem, 0, 1);
+
+	/* Check DMA device readiness */
+	if (rom->dma_tx.dma_dev && !device_is_ready(rom->dma_tx.dma_dev)) {
+		LOG_ERR("TX DMA device not ready");
+		return -ENODEV;
+	}
+
+	if (rom->dma_rx.dma_dev && !device_is_ready(rom->dma_rx.dma_dev)) {
+		LOG_ERR("RX DMA device not ready");
+		return -ENODEV;
+	}
+
+	LOG_DBG("DMA support initialized - TX: %s channel %d, RX: %s channel %d",
+		rom->dma_tx.dma_dev ? rom->dma_tx.dma_dev->name : "none", rom->dma_tx.channel,
+		rom->dma_rx.dma_dev ? rom->dma_rx.dma_dev->name : "none", rom->dma_rx.channel);
+#endif
+
 	uint32_t reg_base = get_regs(dev);
 
 	clear_bit_enable_en(reg_base);
@@ -1382,24 +1812,67 @@ static int i2c_dw_initialize(const struct device *dev)
 	(.dma_dev = DEVICE_DT_GET(DT_INST_DMAS_CTLR_BY_IDX(n, 0)),),	\
 	())), ())
 
-#define I2C_DEVICE_INIT_DW(n)                                                 \
-	PINCTRL_DW_DEFINE(n);                                                 \
-	I2C_PCIE_DEFINE(n);                                                   \
-	static void i2c_config_##n(const struct device *port);                \
-	static const struct i2c_dw_rom_config i2c_config_dw_##n = {           \
-		I2C_CONFIG_REG_INIT(n)                                        \
-		.config_func = i2c_config_##n,                                \
-		.bitrate = DT_INST_PROP(n, clock_frequency),                  \
-		RESET_DW_CONFIG(n)                                            \
-		PINCTRL_DW_CONFIG(n)                                          \
-		I2C_DW_INIT_PCIE(n)                                           \
-		I2C_CONFIG_DMA_INIT(n)					      \
-	};                                                                    \
-	static struct i2c_dw_dev_config i2c_##n##_runtime;                    \
-	I2C_DEVICE_DT_INST_DEFINE(n, i2c_dw_initialize, NULL,                 \
-			      &i2c_##n##_runtime, &i2c_config_dw_##n,         \
-			      POST_KERNEL, CONFIG_I2C_INIT_PRIORITY,          \
-			      &funcs);                                        \
+#ifdef CONFIG_I2C_DW_DMA
+#define I2C_DW_DMA_CHANNELS(n)                                                                     \
+	COND_CODE_1(DT_INST_DMAS_HAS_NAME(n, tx),                                                  \
+		    (.dma_tx =                                                                     \
+			     {                                                                     \
+				     .dma_dev = DEVICE_DT_GET(DT_INST_DMAS_CTLR_BY_NAME(n, tx)),   \
+				     .channel = DT_INST_DMAS_CELL_BY_NAME(n, tx, channel),         \
+				     .dma_cfg =                                                    \
+					     {                                                     \
+						     .channel_direction = MEMORY_TO_PERIPHERAL,    \
+						     .dma_callback = i2c_dw_dma_callback,          \
+						     .source_burst_length = 1,                     \
+						     .dest_burst_length = 1,                       \
+						     .source_data_size = 4,                        \
+						     .dest_data_size = 4,                          \
+						     .block_count = 1,                             \
+						     .dma_slot = DT_INST_DMAS_CELL_BY_NAME(n, tx,  \
+											   slot),  \
+						     .source_handshake = 0,                        \
+						     .dest_handshake = 0,                          \
+					     },                                                    \
+			     }, ),                                                                 \
+		    (.dma_tx = {.dma_dev = NULL}, ))                                               \
+	COND_CODE_1(DT_INST_DMAS_HAS_NAME(n, rx),                                                  \
+		    (.dma_rx =                                                                     \
+			     {                                                                     \
+				     .dma_dev = DEVICE_DT_GET(DT_INST_DMAS_CTLR_BY_NAME(n, rx)),   \
+				     .channel = DT_INST_DMAS_CELL_BY_NAME(n, rx, channel),         \
+				     .dma_cfg =                                                    \
+					     {                                                     \
+						     .channel_direction = PERIPHERAL_TO_MEMORY,    \
+						     .dma_callback = i2c_dw_dma_callback,          \
+						     .source_burst_length = 1,                     \
+						     .dest_burst_length = 1,                       \
+						     .source_data_size = 1,                        \
+						     .dest_data_size = 1,                          \
+						     .block_count = 1,                             \
+						     .dma_slot = DT_INST_DMAS_CELL_BY_NAME(n, rx,  \
+											   slot),  \
+						     .source_handshake = 0,                        \
+						     .dest_handshake = 0,                          \
+					     },                                                    \
+			     }, ),                                                                 \
+		    (.dma_rx = {.dma_dev = NULL}, ))
+#else
+#define I2C_DW_DMA_CHANNELS(n)
+#endif
+
+#define I2C_DEVICE_INIT_DW(n)                                                                      \
+	PINCTRL_DW_DEFINE(n);                                                                      \
+	I2C_PCIE_DEFINE(n);                                                                        \
+	static void i2c_config_##n(const struct device *port);                                     \
+	static const struct i2c_dw_rom_config i2c_config_dw_##n = {                                \
+		I2C_CONFIG_REG_INIT(n).config_func = i2c_config_##n,                               \
+		.bitrate = DT_INST_PROP(n, clock_frequency),                                       \
+		RESET_DW_CONFIG(n) PINCTRL_DW_CONFIG(n) I2C_DW_INIT_PCIE(n) I2C_CONFIG_DMA_INIT(n) \
+			I2C_DW_DMA_CHANNELS(n)};                                                   \
+	static struct i2c_dw_dev_config i2c_##n##_runtime;                                         \
+	I2C_DEVICE_DT_INST_DEFINE(n, i2c_dw_initialize, NULL, &i2c_##n##_runtime,                  \
+				  &i2c_config_dw_##n, POST_KERNEL, CONFIG_I2C_INIT_PRIORITY,       \
+				  &funcs);                                                         \
 	I2C_DW_IRQ_CONFIG(n)
 
 DT_INST_FOREACH_STATUS_OKAY(I2C_DEVICE_INIT_DW)

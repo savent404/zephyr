@@ -164,6 +164,35 @@ union ic_comp_param_1_register {
 #define DW_IC_DMA_TX_ENABLE                    BIT(1)
 #define DW_IC_DMA_ENABLE                       (BIT(0) | BIT(1))
 
+/* DMA threshold register bits */
+#define DW_IC_DMA_TDLR_MASK 0xFF
+#define DW_IC_DMA_RDLR_MASK 0xFF
+
+/* TX Abort source register bits */
+#define DW_IC_TX_ABRT_7B_ADDR_NOACK   BIT(0)
+#define DW_IC_TX_ABRT_10ADDR1_NOACK   BIT(1)
+#define DW_IC_TX_ABRT_10ADDR2_NOACK   BIT(2)
+#define DW_IC_TX_ABRT_TXDATA_NOACK    BIT(3)
+#define DW_IC_TX_ABRT_GCALL_NOACK     BIT(4)
+#define DW_IC_TX_ABRT_GCALL_READ      BIT(5)
+#define DW_IC_TX_ABRT_HS_ACKDET       BIT(6)
+#define DW_IC_TX_ABRT_SBYTE_ACKDET    BIT(7)
+#define DW_IC_TX_ABRT_HS_NORSTRT      BIT(8)
+#define DW_IC_TX_ABRT_SBYTE_NORSTRT   BIT(9)
+#define DW_IC_TX_ABRT_10B_RD_NORSTRT  BIT(10)
+#define DW_IC_TX_ABRT_MASTER_DIS      BIT(11)
+#define DW_IC_TX_ABRT_ARB_LOST        BIT(12)
+#define DW_IC_TX_ABRT_SLVFLUSH_TXFIFO BIT(13)
+#define DW_IC_TX_ABRT_SLV_ARBLOST     BIT(14)
+#define DW_IC_TX_ABRT_SLVRD_INTX      BIT(15)
+#define DW_IC_TX_ABRT_USER_ABRT       BIT(16)
+
+/* Status register extended bits */
+#define DW_IC_STATUS_MST_HOLD_TX_FIFO_EMPTY BIT(7)
+#define DW_IC_STATUS_MST_HOLD_RX_FIFO_FULL  BIT(8)
+#define DW_IC_STATUS_SLV_HOLD_TX_FIFO_EMPTY BIT(9)
+#define DW_IC_STATUS_SLV_HOLD_RX_FIFO_FULL  BIT(10)
+
 DEFINE_TEST_BIT_OP(con_master_mode, DW_IC_REG_CON, DW_IC_CON_MASTER_MODE_BIT)
 DEFINE_MM_REG_WRITE(con, DW_IC_REG_CON, 32)
 DEFINE_MM_REG_READ(con, DW_IC_REG_CON, 32)

@@ -30,6 +30,30 @@ config I2C_DW_LPSS_DMA
 	  data transfers. All Tx operations are done using dma channel 0 and
 	  all Rx operations are done using dma channel 1.
 
+config I2C_DW_DMA
+	bool "Use DMA for I2C transfers"
+	depends on I2C_DW
+	select DMA
+	help
+	  This option enables DMA support for I2C transfers. DMA will be used
+	  for both TX and RX operations when available and data size exceeds
+	  the configured threshold.
+
+config I2C_DW_DMA_THRESHOLD
+	int "DMA transfer threshold in bytes"
+	depends on I2C_DW_DMA
+	default 1
+	help
+	  Minimum number of bytes required to use DMA for I2C transfers.
+	  Transfers smaller than this threshold will use interrupt mode.
+
+config I2C_DW_DMA_TIMEOUT_MS
+	int "DMA transfer timeout in milliseconds"
+	depends on I2C_DW_DMA
+	default 1000
+	help
+	  Timeout for DMA transfers in milliseconds.
+
 config I2C_DW_RW_TIMEOUT_MS
 	int "Set the Read/Write timeout in milliseconds"
 	depends on I2C_DW
