@@ -637,9 +637,8 @@ void z_usage_stats_reset_if_corrupted(void)
 	unsigned int num_cpus = arch_num_cpus();
 
 	for (uint8_t i = 0; i < num_cpus; i++) {
-		struct _cpu *cpu = &_kernel.cpus[i];
-
 #if CONFIG_THREAD_RUNTIME_STATS_OVERFLOW_PROTECTION
+		struct _cpu *cpu = &_kernel.cpus[i];
 		if (cpu->usage && check_and_reset_corruption(&cpu->usage->total)) {
 #ifdef CONFIG_SCHED_THREAD_USAGE_ANALYSIS
 			cpu->usage->current = 0;
