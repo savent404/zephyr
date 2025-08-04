@@ -787,11 +787,6 @@ static int cmd_tpm_updatemeasure(const struct shell *sh, size_t argc, char **arg
 
 	/* Parse U-Boot address */
 	flash_addr = strtoul(argv[1], NULL, 0);
-	if (flash_addr == 0) {
-		shell_error(sh, "Invalid Flash address: %s", argv[1]);
-		shell_error(sh, "Address must be in hex format (e.g., 0x00100000)");
-		return -EINVAL;
-	}
 
 	/* Parse U-Boot size */
 	flash_size = strtoul(argv[2], NULL, 0);
