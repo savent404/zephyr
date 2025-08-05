@@ -26,7 +26,3 @@
 &ethernet1 {
 	status = "disabled";
 };
-
-&dma0 {
-	status = "okay";
-};

@@ -88,6 +88,10 @@ int main(void)
 	int rv;
 	int retries = 0;
 
+#ifdef CONFIG_I2C_DW_DMA
+	LOG_INF("DesignWare DMA support enabled.");
+#endif
+
 	/* Get RTC device from device tree */
 	rtc_dev = DEVICE_DT_GET(RTC_DEV_NODE);
 	if (!device_is_ready(rtc_dev)) {

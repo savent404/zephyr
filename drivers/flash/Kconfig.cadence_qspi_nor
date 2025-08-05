@@ -30,8 +30,9 @@ config FLASH_CAD_FLASH_QSPI_NOR
 
 config QSPI_DW_DMA
 	bool "DMA support for Cadence QSPI"
-	default y
-	depends on FLASH_CAD_QSPI_NOR && DMA
+	default n
+	depends on FLASH_CAD_QSPI_NOR
+	select DMA
 	help
 		DMA support for Cadence QSPI controller.
 		This option enables DMA transfers for improved performance.
