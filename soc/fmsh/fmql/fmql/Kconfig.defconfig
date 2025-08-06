@@ -17,4 +17,7 @@ config ARM_AARCH32_MMU
 config SYSCON_INIT_PRIORITY
 	default 40
 
+config STACK_SENTINEL
+	default y
+
 endif # SOC_SERIES_FMSH_FMQL
