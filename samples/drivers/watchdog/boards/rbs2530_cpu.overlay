@@ -9,6 +9,4 @@
 };
 &wdt {
 	status = "okay";
-	timeout-sec = <5>;
-	reset = <1>;
 };
