@@ -282,8 +282,8 @@ static int file_sync_transfer(const char *src_path, const char *dst_path)
 	}
 
 	/* Allocate buffers for comparing file data */
-	*src_buffer = k_malloc(CHUNK_SIZE);
-	*dst_buffer = k_malloc(CHUNK_SIZE);
+	src_buffer = k_malloc(CHUNK_SIZE);
+	dst_buffer = k_malloc(CHUNK_SIZE);
 
 	if (!src_buffer || !dst_buffer) {
 		LOG_ERR("Failed to allocate compare buffers");
