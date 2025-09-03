@@ -258,6 +258,31 @@ struct ldp_basic {
 
 	inline static constexpr uint16_t LDP_USR_ASYNC_MAX_LEN =
 		(LDP_USR_SYNC_MAX_LENGTH - sizeof(ldp_a_header));
+
+protected:
+	/**
+	 * @brief General error handler
+	 * If set is true, set the error bit.
+	 * If set is false, clear the error bit, and set the previous error bit.
+	 *
+	 * @param set true to set error bit, false to clear error bit
+	 * @param last_err last error mask
+	 * @param curr current error bit
+	 * @param prev previous error bit
+	 * @return int updated error mask
+	 */
+	uint32_t handle_error(bool set, uint32_t last_err, ldp_error curr, ldp_error prev)
+	{
+		if (set) {
+			last_err |= (1 << curr);
+		} else if (!set && last_err & (1 << curr)) {
+			last_err &= ~(1 << curr);
+			last_err |= (1 << prev);
+		}
+		return last_err;
+	}
+
+
 };
 
 } // namespace cif

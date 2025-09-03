@@ -53,6 +53,7 @@ template <typename T_cache> struct ldp_slave: public ldp_basic {
 		ci->id = next_id_;
 		ci->is_async = is_async;
 		ci->port = config->port;
+		ci->last_err = 0;
 
 		if (!is_async) {
 			/**
@@ -194,6 +195,16 @@ template <typename T_cache> struct ldp_slave: public ldp_basic {
 			return -LDP_ERR_CONN_NOT_FOUND;
 		}
 
+		/* get aware diagnosis bits */
+		uint32_t status;
+		uint32_t aware_bit = mcb_if::MCB_ERR_I_ERR;
+
+		status = mcb_->get_status();
+		mcb_->clr_status(status & aware_bit);
+
+		(*it)->last_err = handle_error(status & mcb_if::MCB_ERR_I_ERR,
+			(*it)->last_err, LDP_ERR_I_ERROR, LDP_ERR_PREV_I_ERROR);
+
 		if (!(*it)->is_async) {
 			uint8_t port = (*it)->port;
 			uint8_t *rx_buf;
@@ -258,11 +269,23 @@ template <typename T_cache> struct ldp_slave: public ldp_basic {
 
 	virtual uint32_t get_extra_error(conn c)
 	{
+		auto it = std::find_if(conns_.begin(), conns_.end(),
+				       [c](const conn_info_ptr &ci) { return ci->id == c; });
+
+		if (it != conns_.end()) {
+			return (*it)->last_err;
+		}
 		return 0;
 	}
 
 	virtual void clr_extra_error(conn c, uint32_t err_bits)
 	{
+		auto it = std::find_if(conns_.begin(), conns_.end(),
+				       [c](const conn_info_ptr &ci) { return ci->id == c; });
+
+		if (it != conns_.end()) {
+			(*it)->last_err &= ~err_bits;
+		}
 	}
 
 	virtual void set_sync_cycle(uint32_t)
@@ -279,6 +302,7 @@ template <typename T_cache> struct ldp_slave: public ldp_basic {
 		conn id;
 		bool is_async;
 		uint8_t port;
+		uint32_t last_err;
 	};
 	using conn_info_ptr = std::unique_ptr<conn_info>;
 	using conn_list = std::list<conn_info_ptr>;

@@ -1107,29 +1107,6 @@ struct ldp_master: public ldp_basic {
 			work_queue_->reset(ci->wq_id, ci->cycle);
 		}
 	}
-
-	/**
-	 * @brief General error handler
-	 * If set is true, set the error bit.
-	 * If set is false, clear the error bit, and set the previous error bit.
-	 *
-	 * @param set true to set error bit, false to clear error bit
-	 * @param last_err last error mask
-	 * @param curr current error bit
-	 * @param prev previous error bit
-	 * @return int updated error mask
-	 */
-	uint32_t handle_error(bool set, uint32_t last_err, ldp_error curr, ldp_error prev)
-	{
-		if (set) {
-			last_err |= (1 << curr);
-		} else if (!set && last_err & (1 << curr)) {
-			last_err &= ~(1 << curr);
-			last_err |= (1 << prev);
-		}
-		return last_err;
-	}
-
       protected:
 	sync_conn_list sync_conns_;
 	async_conn_list async_conns_;
