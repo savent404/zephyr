@@ -178,7 +178,8 @@ static bool dev_general_cfg(int cif_sock, uint8_t slot, uint8_t port, const void
 	return false;
 }
 
-static int handle_extra_errors(int sock)
+/* NOTE: this function is called in slave too. */
+int handle_extra_errors(int sock)
 {
 	int ret;
 	struct cif_error_filter err_mask = {

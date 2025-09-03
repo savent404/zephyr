@@ -109,6 +109,13 @@ int slave_cancel(void);
 int master_start(void);
 int master_cancel(void);
 
+/**
+ * @brief This function is used to get and handle extra errors.
+ * @return 1 if Preempt event detected. (For master mode, it shall switch to slave mode)
+ * @return 0 if no extra errors detected.
+ */
+int handle_extra_errors(int sock);
+
 #define MAX_OPEN_PORTS  8
 #define MAX_OPEN_ERRORS 32
 struct open_port_s {

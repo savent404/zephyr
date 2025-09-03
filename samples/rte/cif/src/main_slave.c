@@ -283,6 +283,7 @@ static int slave_task(void)
 		no_job += deal_ethernet_data(sock, PORT_ID_ETH1);
 		no_job += deal_ethernet_data(sock, PORT_ID_ETH2);
 		no_job += deal_ethernet_data(sock, PORT_ID_ETH3);
+		no_job += handle_extra_errors(sock);
 
 		if (no_job == 0) {
 			k_usleep(10);
