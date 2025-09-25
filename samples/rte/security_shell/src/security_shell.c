@@ -14,6 +14,7 @@
 #include <zephyr/shell/shell.h>
 #include <zephyr/logging/log.h>
 #include <zephyr/kernel.h>
+#include <zephyr/random/random.h>
 #include <string.h>
 #include <stdlib.h>
 
@@ -27,6 +28,12 @@
 #include <wolfssl/wolfcrypt/asn_public.h>  /* For DerBuffer */
 
 #include <wolfssl/wolfcrypt/hash.h>
+
+/* GmSSL includes */
+#include <gmssl/sm4.h>
+#include <gmssl/sm3.h>
+#include <gmssl/sm2.h>
+#include <gmssl/hex.h>
 
 LOG_MODULE_REGISTER(security_shell, CONFIG_LOG_DEFAULT_LEVEL);
 
@@ -333,6 +340,53 @@ cleanup:
 	return ret;
 }
 
+static int generate_sm2_key(const struct shell *sh, WC_RNG *rng)
+{
+	ARG_UNUSED(rng);
+
+	SM2_KEY key;
+	int id;
+
+	if (sm2_key_generate(&key) != 1) {
+		shell_print(sh, "Failed to generate SM2 key");
+		return -EIO;
+	}
+
+	id = load_keybuf(KEY_TYPE_PRIV, (uint8_t *)&key.private_key, sizeof(key.private_key));
+	if (id < 0) {
+		shell_print(sh, "Failed to load SM2 key to buffer: %d", id);
+		return -EIO;
+	}
+	shell_print(sh, "SM2 key loaded to buffer, id: %d", id);
+
+	id = load_keybuf(KEY_TYPE_PUB, (uint8_t *)&key.public_key, sizeof(key.public_key));
+	if (id < 0) {
+		shell_print(sh, "Failed to load SM2 public key to buffer: %d", id);
+		return -EIO;
+	}
+	shell_print(sh, "SM2 public key loaded to buffer, id: %d", id);
+
+	return 0;
+}
+
+static int generate_sm4_key(const struct shell *sh, WC_RNG *rng)
+{
+	ARG_UNUSED(rng);
+
+	uint8_t key[16]; /* SM4 key size is 16 bytes */
+	int id;
+
+	sys_rand_get(key, sizeof(key));
+	id = load_keybuf(KEY_TYPE_PRIV, key, sizeof(key));
+	if (id < 0) {
+		shell_print(sh, "Failed to load SM4 key to buffer: %d", id);
+		return -EIO;
+	}
+	shell_print(sh, "SM4 key loaded to buffer, id: %d", id);
+
+	return 0;
+}
+
 /* Create keypair from private key */
 static int create_keypair(ecc_key *priv_key, ecc_key **keypair_out)
 {
@@ -393,7 +447,7 @@ cleanup_alloc:
 static int cmd_ss_genkey(const struct shell *sh, size_t argc, char **argv)
 {
 	static const char *const algorithms[] = {
-		"ecc256",
+		"ecc256", "sm2", "sm4",
 		/* Add more algorithms as needed */
 	};
 	const char *chosen_algorithm = NULL;
@@ -434,6 +488,10 @@ static int cmd_ss_genkey(const struct shell *sh, size_t argc, char **argv)
 
 	if (chosen_algorithm_index == 0) {
 		ret = generate_ecc_key(sh, rng);
+	} else if (chosen_algorithm_index == 1) {
+		ret = generate_sm2_key(sh, rng);
+	} else if (chosen_algorithm_index == 2) {
+		ret = generate_sm4_key(sh, rng);
 	} else {
 		shell_print(sh, "Unsupported algorithm index: %d", chosen_algorithm_index);
 		return -EINVAL;
@@ -441,6 +499,229 @@ static int cmd_ss_genkey(const struct shell *sh, size_t argc, char **argv)
 
 	cleanup_rng(rng);
 	return ret;
+}
+
+static int handle_sm2_encryption(const struct shell *sh, const char *plaintext,
+				 const key_info_t *kinfo, int pub_key_id)
+{
+	SM2_KEY key;
+	uint8_t ciphertext[MY_MAX_KEY_SIZE];
+	size_t plaintext_len = strnlen(plaintext, MY_MAX_KEY_SIZE);
+	size_t ciphertext_len;
+	int ret;
+
+	if (kinfo->type != KEY_TYPE_PUB) {
+		shell_print(sh, "Key id %d is not a public key", pub_key_id);
+		return -EINVAL;
+	}
+	if (kinfo->size != sizeof(key.public_key)) {
+		shell_print(sh, "Key id %d size is not %zu bytes", pub_key_id,
+			    sizeof(key.public_key));
+		return -EINVAL;
+	}
+
+	/* Load the SM2 public key from buffer */
+	memcpy(&key.public_key, key_buf[pub_key_id], sizeof(key.public_key));
+
+	/* Encrypt the plaintext */
+	ret = sm2_encrypt(&key, (const uint8_t *)plaintext, plaintext_len, ciphertext,
+			  &ciphertext_len);
+	if (ret != 1) {
+		shell_print(sh, "SM2 encryption failed: %d", ret);
+		return -EIO;
+	}
+
+	/* Print the ciphertext in hex format */
+	shell_print(sh, "Ciphertext (hex):");
+	for (size_t i = 0; i < ciphertext_len; i++) {
+		shell_fprintf(sh, SHELL_NORMAL, "%02x", ciphertext[i]);
+	}
+	shell_print(sh, "");
+
+	return 0;
+}
+
+static int handle_sm4_decryption(const struct shell *sh, const char *ciphertext_hex,
+				 const key_info_t *kinfo, int priv_key_id, char *ciphertext,
+				 char *plaintext)
+{
+	SM4_KEY sm4_key;
+	uint8_t iv[16] = {0}; /* Initialization vector */
+	size_t ciphertext_len;
+	size_t plaintext_len;
+	int ret;
+
+	if (kinfo->type != KEY_TYPE_PRIV) {
+		shell_print(sh, "Key id %d is not a private key", priv_key_id);
+		return -EINVAL;
+	}
+	if (kinfo->size != 16) {
+		shell_print(sh, "Key id %d size is not 16 bytes", priv_key_id);
+		return -EINVAL;
+	}
+
+	/* Convert hex string to binary */
+	ret = hex_to_bytes((const char *)ciphertext_hex, strlen(ciphertext_hex), ciphertext,
+			   &ciphertext_len);
+	if (ret < 0) {
+		shell_print(sh, "Failed to decode hex string: %d", ret);
+		return -EINVAL;
+	}
+
+	/* Set the SM4 key */
+	sm4_set_decrypt_key(&sm4_key, key_buf[priv_key_id]);
+
+	/* Decrypt the ciphertext */
+	ret = sm4_cbc_padding_decrypt(&sm4_key, iv, ciphertext, ciphertext_len, plaintext,
+				      &plaintext_len);
+	if (ret != 1) {
+		shell_print(sh, "SM4 decryption failed: %d", ret);
+		return -EIO;
+	}
+	plaintext[plaintext_len] = '\0'; /* Null-terminate the plaintext */
+
+	shell_print(sh, "Decrypted plaintext: %s", plaintext);
+	return 0;
+}
+
+static int handle_sm2_decryption(const struct shell *sh, const char *ciphertext_hex,
+				 const key_info_t *kinfo, int priv_key_id, char *ciphertext,
+				 char *plaintext)
+{
+	SM2_KEY key;
+	size_t ciphertext_len;
+	size_t plaintext_len;
+	int ret;
+
+	if (kinfo->type != KEY_TYPE_PRIV) {
+		shell_print(sh, "Key id %d is not a private key", priv_key_id);
+		return -EINVAL;
+	}
+	if (kinfo->size != sizeof(key.private_key)) {
+		shell_print(sh, "Key id %d size is not %zu bytes", priv_key_id,
+			    sizeof(key.private_key));
+		return -EINVAL;
+	}
+
+	/* Convert hex string to binary */
+	ret = hex_to_bytes((const char *)ciphertext_hex, strlen(ciphertext_hex), ciphertext,
+			   &ciphertext_len);
+	if (ret < 0) {
+		shell_print(sh, "Failed to decode hex string: %d", ret);
+		return -EINVAL;
+	}
+
+	/* Load the SM2 private key from buffer */
+	memcpy(&key.private_key, key_buf[priv_key_id], sizeof(key.private_key));
+
+	/* Decrypt the ciphertext */
+	ret = sm2_decrypt(&key, ciphertext, ciphertext_len, plaintext, &plaintext_len);
+	if (ret != 1) {
+		shell_print(sh, "SM2 decryption failed: %d", ret);
+		return -EIO;
+	}
+	plaintext[plaintext_len] = '\0'; /* Null-terminate the plaintext */
+
+	shell_print(sh, "Decrypted plaintext: %s", plaintext);
+	return 0;
+}
+static int handle_sm4_encryption(const struct shell *sh, const char *plaintext,
+				 const key_info_t *kinfo, int pub_key_id)
+{
+	SM4_KEY sm4_key;
+	uint8_t iv[SM4_BLOCK_SIZE] = {0}; /* Initialization vector */
+	uint8_t ciphertext[MY_MAX_KEY_SIZE];
+	size_t plaintext_len = strnlen(plaintext, MY_MAX_KEY_SIZE);
+	size_t ciphertext_len;
+	int ret;
+
+	if (kinfo->type != KEY_TYPE_PRIV) {
+		shell_print(sh, "Key id %d is not a private key", pub_key_id);
+		return -EINVAL;
+	}
+	if (kinfo->size != 16) {
+		shell_print(sh, "Key id %d size is not 16 bytes", pub_key_id);
+		return -EINVAL;
+	}
+
+	/* Set the SM4 key */
+	sm4_set_encrypt_key(&sm4_key, key_buf[pub_key_id]);
+
+	/* Encrypt the plaintext */
+	ret = sm4_cbc_padding_encrypt(&sm4_key, iv, (const uint8_t *)plaintext, plaintext_len,
+				      ciphertext, &ciphertext_len);
+	if (ret != 1) {
+		shell_print(sh, "SM4 encryption failed: %d", ret);
+		return -EIO;
+	}
+
+	/* Print the ciphertext in hex format */
+	shell_print(sh, "Ciphertext (hex):");
+	for (size_t i = 0; i < ciphertext_len; i++) {
+		shell_fprintf(sh, SHELL_NORMAL, "%02x", ciphertext[i]);
+	}
+	shell_print(sh, "");
+
+	return 0;
+}
+
+static int cmd_ss_enc(const struct shell *sh, size_t argc, char **argv)
+{
+	const char *plaintext = argv[1];
+	const char *algo = argv[2];
+	int pub_key_id = atoi(argv[3]);
+
+	if (pub_key_id < 0 || pub_key_id >= MAX_KEY_NUM) {
+		shell_print(sh, "Invalid public key id: %d", pub_key_id);
+		return -EINVAL;
+	}
+
+	const key_info_t *kinfo = &key_info[pub_key_id];
+
+	if (!kinfo->is_used) {
+		shell_print(sh, "Key id %d is not used", pub_key_id);
+		return -EINVAL;
+	}
+
+	if (!strcmp(algo, "sm4")) {
+		return handle_sm4_encryption(sh, plaintext, kinfo, pub_key_id);
+	} else if (!strcmp(algo, "sm2")) {
+		return handle_sm2_encryption(sh, plaintext, kinfo, pub_key_id);
+	}
+	shell_print(sh, "Unsupported algorithm: %s", algo);
+
+	return 0;
+}
+
+static int cmd_ss_dec(const struct shell *sh, size_t argc, char **argv)
+{
+	static char ciphertext[512];
+	static char plaintext[512];
+	const char *ciphertext_hex = argv[1];
+	const char *algo = argv[2];
+	int priv_key_id = atoi(argv[3]);
+
+	if (priv_key_id < 0 || priv_key_id >= MAX_KEY_NUM) {
+		shell_print(sh, "Invalid private key id: %d", priv_key_id);
+		return -EINVAL;
+	}
+
+	const key_info_t *kinfo = &key_info[priv_key_id];
+
+	if (!kinfo->is_used) {
+		shell_print(sh, "Key id %d is not used", priv_key_id);
+		return -EINVAL;
+	}
+
+	if (!strcmp(algo, "sm4")) {
+		return handle_sm4_decryption(sh, ciphertext_hex, kinfo, priv_key_id, ciphertext,
+					     plaintext);
+	} else if (!strcmp(algo, "sm2")) {
+		return handle_sm2_decryption(sh, ciphertext_hex, kinfo, priv_key_id, ciphertext,
+					     plaintext);
+	}
+	shell_print(sh, "Unsupported algorithm: %s", algo);
+	return 0;
 }
 
 static int cmd_ss_gencsr(const struct shell *sh, size_t argc, char **argv)
@@ -1011,6 +1292,14 @@ SHELL_STATIC_SUBCMD_SET_CREATE(sub_ss_cmds,
 					     "Dump key in PEM format\n"
 					     "Usage: dump [key_id]",
 					     cmd_ss_dump, 2, 0),
+			       SHELL_CMD_ARG(enc, NULL,
+					     "Encrypt a string with pubkey\n"
+					     "Usage: enc [string] [algo] [pubkey_id]",
+					     cmd_ss_enc, 4, 0),
+			       SHELL_CMD_ARG(dec, NULL,
+					     "Decrypt a string with privkey\n"
+					     "Usage: dec [hex_string] [algo] [privkey_id]",
+					     cmd_ss_dec, 4, 0),
 			       SHELL_CMD_ARG(sign, NULL,
 					     "Sign a string with privkey\n"
 					     "Usage: sign [string] [privkey_id]",
