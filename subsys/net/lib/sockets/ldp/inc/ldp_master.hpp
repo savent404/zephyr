@@ -622,12 +622,11 @@ struct ldp_master: public ldp_basic {
 		mcb_->config_port(port, true, true, mcb_if::MCB_MAX_FRAME_LEN);
 		mcb_->set_tx_len(port, len);
 
-#if CONFIG_MCB
 		if (len > mcb_if::MCB_MAX_FRAME_LEN) {
+#if CONFIG_MCB
 			printk("LDP_MASTER: Invalid tx length %d\n", len);
-			k_panic();
-		}
 #endif
+		}
 	}
 
 	/**
@@ -768,7 +767,6 @@ struct ldp_master: public ldp_basic {
 				printk("LDP_MASTER: triggered transfer count: %llu\n",
 				       transfer_count);
 				printk("LDP_MASTER: poll timeout, sid=%d, port=%d\n", sid, port);
-				k_panic();
 			}
 			k_usleep(LDP_POLL_INTERVAL);
 #endif
