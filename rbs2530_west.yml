@@ -59,7 +59,8 @@ manifest:
       path: modules/fs/littlefs
       groups:
         - fs
-      revision: 009bcff0ed4853a53df8256039fa815bda6854dd
+      revision: 61732395391587a993aeea8b32d0b9b039d01a32
+      remote: sysfly
     - name: mbedtls
       revision: fb36f3fe20f9f62e67b1a20c0cfe0a6788ec2bf6
       path: modules/crypto/mbedtls
