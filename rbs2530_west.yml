@@ -59,7 +59,7 @@ manifest:
       path: modules/fs/littlefs
       groups:
         - fs
-      revision: 009bcff0ed4853a53df8256039fa815bda6854dd
+      revision: 8f5ca347843363882619d8f96c00d8dbd88a8e79
     - name: mbedtls
       revision: fb36f3fe20f9f62e67b1a20c0cfe0a6788ec2bf6
       path: modules/crypto/mbedtls
