@@ -31,6 +31,7 @@ struct sdhc_dw_data {
 	DEVICE_MMIO_RAM;
 	uint32_t prev_opcode;
 	uint32_t host_freq;
+	struct k_sem io_lock;
 
 #if defined(CONFIG_SDHC_DW_DMA)
 	/* NOTE: This buffer must be mapped directly
@@ -203,6 +204,24 @@ static bool _is_long_response(uint32_t z_resp_type)
 		break;
 	}
 	return res;
+}
+
+static inline int sdhc_dw_critical_entry(const struct device *dev)
+{
+	struct sdhc_dw_data *data = dev->data;
+	int ret = k_sem_take(&data->io_lock, K_MSEC(10));
+
+	if (ret) {
+		LOG_ERR("Failed to acquire io_lock");
+	}
+	return ret;
+}
+
+static inline void sdhc_dw_critical_exit(const struct device *dev)
+{
+	struct sdhc_dw_data *data = dev->data;
+
+	k_sem_give(&data->io_lock);
 }
 
 static int sdhc_dw_set_fifo_threshold(const struct device *dev, uint32_t threshold, uint32_t burst)
@@ -573,17 +592,25 @@ static int sdhc_dw_read(const struct device *dev, uint32_t *addr, uint32_t len)
 static int sdhc_dw_request(const struct device *dev, struct sdhc_command *cmd,
 			   struct sdhc_data *data)
 {
+	struct sdhc_dw_data *dev_data = dev->data;
 	const uint32_t per_loop_delay_us = 1;
 	uint32_t rcmd;
 	uint32_t temp;
 	int timeout = (cmd->retries + 1) * cmd->timeout_ms * 1000 / per_loop_delay_us;
+	int ret;
 	enum {
 		rd,
 		wr,
 		none
 	} dir = none;
 
-	rcmd = _dw_cmd_prepare(cmd, dev->data);
+	/* Acquire lock for exclusive access */
+	ret = sdhc_dw_critical_entry(dev);
+	if (ret) {
+		return ret;
+	}
+
+	rcmd = _dw_cmd_prepare(cmd, dev_data);
 
 	if (rcmd & SDMMC_CMD_DAT_WR) {
 		dir = wr;
@@ -615,9 +642,11 @@ static int sdhc_dw_request(const struct device *dev, struct sdhc_command *cmd,
 
 	if (timeout < 0 || (temp & SDMMC_INT_RTO) || (temp & SDMMC_INT_DRTO)) {
 		LOG_WRN_ONCE("Command(%x) timeout", cmd->opcode & 0xFF);
+		sdhc_dw_critical_exit(dev);
 		return -ETIMEDOUT;
 	} else if (rcmd & SDMMC_CMD_RESP_CRC && temp & (SDMMC_INT_RCRC | SDMMC_INT_DCRC)) {
 		LOG_WRN_ONCE("Response CRC error");
+		sdhc_dw_critical_exit(dev);
 		return -EIO;
 	}
 
@@ -641,17 +670,21 @@ static int sdhc_dw_request(const struct device *dev, struct sdhc_command *cmd,
 		if (dir == rd) {
 			if (sdhc_dw_read(dev, data->data, data->blocks * data->block_size)) {
 				LOG_WRN_ONCE("Read data timeout");
+				sdhc_dw_critical_exit(dev);
 				return -ETIMEDOUT;
 			}
 		} else {
 			if (sdhc_dw_write(dev, data->data, data->blocks * data->block_size)) {
 				LOG_WRN_ONCE("Write data timeout");
+				sdhc_dw_critical_exit(dev);
 				return -ETIMEDOUT;
 			}
 		}
 		data->bytes_xfered = data->blocks * data->block_size;
 	}
 
+	/* Release lock before returning */
+	sdhc_dw_critical_exit(dev);
 	return 0;
 }
 
@@ -660,10 +693,17 @@ static int sdhc_dw_set_io(const struct device *dev, struct sdhc_io *io)
 	int ret;
 	const struct sdhc_dw_config *config = dev->config;
 
+	/* Acquire lock for exclusive access */
+	ret = sdhc_dw_critical_entry(dev);
+	if (ret) {
+		return ret;
+	}
+
 	/* Deal with power mode */
 	ret = sdhc_dw_set_power(dev, io->power_mode);
 	if (ret) {
 		LOG_WRN("Failed to set power mode");
+		sdhc_dw_critical_exit(dev);
 		return -EIO;
 	}
 
@@ -671,6 +711,7 @@ static int sdhc_dw_set_io(const struct device *dev, struct sdhc_io *io)
 	ret = sdhc_dw_set_clock(dev, (unsigned int)(io->clock));
 	if (ret) {
 		LOG_WRN("Failed to set clock rate");
+		sdhc_dw_critical_exit(dev);
 		return -EIO;
 	}
 
@@ -678,6 +719,7 @@ static int sdhc_dw_set_io(const struct device *dev, struct sdhc_io *io)
 	ret = sdhc_dw_set_bus_width(dev, io->bus_width);
 	if (ret) {
 		LOG_WRN("Failed to set bus width");
+		sdhc_dw_critical_exit(dev);
 		return -EIO;
 	}
 
@@ -692,6 +734,8 @@ static int sdhc_dw_set_io(const struct device *dev, struct sdhc_io *io)
 	}
 #endif
 
+	/* Release lock before returning */
+	sdhc_dw_critical_exit(dev);
 	return 0;
 }
 
@@ -729,12 +773,23 @@ static int sdhc_dw_card_present(const struct device *dev)
 static int sdhc_dw_reset(const struct device *dev)
 {
 	uint32_t temp;
+	int ret;
+
+	/* Acquire lock for exclusive access */
+	ret = sdhc_dw_critical_entry(dev);
+	if (ret) {
+		return ret;
+	}
 
 	temp = dw_readl(dev, SDMMC_CTRL) | SDMMC_CTRL_ALL_RESET_FLAGS;
 	dw_writel(dev, SDMMC_CTRL, temp);
 
-	return dw_readl_poll(dev, SDMMC_CTRL, temp, (temp & SDMMC_CTRL_ALL_RESET_FLAGS) == 0, 10,
-			     1000);
+	ret = dw_readl_poll(dev, SDMMC_CTRL, temp, (temp & SDMMC_CTRL_ALL_RESET_FLAGS) == 0, 10,
+			    1000);
+
+	/* Release lock before returning */
+	sdhc_dw_critical_exit(dev);
+	return ret;
 }
 
 static int sdhc_dw_card_busy(const struct device *dev)
@@ -763,6 +818,9 @@ static int sdhc_dw_init(const struct device *dev)
 	uint32_t rate;
 
 	DEVICE_MMIO_MAP(dev, K_MEM_CACHE_NONE);
+
+	/* Initialize io_lock for single entry protection */
+	k_sem_init(&data->io_lock, 1, 1);
 
 	ret = clock_control_get_rate(config->clk_dev, config->clk_subsys, &rate);
 	if (ret) {
