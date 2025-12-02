@@ -10,8 +10,21 @@
 #include <zephyr/logging/log.h>
 
 #include <zephyr/kernel.h>
+#include <zephyr/spinlock.h>
 
 LOG_MODULE_REGISTER(flash_cadence_ll, CONFIG_FLASH_LOG_LEVEL);
+
+static struct k_spinlock cad_qspi_lock;
+
+static inline k_spinlock_key_t cad_qspi_critical_enter(void)
+{
+	return k_spin_lock(&cad_qspi_lock);
+}
+
+static inline void cad_qspi_critical_exit(k_spinlock_key_t key)
+{
+	k_spin_unlock(&cad_qspi_lock, key);
+}
 
 int cad_qspi_idle(struct cad_qspi_params *cad_params)
 {
@@ -878,6 +891,7 @@ int cad_qspi_read(struct cad_qspi_params *cad_params, void *buffer, uint32_t off
 int cad_qspi_erase(struct cad_qspi_params *cad_params, uint32_t offset, uint32_t size)
 {
 	int status = 0;
+	k_spinlock_key_t key;
 	uint32_t subsector_offset = offset & (CAD_QSPI_SUBSECTOR_SIZE - 1);
 	uint32_t erase_size = MIN(size, CAD_QSPI_SUBSECTOR_SIZE - subsector_offset);
 
@@ -887,7 +901,9 @@ int cad_qspi_erase(struct cad_qspi_params *cad_params, uint32_t offset, uint32_t
 	}
 
 	while (size) {
+		key = cad_qspi_critical_enter();
 		status = cad_qspi_erase_subsector(cad_params, offset);
+		cad_qspi_critical_exit(key);
 
 		if (status != 0) {
 			break;
