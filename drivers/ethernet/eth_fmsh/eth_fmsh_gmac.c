@@ -12,6 +12,7 @@
 #include <zephyr/irq.h>
 #include <zephyr/kernel/mm.h>
 #include <zephyr/logging/log.h>
+#include <zephyr/sys/util.h>
 
 #include "eth_fmsh_gmac_priv.h"
 #include "eth_fmsh_gmac.h"
@@ -468,20 +469,24 @@ static void eth_fmsh_iface_init(struct net_if *iface)
 	data->napi_budget = 256;
 	atomic_clear(&data->rx_busy);
 
+	BUILD_ASSERT(FMSH_ETH_RX_THREAD_PRIORITY < CONFIG_NUM_COOP_PRIORITIES,
+		     "ETH RX thread cooperative priority exceeds CONFIG_NUM_COOP_PRIORITIES");
+
 	/* 创建接收线程 */
 	char thread_name[32];
 
 	snprintf(thread_name, sizeof(thread_name), "eth_fmsh_rx%d", config->instance_id);
 	k_thread_create(&data->rx_thread, data->rx_thread_stack, FMSH_ETH_RX_STACK_SIZE,
 			eth_fmsh_rx_thread, (void *)dev, NULL, NULL,
-			K_PRIO_COOP(FMSH_ETH_RX_THREAD_PRIORITY) + config->instance_id, 0,
-			K_SECONDS(2));
+			K_PRIO_COOP(FMSH_ETH_RX_THREAD_PRIORITY), 0, K_SECONDS(2));
 	k_thread_name_set(&data->rx_thread, thread_name);
 
 	snprintf(thread_name, sizeof(thread_name), "eth_fmsh_phy_update%d", config->instance_id);
-	k_thread_create(&data->phy_update_thread, data->phy_update_thread_stack,
-			FMSH_ETH_PYH_STACK_SIZE, eth_fmsh_gmac_link_state_update, (void *)dev, NULL,
-			NULL, K_IDLE_PRIO + config->instance_id, 0, K_SECONDS(1));
+	k_thread_create(
+		&data->phy_update_thread, data->phy_update_thread_stack, FMSH_ETH_PYH_STACK_SIZE,
+		eth_fmsh_gmac_link_state_update, (void *)dev, NULL, NULL,
+		CLAMP(FMSH_ETH_PHY_UPDATE_THREAD_PRIORITY, 0, K_LOWEST_APPLICATION_THREAD_PRIO), 0,
+		K_SECONDS(1));
 	k_thread_name_set(&data->phy_update_thread, thread_name);
 
 	FMSH_DEBUG("Interface init done.");

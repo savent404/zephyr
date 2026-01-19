@@ -8,9 +8,10 @@
 #include <zephyr/net/net_stats.h>
 #include "gmacps/fmsh_gmac_lib.h"
 
-#define FMSH_ETH_RX_STACK_SIZE      4096
-#define FMSH_ETH_PYH_STACK_SIZE     2048
-#define FMSH_ETH_RX_THREAD_PRIORITY 5
+#define FMSH_ETH_RX_STACK_SIZE              4096
+#define FMSH_ETH_PYH_STACK_SIZE             2048
+#define FMSH_ETH_RX_THREAD_PRIORITY         CONFIG_ETH_FMQL_RX_THREAD_PRIORITY
+#define FMSH_ETH_PHY_UPDATE_THREAD_PRIORITY CONFIG_ETH_FMQL_PHY_UPDATE_THREAD_PRIORITY
 
 typedef void (*eth_config_irq_t)(void);
 

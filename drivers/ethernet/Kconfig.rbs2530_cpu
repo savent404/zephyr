@@ -16,4 +16,24 @@ if ETH_FMQL
 	config ETH_FMQL_USE_RMII
 		bool "Use RMII interface"
 		default y
+
+	config ETH_FMQL_RX_THREAD_PRIORITY
+		int "RX thread priority"
+		default 1
+		help
+		  Cooperative priority level for the RX thread.
+		  This value is passed to K_PRIO_COOP() at build time.
+		  Valid range is 0 .. (CONFIG_NUM_COOP_PRIORITIES - 1).
+		  Lower values indicate higher priority. Default is 1.
+
+	config ETH_FMQL_PHY_UPDATE_THREAD_PRIORITY
+		int "PHY update thread priority"
+		default NUM_PREEMPT_PRIORITIES
+		help
+		  Thread priority for the PHY link state update thread.
+		  This value is used as an application thread priority and will be clamped
+		  at runtime using CLAMP(value, 0, K_LOWEST_APPLICATION_THREAD_PRIO).
+		  Lower values indicate higher priority.
+		  Default is NUM_PREEMPT_PRIORITIES which will clamp to the lowest
+		  available preemptive application priority.
 endif

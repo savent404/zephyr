@@ -2,6 +2,7 @@
  * Copyright (c) 2024 SYSTech Co.
  * SPDX-License-Identifier: Apache-2.0
  */
+#include <zephyr/kernel.h>
 #include "fmsh_mdio.h"
 
 #define LOG_LEVEL CONFIG_ETHERNET_LOG_LEVEL
@@ -9,6 +10,8 @@
 LOG_MODULE_REGISTER(fmsh_mdio);
 
 extern u32 g_GmacLinkStatus;
+
+K_MUTEX_DEFINE(fmsh_mdio_bus_lock);
 
 u8 fmsh_mdio_idle(FGmacPs_Instance_T *pGmac)
 {
@@ -122,14 +125,19 @@ u32 fmsh_mdio_write(FGmacPs_Instance_T *pGmac, u8 regAddr, u32 regdata)
 	FGmacPs_MacPortMap_T *pGmacPortMap = pGmac->base_address;
 	FGmacPs_PhyConfig_T *pPhyConfig = pGmac->phy_cfg;
 	u16 reg;
+	u32 ret = ETHERNET_PHY_OK;
+
+	k_mutex_lock(&fmsh_mdio_bus_lock, K_FOREVER);
 
 	if ((regdata & 0xFFFF00000) != 0) {
-		return ETHERNET_PHY_PARAM_ERR;
+		ret = ETHERNET_PHY_PARAM_ERR;
+		goto out;
 	}
 
 	/* wait idle */
 	if (fmsh_mdio_idle(pGmac) != ETHERNET_PHY_OK) {
-		return ETHERNET_PHY_ERR;
+		ret = ETHERNET_PHY_ERR;
+		goto out;
 	}
 	/* write data */
 	reg = (pPhyConfig->mdio_address << 11) | (pGmac->csr_clk << 2);
@@ -139,10 +147,13 @@ u32 fmsh_mdio_write(FGmacPs_Instance_T *pGmac, u8 regAddr, u32 regdata)
 	FMSH_OUT32_32(reg, pGmacPortMap->GMAC_GAR);
 	/* wait idle */
 	if (fmsh_mdio_idle(pGmac) != ETHERNET_PHY_OK) {
-		return ETHERNET_PHY_ERR;
+		ret = ETHERNET_PHY_ERR;
+		goto out;
 	}
 
-	return ETHERNET_PHY_OK;
+out:
+	k_mutex_unlock(&fmsh_mdio_bus_lock);
+	return ret;
 }
 
 /*
@@ -157,10 +168,14 @@ u32 fmsh_mdio_read(FGmacPs_Instance_T *pGmac, u8 regAddr)
 	FGmacPs_PhyConfig_T *pPhyConfig = pGmac->phy_cfg;
 	u32 reg = 0;
 	u32 datareg;
+	u32 ret = ETHERNET_PHY_OK;
+
+	k_mutex_lock(&fmsh_mdio_bus_lock, K_FOREVER);
 
 	/* wait idle */
 	if (fmsh_mdio_idle(pGmac) != ETHERNET_PHY_OK) {
-		return ETHERNET_PHY_ERR;
+		ret = ETHERNET_PHY_ERR;
+		goto out;
 	}
 	/* read data */
 	reg = (pPhyConfig->mdio_address << 11) | (pGmac->csr_clk << 2);
@@ -169,11 +184,15 @@ u32 fmsh_mdio_read(FGmacPs_Instance_T *pGmac, u8 regAddr)
 	FMSH_OUT32_32(reg, pGmacPortMap->GMAC_GAR);
 	/* wait idle */
 	if (fmsh_mdio_idle(pGmac) != ETHERNET_PHY_OK) {
-		return ETHERNET_PHY_ERR;
+		ret = ETHERNET_PHY_ERR;
+		goto out;
 	}
 
 	datareg = FMSH_IN32_32(pGmacPortMap->GMAC_GDR);
-	return datareg;
+
+out:
+	k_mutex_unlock(&fmsh_mdio_bus_lock);
+	return (ret == ETHERNET_PHY_OK) ? datareg : ret;
 }
 
 void fmsh_mdio_reg_dump(FGmacPs_Instance_T *pGmac)
