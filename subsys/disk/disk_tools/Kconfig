@@ -1,0 +1,72 @@
+# Copyright (c) 2026 SYSTech Co.
+# SPDX-License-Identifier: Apache-2.0
+
+menuconfig DISK_TOOLS
+	bool "Disk Tools"
+	depends on DISK_ACCESS
+	depends on SHELL
+	help
+	  Enable disk tools for reading and transferring disk data
+	  via command line interface. Supports reading from various
+	  storage devices like eMMC, Flash, etc.
+
+if DISK_TOOLS
+
+config DISK_TOOLS_BUFFER_SIZE
+	int "Disk tools buffer size"
+	default 16384
+	help
+	  Buffer size for disk read operations. Larger buffer size
+	  improves network transfer performance. Default 16KB.
+	  Should be multiple of disk sector size (typically 512 bytes).
+
+config DISK_TOOLS_MAX_TRANSFER_SIZE
+	int "Maximum transfer size in bytes"
+	default 1073741824
+	help
+	  Maximum size of data that can be transferred in one operation.
+	  Default is 1GB.
+
+config DISK_TOOLS_NETWORK
+	bool "Network transfer support"
+	depends on NETWORKING
+	depends on NET_SOCKETS
+	depends on NET_TCP
+	help
+	  Enable network transfer capability to send disk data over TCP.
+	  Compatible with coredump_client.py protocol.
+
+if DISK_TOOLS_NETWORK
+
+config DISK_TOOLS_NET_PORT
+	int "Network server port"
+	default 9999
+	help
+	  TCP port for disk data transfer server.
+
+config DISK_TOOLS_NET_STACK_SIZE
+	int "Network server thread stack size"
+	default 4096
+	help
+	  Stack size for the network transfer server thread.
+	  Should be at least 4KB for basic operation.
+
+config DISK_TOOLS_NET_THREAD_PRIORITY
+	int "Network server thread priority"
+	default 5
+	help
+	  Priority for the network transfer server thread.
+
+config DISK_TOOLS_NET_TIMEOUT_MS
+	int "Network operation timeout in milliseconds"
+	default 30000
+	help
+	  Timeout for network send/receive operations.
+
+endif # DISK_TOOLS_NETWORK
+
+module = DISK_TOOLS
+module-str = disk_tools
+source "subsys/logging/Kconfig.template.log_config"
+
+endif # DISK_TOOLS
