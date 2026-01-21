@@ -1,0 +1,57 @@
+/*
+ * Copyright (c) 2026 SYSTech Co.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+#include <mem.h>
+
+/*
+ * Enable eMMC controller and define partitions
+ */
+&mmc0 {
+	status = "okay";
+	non-removable;
+
+	mmc {
+		compatible = "zephyr,mmc-disk";
+		status = "okay";
+		bus-width = <4>;
+		disk-name = "MMC";
+
+		partitions {
+			compatible = "fixed-partitions";
+			#address-cells = <1>;
+			#size-cells = <1>;
+			coredump_partition: partition@500000 {
+				label = "coredump-partition";
+				reg = <0x00500000 DT_SIZE_M(256)>;
+			};
+		};
+	};
+};
+
+/*
+ * Optional: Ethernet for network-based debugging
+ */
+&ethernet0 {
+	status = "okay";
+};
+
+&ethernet1 {
+	status = "okay";
+};
+
+&gpio2 {
+	status = "okay";
+};
+
+&spi0 {
+	status = "okay";
+};
+
+&sf2507_u29 {
+	status = "okay";
+};
+
+&sf2507_u28 {
+	status = "okay";
+};
