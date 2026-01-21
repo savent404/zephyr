@@ -36,6 +36,31 @@ config DEBUG_COREDUMP_BACKEND_INTEL_ADSP_MEM_WINDOW
 	  It is Intel ADSP memory region shared with xtensa DSP.
 	  Window 2 slot [1] is reserved for debuging information.
 
+config DEBUG_COREDUMP_BACKEND_EMMC
+	bool "Use eMMC storage for coredump"
+	depends on DISK_ACCESS
+	select MMC_STACK
+	help
+	  Core dump is saved to an eMMC partition with DTS alias
+	  "coredump-partition". This backend uses disk access API
+	  to write coredump data to eMMC storage.
+
+	  IMPORTANT LIMITATION:
+	  The eMMC backend is initialized at APPLICATION level during boot
+	  sequence (just before main()). This means coredump will NOT work
+	  for faults that occur during early boot stages (PRE_KERNEL_1,
+	  PRE_KERNEL_2, POST_KERNEL). Only faults occurring after APPLICATION
+	  initialization are captured.
+
+	  This late initialization is intentional to ensure the disk subsystem
+	  is fully ready before attempting eMMC access, as disk_access_init()
+	  may block waiting for hardware and could hang in fault context if
+	  called too early.
+
+	  For maximum fault coverage including early boot, consider using
+	  DEBUG_COREDUMP_BACKEND_FLASH_PARTITION instead, which initializes
+	  earlier in the boot sequence.
+
 config DEBUG_COREDUMP_BACKEND_OTHER
 	bool "Backend subsystem for coredump defined out of tree"
 	help
@@ -91,6 +116,25 @@ config DEBUG_COREDUMP_FLASH_CHUNK_SIZE
 
 
 endif # DEBUG_COREDUMP_BACKEND_FLASH_PARTITION
+
+if DEBUG_COREDUMP_BACKEND_EMMC
+
+config DEBUG_COREDUMP_EMMC_CHUNK_SIZE
+	int "Chunk size for eMMC write operations"
+	default 512
+	help
+	  Larger values can speed up writing due to fewer write operations
+	  being performed in total, but consume more memory.
+	  Must be a multiple of eMMC sector size (typically 512 bytes).
+
+config DEBUG_COREDUMP_EMMC_DEVICE_NAME
+	string "eMMC device name"
+	default "MMC"
+	help
+	  The name of the eMMC device to use for coredump storage.
+	  This should match the disk access device name.
+
+endif # DEBUG_COREDUMP_BACKEND_EMMC
 
 config DEBUG_COREDUMP_SHELL
 	bool "Coredump shell"
