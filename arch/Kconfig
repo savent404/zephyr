@@ -31,8 +31,8 @@ config ARC
 config ARM
 	bool
 	select ARCH_IS_SET
-	select ARCH_SUPPORTS_COREDUMP if CPU_CORTEX_M
-	select ARCH_SUPPORTS_COREDUMP_THREADS if CPU_CORTEX_M
+	select ARCH_SUPPORTS_COREDUMP if CPU_CORTEX_M || CPU_AARCH32_CORTEX_A
+	select ARCH_SUPPORTS_COREDUMP_THREADS if CPU_CORTEX_M || CPU_AARCH32_CORTEX_A
 	# FIXME: current state of the code for all ARM requires this, but
 	# is really only necessary for Cortex-M with ARM MPU!
 	select GEN_PRIV_STACKS

@@ -277,6 +277,10 @@ bool z_arm_fault_prefetch(struct arch_esf *esf)
 		reason = dump_fault(fs, ifar);
 	}
 
+#ifdef CONFIG_DEBUG_COREDUMP
+	z_arm_coredump_fault_sp = POINTER_TO_UINT(esf);
+#endif
+
 	/* Simplify exception codes if requested */
 	if (IS_ENABLED(CONFIG_SIMPLIFIED_EXCEPTION_CODES) && (reason >= K_ERR_ARCH_START)) {
 		reason = K_ERR_CPU_EXCEPTION;
@@ -360,6 +364,10 @@ bool z_arm_fault_data(struct arch_esf *esf)
 	if (FAULT_DUMP_VERBOSE) {
 		reason = dump_fault(fs, dfar);
 	}
+
+#ifdef CONFIG_DEBUG_COREDUMP
+	z_arm_coredump_fault_sp = POINTER_TO_UINT(esf);
+#endif
 
 	/* Simplify exception codes if requested */
 	if (IS_ENABLED(CONFIG_SIMPLIFIED_EXCEPTION_CODES) && (reason >= K_ERR_ARCH_START)) {

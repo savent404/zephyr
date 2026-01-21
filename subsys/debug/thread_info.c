@@ -27,8 +27,14 @@ enum {
 	THREAD_INFO_OFFSET_T_ARC_RELINQUISH_CAUSE,
 };
 
-#if CONFIG_MP_MAX_NUM_CPUS > 1
-#error "This code doesn't work properly with multiple CPUs enabled"
+/*
+ * This code assumes single-CPU operation. The check should be against SMP
+ * configuration, not MP_MAX_NUM_CPUS, since MP_MAX_NUM_CPUS can be > 1
+ * even in non-SMP systems (for multiprocessor API support without SMP).
+ * The Kconfig already enforces "depends on !SMP" for DEBUG_COREDUMP_MEMORY_DUMP_THREADS.
+ */
+#if defined(CONFIG_SMP)
+#error "This code doesn't work properly with SMP enabled"
 #endif
 
 /* Forward-compatibility notes: 1) Only append items to this table; otherwise
