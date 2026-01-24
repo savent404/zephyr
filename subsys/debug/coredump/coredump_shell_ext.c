@@ -206,19 +206,6 @@ static int cmd_coredump_info(const struct shell *sh, size_t argc, char **argv)
 {
 	int ret;
 	int size;
-	int has_dump;
-
-	/* Check if coredump exists */
-	ret = coredump_query(COREDUMP_QUERY_HAS_STORED_DUMP, &has_dump);
-	if (ret < 0) {
-		shell_error(sh, "Failed to query coredump: %d", ret);
-		return ret;
-	}
-
-	if (!has_dump) {
-		shell_info(sh, "No stored coredump found");
-		return 0;
-	}
 
 	/* Get size */
 	size = coredump_query(COREDUMP_QUERY_GET_STORED_DUMP_SIZE, NULL);
@@ -227,11 +214,27 @@ static int cmd_coredump_info(const struct shell *sh, size_t argc, char **argv)
 		return size;
 	}
 
+	if (size == 0) {
+		shell_info(sh, "No stored coredump found");
+		return 0;
+	}
+
 	/* Verify */
 	ret = coredump_cmd(COREDUMP_CMD_VERIFY_STORED_DUMP, NULL);
 
 	shell_print(sh, "Coredump Information:");
-	shell_print(sh, "  Status:   %s", has_dump ? "Present" : "Not found");
+	switch (ret) {
+	case 1:
+		shell_print(sh, "  Status:   Present");
+		break;
+	case 0:
+		shell_print(sh, "  Status:   Present (invalid)");
+		break;
+	default:
+		shell_print(sh, "  Status:   Present (unknown)");
+		break;
+	}
+
 	shell_print(sh, "  Size:     %d bytes", size);
 	shell_print(sh, "  Valid:    %s", ret == 1 ? "Yes" : (ret == 0 ? "No" : "Unknown"));
 
