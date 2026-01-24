@@ -18,6 +18,28 @@
 LOG_MODULE_REGISTER(coredump_emmc, CONFIG_KERNEL_LOG_LEVEL);
 
 #define LOG_OUT printk
+
+/*
+ * Weak watchdog feed hook.
+ *
+ * The coredump backend does NOT own the watchdog and does not attempt to
+ * initialize it. It only provides a high-frequency call-site so user/board
+ * code may decide if/when to feed (e.g. throttle by time).
+ */
+__weak void coredump_watchdog_feed(void)
+{
+	static bool warned;
+
+	if (!warned) {
+		warned = true;
+		LOG_WRN("watchdog feed hook not overridden; override %s()", __func__);
+	}
+}
+
+static inline void emmc_wdt_feed_hook(void)
+{
+	coredump_watchdog_feed();
+}
 /**
  * @file
  * @brief Coredump backend to store data in eMMC storage.
@@ -305,6 +327,9 @@ static void coredump_emmc_backend_start(void)
 
 	(void)k_sem_take(&emmc_sem, EMMC_BACKEND_SEM_TIMEOUT);
 
+	/* High-frequency feed call-site; user decides whether to actually feed. */
+	emmc_wdt_feed_hook();
+
 	backend_ctx.write_pos = HEADER_SECTOR_SIZE;
 	backend_ctx.checksum = 0;
 	backend_ctx.error = 0;
@@ -365,7 +390,10 @@ static int flush_write_buffer(bool final)
 		return -ENOSPC;
 	}
 
+	/* High-frequency feed call-site; user decides whether to actually feed. */
+	emmc_wdt_feed_hook();
 	ret = emmc_write_sectors(sector_offset, write_buf, sectors);
+	emmc_wdt_feed_hook();
 	if (ret != 0) {
 		LOG_ERR("Failed to write to eMMC: %d", ret);
 		return ret;
@@ -414,6 +442,7 @@ static void coredump_emmc_backend_end(void)
 	actual_data_size = (backend_ctx.write_pos - HEADER_SECTOR_SIZE) + write_buf_pos;
 
 	/* Flush remaining data */
+	emmc_wdt_feed_hook();
 	ret = flush_write_buffer(true);
 	if (ret != 0) {
 		backend_ctx.error = ret;
@@ -479,6 +508,7 @@ static void coredump_emmc_backend_buffer_output(uint8_t *buf, size_t buflen)
 	 * content may change during execution.
 	 */
 	while (remaining > 0) {
+		emmc_wdt_feed_hook();
 		copy_sz = MIN(remaining, EMMC_BUF_SIZE);
 
 		/* Copy to temporary buffer */
@@ -498,6 +528,7 @@ static void coredump_emmc_backend_buffer_output(uint8_t *buf, size_t buflen)
 
 		/* Flush if buffer is full */
 		if (write_buf_pos >= EMMC_BUF_SIZE) {
+			emmc_wdt_feed_hook();
 			backend_ctx.error = flush_write_buffer(false);
 			if (backend_ctx.error != 0) {
 				return;

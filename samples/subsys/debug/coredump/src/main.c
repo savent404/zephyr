@@ -13,6 +13,25 @@
 
 LOG_MODULE_REGISTER(coredump_test, LOG_LEVEL_DBG);
 
+/*
+ * Example override for the coredump eMMC backend watchdog feed hook.
+ * Replace printk with your actual watchdog feed call.
+ *
+ * Note: The coredump backend may call this frequently; do any throttling
+ * (time-based, count-based, etc.) here.
+ */
+void coredump_watchdog_feed(void)
+{
+	static uint32_t last_ms;
+	uint32_t now = k_uptime_get_32();
+
+	if ((now - last_ms) < 500U) {
+		return;
+	}
+	last_ms = now;
+	LOG_INF("%s: watchdog feed.", __func__);
+}
+
 /* Test modes */
 enum test_mode {
 	TEST_MODE_NULL_POINTER,
