@@ -88,18 +88,22 @@ manifest:
         - crypto
     - name: wolfTPM
       remote: sysfly
-      revision: master
+      revision: 1cae3ad5f30fd127569ec4ee65ef9f9f17d1ad1f
       path: modules/crypto/wolfTPM
       groups:
         - crypto
     - name: wolfssl
       remote: wolfssl
-      revision: master
+      revision: 08ec3642f07e6cd1f09ffe4c39b7bd06de9302e9
       path: modules/crypto/wolfssl
+      groups:
+        - crypto
     - name: GmSSL
       remote: sysfly
-      revision: rel/ze-port
+      revision: e9f3be5131b64b83bf8ac9e7aaa9a11ed046f2fa
       path: modules/crypto/GmSSL
+      groups:
+        - crypto
 
   self:
     path: zephyr
