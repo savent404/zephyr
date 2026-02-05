@@ -670,6 +670,15 @@ static const struct ethernet_api eth_fmsh_api = {
 /* 设备定义 */
 #define ETH_FMSH_INIT(n)                                                                           \
                                                                                                    \
+	COND_CODE_1(DT_INST_NODE_HAS_PROP(n, ext_phy_init_seq),                                    \
+		    (static const uint32_t phy_init_stream_##n[] =                                 \
+			     DT_INST_PROP(n, ext_phy_init_seq);),                                  \
+		    ())                                                                            \
+	static const uint32_t *const phy_init_stream_ptr_##n = COND_CODE_1(                        \
+		DT_INST_NODE_HAS_PROP(n, ext_phy_init_seq), (phy_init_stream_##n), (NULL));        \
+	static const uint32_t phy_init_stream_len_##n =                                            \
+		COND_CODE_1(DT_INST_NODE_HAS_PROP(n, ext_phy_init_seq),                            \
+			    (ARRAY_SIZE(phy_init_stream_##n)), (0));                               \
 	FGmacPs_RxDescriptor_T __attribute__((section(".ocm_data")))                               \
 	__aligned(CONFIG_DCACHE_LINE_SIZE) GMAC0_RxDs_##n[GMAC_RDES_NUM];                          \
 	FGmacPs_TxDescriptor_T __attribute__((section(".ocm_data")))                               \
@@ -700,6 +709,8 @@ static const struct ethernet_api eth_fmsh_api = {
 		.phy_delay = DT_INST_PROP(n, phy_delay),                                           \
 		.auto_nag_en = DT_INST_PROP_OR(n, auto_negotiation, 1),                            \
 		.interface = FPAR_GMACPS_0_INTERFACE,                                              \
+		.ext_phy_init_seq = phy_init_stream_ptr_##n,                                       \
+		.ext_phy_init_seq_len = phy_init_stream_len_##n,                                   \
 		.partner_phy_config =                                                              \
 			{                                                                          \
 				.mdio_address = DT_INST_PROP_OR(n, partner_mdio_addr,              \

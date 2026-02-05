@@ -100,3 +100,21 @@ properties:
   partner-phy-delay:
     type: int
     description: "Partner PHY delay configuration value (hex)"
+
+  ext-phy-init-seq:
+    type: array
+    description: |
+      MDIO initialization command stream encoded as 3-cell tuples:
+        <phy_addr reg_addr value>
+
+      Command forms:
+        - Write: <phy_addr reg_addr value>
+        - Read:  <phy_addr reg_addr 0xffffffff>
+        - Delay: <0xff 0xee delay_us>
+
+      Read uses 0xffffffff as a sentinel; the driver performs an MDIO read of reg_addr.
+      Delay waits for delay_us microseconds.
+
+      Examples:
+        <0x02 0x00 0xffffffff>
+        <0xff 0xee 0x64>

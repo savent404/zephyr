@@ -14,6 +14,73 @@
 
 LOG_MODULE_REGISTER(fmsh_gmac_lib);
 
+#define EXT_PHY_INIT_ESCAPE_PHY_ADDR     0xffU
+#define EXT_PHY_INIT_ESCAPE_REG_ADDR     0xeeU
+#define EXT_PHY_INIT_BUSYWAIT_MAX_US     1000U
+#define EXT_PHY_INIT_READ_VALUE_SENTINEL 0xffffffffU
+
+static int fgmac_apply_ext_phy_init_seq(FGmacPs_Instance_T *pGmac)
+{
+	FGmacPs_PhyConfig_T *pPhyConfig = pGmac->phy_cfg;
+	const u32 *stream = pPhyConfig->ext_phy_init_seq;
+	u32 len = pPhyConfig->ext_phy_init_seq_len;
+	u8 saved_mdio_addr;
+
+	if (stream == NULL || len == 0U) {
+		return 0;
+	}
+
+	if ((len % 3U) != 0U) {
+		LOG_ERR("ext-phy-init-seq length (%u) must be multiple of 3", len);
+		return -EINVAL;
+	}
+
+	saved_mdio_addr = pPhyConfig->mdio_address;
+
+	for (u32 i = 0; i < len; i += 3U) {
+		u32 phy_addr = stream[i + 0U];
+		u32 reg_addr = stream[i + 1U];
+		u32 value = stream[i + 2U];
+
+		if (phy_addr == EXT_PHY_INIT_ESCAPE_PHY_ADDR &&
+		    reg_addr == EXT_PHY_INIT_ESCAPE_REG_ADDR) {
+			if (value > EXT_PHY_INIT_BUSYWAIT_MAX_US) {
+				LOG_WRN("ext-phy-init-seq delay %u us, use k_sleep", value);
+				k_sleep(K_USEC(value));
+			} else {
+				FMSH_DELAY_US(value);
+			}
+			continue;
+		}
+
+		/* Clause 22 MDIO PHY/reg addresses are 5-bit (0..0x1f). */
+		if (phy_addr > 0x1fU || reg_addr > 0x1fU) {
+			LOG_ERR("ext-phy-init-seq invalid tuple[%u]: <0x%x 0x%x 0x%x> (addr <= "
+				"0x1f)",
+				i / 3U, phy_addr, reg_addr, value);
+			pPhyConfig->mdio_address = saved_mdio_addr;
+			return -EINVAL;
+		}
+
+		pPhyConfig->mdio_address = (u8)phy_addr;
+
+		if (value == EXT_PHY_INIT_READ_VALUE_SENTINEL) {
+			(void)fmsh_mdio_read(pGmac, (u8)reg_addr);
+		} else {
+			if ((value & 0xffff0000U) != 0U) {
+				LOG_ERR("ext-phy-init-seq write value out of 16-bit range: 0x%x",
+					value);
+				pPhyConfig->mdio_address = saved_mdio_addr;
+				return -EINVAL;
+			}
+			(void)fmsh_mdio_write(pGmac, (u8)reg_addr, value);
+		}
+	}
+
+	pPhyConfig->mdio_address = saved_mdio_addr;
+	return 0;
+}
+
 /* Increment head or tail */
 #define GMAC_GCIRC_INC(headortail, size)                                                           \
 	do {                                                                                       \
@@ -357,6 +424,7 @@ u8 FGmac_Ps_MacInit(FGmacPs_Instance_T *pGmac, int m2m)
 		int mdio_address = pPhyConfig->mdio_address;
 		int phy_delay = pPhyConfig->phy_delay;
 		char *phy_mode = pPhyConfig->phy_mode;
+		int ret;
 
 		pPhyConfig->phy_op_init(pGmac);
 		pPhyConfig->phy_op_cfg(pGmac);
@@ -370,6 +438,12 @@ u8 FGmac_Ps_MacInit(FGmacPs_Instance_T *pGmac, int m2m)
 			pPhyConfig->phy_op_init(pGmac);
 			pPhyConfig->phy_op_cfg(pGmac);
 			pPhyConfig->phy_op_reset(pGmac);
+		}
+
+		ret = fgmac_apply_ext_phy_init_seq(pGmac);
+		if (ret != 0) {
+			LOG_WRN("GMAC%d ext-phy-init-seq failed (%d), disable PHY ops",
+				pGmac->index, ret);
 		}
 
 		pPhyConfig->mdio_address = mdio_address;

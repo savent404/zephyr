@@ -327,6 +327,10 @@ typedef struct _phy_config {
 	u8 (*phy_op_get_status)(FGmacPs_Instance_T *pGmac);
 	u8 (*phy_op_reg_dump)(FGmacPs_Instance_T *pGmac);
 
+	/* Optional MDIO init command stream (DT property: ext-phy-init-seq) */
+	const u32 *ext_phy_init_seq;
+	u32 ext_phy_init_seq_len;
+
 } FGmacPs_PhyConfig_T;
 
 /* gmac instance struct */
