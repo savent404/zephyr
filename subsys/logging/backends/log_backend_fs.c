@@ -194,9 +194,9 @@ int write_log_to_file(uint8_t *data, size_t length, void *ctx)
 			 */
 			length = rc;
 		} else {
-			rc = check_log_file_exist(newest);
-			if (rc == 0) {
+			if (rc == -EFAULT || check_log_file_exist(newest) <= 0) {
 				/* file was lost somehow
+				 * or fs is corrupted
 				 * try to get a new one
 				 */
 				file_ctr--;
