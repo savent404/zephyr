@@ -49,6 +49,9 @@
 #define MMC_SWITCH_CACHE_ON_ARG                                                                    \
 	(0xFC000000 & (0U << 26)) + (0x03000000 & (0b11 << 24)) + (0x00FF0000 & (33U << 16)) +     \
 		(0x0000FF00 & (1U << 8)) + (0x000000F7 & (0U << 3)) + (0x00000000 & (3U << 0))
+#define MMC_SWITCH_CACHE_OFF_ARG                                                                   \
+	(0xFC000000 & (0U << 26)) + (0x03000000 & (0b11 << 24)) + (0x00FF0000 & (33U << 16)) +     \
+		(0x0000FF00 & (0U << 8)) + (0x000000F7 & (0U << 3)) + (0x00000000 & (3U << 0))
 
 LOG_MODULE_DECLARE(sd, CONFIG_SD_LOG_LEVEL);
 
@@ -630,14 +633,18 @@ static int mmc_set_cache(struct sd_card *card, struct mmc_ext_csd *card_ext_csd)
 	if (card_ext_csd->cache_size == 0) {
 		return 0;
 	}
-	/* CMD6 to write to EXT CSD to turn on cache */
+	/* CMD6 to write to EXT CSD to control cache */
 	cmd.opcode = SD_SWITCH;
+#ifdef CONFIG_MMC_CACHE_CTRL
 	cmd.arg = MMC_SWITCH_CACHE_ON_ARG;
+#else
+	cmd.arg = MMC_SWITCH_CACHE_OFF_ARG;
+#endif
 	cmd.response_type = SD_RSP_TYPE_R1b;
 	cmd.timeout_ms = CONFIG_SD_CMD_TIMEOUT;
 	ret = sdhc_request(card->sdhc, &cmd, NULL);
 	if (ret) {
-		LOG_DBG("Error turning on card cache: %d", ret);
+		LOG_DBG("Error configuring card cache: %d", ret);
 		return ret;
 	}
 	ret = sdmmc_wait_ready(card);
