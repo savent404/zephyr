@@ -84,3 +84,8 @@ west-commands:
       - name: sdk
         class: Sdk
         help: manage Zephyr SDK
+  - file: scripts/west_commands/striped_export.py
+    commands:
+      - name: export
+        class: StripedExport
+        help: export a stripped build project for another machine
