@@ -358,7 +358,9 @@ void mcb_systech_set_tx_len(const struct device *dev, uint8_t port, uint16_t len
 	}
 	if (len % CONFIG_MCB_SYSTECH_BUFFER_ALIGN) {
 		LOG_WRN("Invalid tx len %d, set to align %d", len, CONFIG_MCB_SYSTECH_BUFFER_ALIGN);
-		len = (len + CONFIG_MCB_SYSTECH_BUFFER_ALIGN) & ~CONFIG_MCB_SYSTECH_BUFFER_ALIGN;
+		len = ((len + CONFIG_MCB_SYSTECH_BUFFER_ALIGN - 1) /
+		       CONFIG_MCB_SYSTECH_BUFFER_ALIGN) *
+		      CONFIG_MCB_SYSTECH_BUFFER_ALIGN;
 	}
 	if (len > CONFIG_MCB_SYSTECH_BUFFER_MAX_LENGTH) {
 		LOG_WRN("Invalid tx len %d, set to max %d", len,
