@@ -72,7 +72,7 @@ void ldp_wq::schedule()
 {
 	int32_t min_left = INT32_MAX;
 	uint32_t sleepTime = 0;
-	work_item *early_wi = nullptr;
+	id early_id = -1;
 
 	if (work_items_.empty()) {
 		work_sem_.take();
@@ -87,11 +87,11 @@ void ldp_wq::schedule()
 		for (auto &wi : work_items_) {
 			if (wi.left < min_left) {
 				min_left = wi.left;
-				early_wi = &wi;
+				early_id = wi.id;
 			}
 		}
 
-		if (min_left > 0 && early_wi) {
+		if (min_left > 0 && early_id >= 0) {
 			for (auto &wi : work_items_) {
 				wi.left -= min_left;
 			}
@@ -107,6 +107,20 @@ void ldp_wq::schedule()
 	{
 		std::lock_guard lock(x_lock_);
 		uint64_t curr, after, duration;
+
+		/*
+		 * Re-find the work item by ID: cancel() or destroy() may have
+		 * erased the list node between releasing the first lock above and
+		 * re-acquiring it here, leaving any previously captured pointer
+		 * dangling.  Looking up by ID is safe and avoids the
+		 * use-after-free.
+		 */
+		auto it = std::find_if(work_items_.begin(), work_items_.end(),
+				       [early_id](const work_item &wi) { return wi.id == early_id; });
+		if (it == work_items_.end()) {
+			return;
+		}
+		work_item *early_wi = &*it;
 
 		/* wi might change its left/cycle in its callback, so
 		 * we need to reset its left/cycle before calling it.
