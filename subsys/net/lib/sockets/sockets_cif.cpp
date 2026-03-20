@@ -740,7 +740,7 @@ int zcif_socket(int family, net_sock_type type, int proto)
 		return -1;
 	}
 
-	usr_data = new cif_sock_data;
+	usr_data = new cif_sock_data{};
 	if (!usr_data) {
 		zvfs_free_fd(fd);
 		errno = ENOMEM;
