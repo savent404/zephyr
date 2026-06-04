@@ -179,13 +179,13 @@ static void eth_fmsh_rx_thread(void *arg1, void *arg2, void *arg3)
 			if (net_recv_data(data->iface, pkt) < 0) {
 				data->stats.error_details.rx_frame_errors++;
 				net_pkt_unref(pkt);
+			} else {
+				data->stats.bytes.received += rx_len;
+				data->stats.pkts.rx++;
 			}
 
 			budget--;
 		}
-		/* 更新统计 */
-		data->stats.bytes.received += rx_len;
-		data->stats.pkts.rx++;
 		/* 处理完成，退出轮询模式 */
 		atomic_clear_bit(&data->rx_busy, 0);
 		FGmac_Ps_SetupIntr(data->gmac_inst, gdma_irq_tx | gdma_irq_rx | gdma_irq_nie);
@@ -259,7 +259,6 @@ static void eth_fmsh_isr(const struct device *dev)
 	}
 	/* 正常中断处理 */
 	else if (reg_val_32b & gdma_irq_nie) {
-
 		if (reg_val_32b & gdma_irq_rx) {
 			/* 关闭接收中断 */
 			FGmac_Ps_SetupIntr(data->gmac_inst, gdma_irq_tx | gdma_irq_nie);
@@ -267,7 +266,6 @@ static void eth_fmsh_isr(const struct device *dev)
 			if (!atomic_test_and_set_bit(&data->rx_busy, 0)) {
 				k_sem_give(&data->rx_sem);
 			}
-			data->stats.pkts.rx++;
 			clearIrqMask = gdma_irq_rx;
 			callbackArg = gdma_irq_rx;
 			userCallback = data->gmac_inst->rxCallback;
@@ -278,7 +276,6 @@ static void eth_fmsh_isr(const struct device *dev)
 			userCallback = data->gmac_inst->listener;
 		} else if (reg_val_32b & gdma_irq_tx) {
 			FMSH_DEBUG("Transmit interrupt");
-			data->stats.pkts.tx++;
 			k_sem_give(&data->tx_sem);
 			clearIrqMask = gdma_irq_tx;
 			callbackArg = gdma_irq_tx;
