@@ -1,0 +1,35 @@
+/**
+ * Copyright (c) 2024 SYSTech Co.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+#include <zephyr/dt-bindings/gpio/gpio.h>
+
+/ {
+	ramdisk0 {
+		compatible = "zephyr,ram-disk";
+		disk-name = "RAM";
+		sector-size = <512>;
+		sector-count = <128>;
+	};
+};
+
+&mmc0 {
+	status = "okay";
+	non-removable;
+
+	usr {
+		compatible = "zephyr,mmc-disk";
+		status = "okay";
+		bus-width = <4>;
+	};
+};
+
+&gpio1 {
+	status = "okay";
+};
+
+&ethernet0 {
+	status = "okay";
+	local-mac-address = [00 80 E1 00 00 00];
+};

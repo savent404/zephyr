@@ -1,0 +1,16 @@
+sample:
+  description: rbs2530 LOG_BACKEND_FS downgrade verification sample
+  name: rbs2530 log fs downgrade
+common:
+  tags:
+    - logging
+    - filesystem
+    - rte
+tests:
+  sample.rbs2530.rte.log_fs_downgrade:
+    tags:
+      - logging
+      - filesystem
+      - rte
+    platform_allow:
+      - rbs2530_cpu
