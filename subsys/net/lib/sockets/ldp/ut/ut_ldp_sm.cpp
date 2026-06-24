@@ -231,6 +231,20 @@ TEST_F(test_ldp_sm, basic_concept)
 	}
 }
 
+TEST_F(test_ldp_sm, master_rejects_ports_outside_mcb_range)
+{
+	simu_work_queue wq;
+	simu_mcb bus_m(0);
+	ldp_master_impl m(&bus_m, &wq);
+	ldp_master_sync_config cfg = {
+		33, 1, 1000, NO_TIMEOUT, false, false,
+	};
+
+	int conn = m.create(false, &cfg);
+
+	EXPECT_EQ(conn, -err::LDP_ERR_INVALID);
+}
+
 TEST_F(test_ldp_sm, DISABLED_harq)
 {
 	simu_work_queue wq;

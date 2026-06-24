@@ -104,6 +104,10 @@ struct ldp_master: public ldp_basic {
 			return -LDP_ERR_INVALID;
 		}
 
+		if (config->port >= mcb_if::MCB_MAX_PORT) {
+			return -LDP_ERR_INVALID;
+		}
+
 		std::unique_lock lock_wq(*work_queue_);
 		std::unique_lock lock(conns_lock);
 

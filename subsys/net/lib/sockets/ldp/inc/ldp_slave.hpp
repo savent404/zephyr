@@ -39,6 +39,10 @@ template <typename T_cache> struct ldp_slave: public ldp_basic {
 			return -LDP_ERR_INVALID;
 		}
 
+		if (config->port >= mcb_if::MCB_MAX_PORT) {
+			return -LDP_ERR_INVALID;
+		}
+
 		if (!ci) {
 			/* cov: no memory error injection is too boring */
 			return -LDP_ERR_NOMEM;

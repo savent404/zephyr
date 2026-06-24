@@ -26,6 +26,7 @@ struct mcb_frame {
 };
 
 struct mcb_if {
+	static const uint32_t MCB_MAX_PORT = 0x20;
 	static const uint32_t MCB_MAX_FRAME_LEN = 0x800;
 	enum mcb_error {
 		MCB_ERR_OK = 0,

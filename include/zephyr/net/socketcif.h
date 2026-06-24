@@ -180,8 +180,9 @@ enum {
 
 /* This is for CIF socket address */
 #define CIF_PORT_MOD(n)           ((n) & 0x1F) /* 0x00 ~ 0x1F */
-#define CIF_IS_SYNC_PORT(port)    (CIF_PORT_MOD(port) < 0x08)
-#define CIF_IS_ASYNC_PORT(port)   (CIF_PORT_MOD(port) >= 0x08)
+#define CIF_IS_VALID_PORT(port)     ((port) == CIF_PORT_MOD(port))
+#define CIF_IS_SYNC_PORT(port)      (CIF_IS_VALID_PORT(port) && (CIF_PORT_MOD(port) < 0x08))
+#define CIF_IS_ASYNC_PORT(port)     (CIF_IS_VALID_PORT(port) && (CIF_PORT_MOD(port) >= 0x08))
 #define CIF_IS_UNKNOWN_PORT(port) (!(CIF_IS_SYNC_PORT(port) || CIF_IS_ASYNC_PORT(port)))
 #define CIF_IS_STAT_VALID(stat, id) (((struct cif_stats *)(stat))->valid_mask & (1 << (id)))
 
