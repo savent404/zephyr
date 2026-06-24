@@ -15,6 +15,7 @@
 #include <zephyr/kernel.h>
 #include <zephyr/ztest.h>
 #include <zephyr/fs/fs.h>
+#include <zephyr/logging/log_backend_fs.h>
 
 #define DT_DRV_COMPAT zephyr_fstab_littlefs
 #define TEST_AUTOMOUNT DT_PROP(DT_DRV_INST(0), automount)
@@ -30,6 +31,190 @@ static const char *log_prefix = CONFIG_LOG_BACKEND_FS_FILE_PREFIX;
 
 int write_log_to_file(uint8_t *data, size_t length, void *ctx);
 
+void log_backend_fs_test_reset(void);
+void log_backend_fs_test_fail_next_allocations(int count, int err);
+void log_backend_fs_test_fail_next_writes(int count, int err);
+bool log_backend_fs_test_warning_pending(void);
+
+static int log_backend_fs_test_count_files(void)
+{
+	struct fs_dir_t dir;
+	struct fs_dirent ent;
+	int file_ctr = 0;
+	int rc;
+
+	fs_dir_t_init(&dir);
+
+	rc = fs_opendir(&dir, CONFIG_LOG_BACKEND_FS_DIR);
+	zassert_equal(rc, 0, "Can not open directory.");
+
+	while (rc >= 0) {
+		rc = fs_readdir(&dir, &ent);
+		zassert_true(rc >= 0, "Can not read directory.");
+		if (ent.name[0] == 0) {
+			break;
+		}
+
+		if (ent.type == FS_DIR_ENTRY_FILE &&
+		    strncmp(ent.name, log_prefix, strlen(log_prefix)) == 0) {
+			file_ctr++;
+		}
+	}
+
+	(void)fs_closedir(&dir);
+	return file_ctr;
+}
+
+static void log_backend_fs_test_wipe_files(void)
+{
+	struct fs_dir_t dir;
+	struct fs_dirent ent;
+	char fname[MAX_PATH_LEN];
+	int rc;
+
+	fs_dir_t_init(&dir);
+
+	rc = fs_opendir(&dir, CONFIG_LOG_BACKEND_FS_DIR);
+	if (rc) {
+		return;
+	}
+
+	while (rc >= 0) {
+		rc = fs_readdir(&dir, &ent);
+		zassert_true(rc >= 0, "Can not read directory.");
+		if (ent.name[0] == 0) {
+			break;
+		}
+
+		if (ent.type == FS_DIR_ENTRY_FILE &&
+		    strncmp(ent.name, log_prefix, strlen(log_prefix)) == 0) {
+			sprintf(fname, "%s/%s", CONFIG_LOG_BACKEND_FS_DIR, ent.name);
+			rc = fs_unlink(fname);
+			zassert_equal(rc, 0, "Can not remove file %s.", fname);
+		}
+	}
+
+	(void)fs_closedir(&dir);
+}
+
+static void log_backend_fs_test_fill_to_limit(void)
+{
+	uint8_t to_log[] = "Fill to file limit";
+
+	for (int i = 0; i < 100; i++) {
+		if (log_backend_fs_test_count_files() >= CONFIG_LOG_BACKEND_FS_FILES_LIMIT) {
+			return;
+		}
+
+		(void)write_log_to_file(to_log, sizeof(to_log), NULL);
+	}
+
+	zassert_unreachable("Can not fill log files to configured limit.");
+}
+
+ZTEST(test_log_backend_fs, test_degrade_initial_state)
+{
+	log_backend_fs_test_reset();
+
+	zassert_false(log_backend_fs_is_degraded(), "Backend unexpectedly degraded.");
+	zassert_equal(log_backend_fs_failure_count_get(), 0, "Unexpected initial failure count.");
+	zassert_equal(log_backend_fs_last_error_get(), 0, "Unexpected initial last error.");
+	zassert_false(log_backend_fs_test_warning_pending(), "Warning work unexpectedly pending.");
+}
+
+ZTEST(test_log_backend_fs, test_single_write_failure_does_not_degrade)
+{
+	uint8_t to_log[] = "Recoverable failure";
+	int rc;
+
+	log_backend_fs_test_reset();
+	log_backend_fs_test_fail_next_writes(1, -EIO);
+
+	rc = write_log_to_file(to_log, sizeof(to_log), NULL);
+
+	zassert_equal(rc, sizeof(to_log), "Failed writes should be discarded as processed.");
+	zassert_false(log_backend_fs_is_degraded(), "Backend degraded too early.");
+	zassert_equal(log_backend_fs_failure_count_get(), 1,
+		      "Unexpected failure count after one failed write.");
+	zassert_equal(log_backend_fs_last_error_get(), -EIO,
+		      "Unexpected last error after injected write failure.");
+}
+
+ZTEST(test_log_backend_fs, test_successful_write_clears_failure_count)
+{
+	uint8_t to_log[] = "Clear failure";
+
+	log_backend_fs_test_reset();
+	log_backend_fs_test_fail_next_writes(1, -EIO);
+
+	(void)write_log_to_file(to_log, sizeof(to_log), NULL);
+	zassert_equal(log_backend_fs_failure_count_get(), 1, "Injected failure was not recorded.");
+
+	(void)write_log_to_file(to_log, sizeof(to_log), NULL);
+
+	zassert_false(log_backend_fs_is_degraded(), "Backend degraded after success.");
+	zassert_equal(log_backend_fs_failure_count_get(), 0,
+		      "Successful write did not clear failure count.");
+	zassert_equal(log_backend_fs_last_error_get(), 0,
+		      "Successful write did not clear last error.");
+}
+
+ZTEST(test_log_backend_fs, test_repeated_write_failures_degrade)
+{
+	uint8_t to_log[] = "Degrade failure";
+
+	log_backend_fs_test_reset();
+	log_backend_fs_test_fail_next_writes(CONFIG_LOG_BACKEND_FS_DEGRADE_FAILURE_THRESHOLD, -EIO);
+
+	for (int i = 0; i < CONFIG_LOG_BACKEND_FS_DEGRADE_FAILURE_THRESHOLD; i++) {
+		(void)write_log_to_file(to_log, sizeof(to_log), NULL);
+	}
+
+	zassert_true(log_backend_fs_is_degraded(), "Backend did not degrade.");
+	zassert_equal(log_backend_fs_failure_count_get(),
+		      CONFIG_LOG_BACKEND_FS_DEGRADE_FAILURE_THRESHOLD,
+		      "Unexpected failure count at degrade threshold.");
+	zassert_equal(log_backend_fs_last_error_get(), -EIO,
+		      "Unexpected last error at degrade threshold.");
+	zassert_true(log_backend_fs_test_warning_pending(), "Degrade warning work was not armed.");
+}
+
+ZTEST(test_log_backend_fs, test_repeated_initial_allocation_failures_degrade)
+{
+	uint8_t to_log[] = "Degrade initial allocation failure";
+
+	log_backend_fs_test_reset();
+	log_backend_fs_test_fail_next_allocations(CONFIG_LOG_BACKEND_FS_DEGRADE_FAILURE_THRESHOLD,
+						 -EIO);
+
+	for (int i = 0; i < CONFIG_LOG_BACKEND_FS_DEGRADE_FAILURE_THRESHOLD; i++) {
+		(void)write_log_to_file(to_log, sizeof(to_log), NULL);
+	}
+
+	zassert_true(log_backend_fs_is_degraded(), "Backend did not degrade.");
+	zassert_equal(log_backend_fs_failure_count_get(),
+		      CONFIG_LOG_BACKEND_FS_DEGRADE_FAILURE_THRESHOLD,
+		      "Unexpected failure count at degrade threshold.");
+	zassert_equal(log_backend_fs_last_error_get(), -EIO,
+		      "Unexpected last error at degrade threshold.");
+}
+
+ZTEST(test_log_backend_fs, test_recovery_keeps_log_file_limit)
+{
+	uint8_t to_log[] = "Recover while files are already at limit";
+
+	log_backend_fs_test_reset();
+	log_backend_fs_test_wipe_files();
+	log_backend_fs_test_fill_to_limit();
+	zassert_equal(log_backend_fs_test_count_files(), CONFIG_LOG_BACKEND_FS_FILES_LIMIT,
+		      "Unexpected file count before recovery.");
+
+	log_backend_fs_test_fail_next_writes(1, -EIO);
+	(void)write_log_to_file(to_log, sizeof(to_log), NULL);
+
+	zassert_equal(log_backend_fs_test_count_files(), CONFIG_LOG_BACKEND_FS_FILES_LIMIT,
+		      "Recovery exceeded configured file count limit.");
+}
 
 ZTEST(test_log_backend_fs, test_fs_nonexist)
 {

@@ -34,6 +34,8 @@ static int last_error;
 static bool backend_degraded;
 
 #ifdef CONFIG_LOG_BACKEND_FS_TESTSUITE
+static int fail_next_allocations;
+static int fail_next_allocations_err;
 static int fail_next_writes;
 static int fail_next_writes_err;
 #endif
@@ -178,8 +180,16 @@ void log_backend_fs_test_reset(void)
 	failure_count = 0;
 	last_error = 0;
 	backend_degraded = false;
+	fail_next_allocations = 0;
+	fail_next_allocations_err = -EIO;
 	fail_next_writes = 0;
 	fail_next_writes_err = -EIO;
+}
+
+void log_backend_fs_test_fail_next_allocations(int count, int err)
+{
+	fail_next_allocations = count;
+	fail_next_allocations_err = err;
 }
 
 void log_backend_fs_test_fail_next_writes(int count, int err)
@@ -435,6 +445,13 @@ static int allocate_new_file(struct fs_file_t *file)
 	off_t file_size;
 
 	assert(file);
+
+#ifdef CONFIG_LOG_BACKEND_FS_TESTSUITE
+	if (fail_next_allocations > 0) {
+		fail_next_allocations--;
+		return fail_next_allocations_err;
+	}
+#endif
 
 	if (backend_state == BACKEND_FS_NOT_INITIALIZED) {
 		/* Search for the last used log number. */
