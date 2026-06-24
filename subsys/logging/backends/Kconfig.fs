@@ -67,4 +67,20 @@ config LOG_BACKEND_FS_FILES_LIMIT
 	  Limit of number of files with logs. It is also limited by
 	  size of file system partition.
 
+config LOG_BACKEND_FS_DEGRADE_FAILURE_THRESHOLD
+	int "Consecutive failures before fs backend degrades"
+	default 3
+	range 1 255
+	help
+	  Number of consecutive file write path failures tolerated before
+	  the file system backend marks itself degraded and deactivates.
+
+config LOG_BACKEND_FS_DEGRADE_PRINTK_INTERVAL_MS
+	int "FS backend degraded printk interval in milliseconds"
+	default 0
+	range 0 2147483647
+	help
+	  Period for printk warnings after the file system backend degrades.
+	  Set to 0 to disable periodic warnings.
+
 endif # LOG_BACKEND_FS

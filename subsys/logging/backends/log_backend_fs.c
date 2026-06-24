@@ -9,6 +9,8 @@
 #include <zephyr/logging/log_backend.h>
 #include <zephyr/logging/log_output_dict.h>
 #include <zephyr/logging/log_backend_std.h>
+#include <zephyr/logging/log_backend_fs.h>
+#include <zephyr/kernel.h>
 #include <assert.h>
 #include <zephyr/fs/fs.h>
 
@@ -27,12 +29,169 @@ enum backend_fs_state {
 static struct fs_file_t fs_file;
 static enum backend_fs_state backend_state = BACKEND_FS_NOT_INITIALIZED;
 static int file_ctr, newest, oldest;
+static uint32_t failure_count;
+static int last_error;
+static bool backend_degraded;
+
+#ifdef CONFIG_LOG_BACKEND_FS_TESTSUITE
+static int fail_next_writes;
+static int fail_next_writes_err;
+#endif
 
 static int allocate_new_file(struct fs_file_t *file);
 static int del_oldest_log(void);
 static int get_log_file_id(struct fs_dirent *ent);
+static int check_log_file_exist(int num);
+static void log_backend_fs_record_failure(int err, void *ctx);
+static void log_backend_fs_clear_failure(void);
+static int log_backend_fs_recover_file(struct fs_file_t *file, void *ctx);
+static ssize_t log_backend_fs_write(struct fs_file_t *file, const void *data, size_t len);
 #ifndef CONFIG_LOG_BACKEND_FS_TESTSUITE
 static uint32_t log_format_current = CONFIG_LOG_BACKEND_FS_OUTPUT_DEFAULT;
+#endif
+
+static void log_backend_fs_warning_print(void)
+{
+	printk("LOG_BACKEND_FS degraded: failures=%u last_error=%d dir=%s; "
+	       "check or remove damaged log files\n",
+	       failure_count, last_error, CONFIG_LOG_BACKEND_FS_DIR);
+}
+
+static void log_backend_fs_warning_work_handler(struct k_work *work);
+
+K_WORK_DELAYABLE_DEFINE(log_backend_fs_warning_work, log_backend_fs_warning_work_handler);
+
+static void log_backend_fs_warning_work_handler(struct k_work *work)
+{
+	ARG_UNUSED(work);
+
+	if (!backend_degraded) {
+		return;
+	}
+
+	log_backend_fs_warning_print();
+
+	if (CONFIG_LOG_BACKEND_FS_DEGRADE_PRINTK_INTERVAL_MS > 0) {
+		(void)k_work_schedule(&log_backend_fs_warning_work,
+				      K_MSEC(CONFIG_LOG_BACKEND_FS_DEGRADE_PRINTK_INTERVAL_MS));
+	}
+}
+
+bool log_backend_fs_is_degraded(void)
+{
+	return backend_degraded;
+}
+
+uint32_t log_backend_fs_failure_count_get(void)
+{
+	return failure_count;
+}
+
+int log_backend_fs_last_error_get(void)
+{
+	return last_error;
+}
+
+static void log_backend_fs_degrade(void *ctx)
+{
+	const struct log_backend *backend = ctx;
+
+	if (backend_degraded) {
+		return;
+	}
+
+	backend_degraded = true;
+	backend_state = BACKEND_FS_CORRUPTED;
+
+	if (backend != NULL) {
+		log_backend_deactivate(backend);
+	}
+
+	log_backend_fs_warning_print();
+	if (CONFIG_LOG_BACKEND_FS_DEGRADE_PRINTK_INTERVAL_MS > 0) {
+		(void)k_work_schedule(&log_backend_fs_warning_work,
+				      K_MSEC(CONFIG_LOG_BACKEND_FS_DEGRADE_PRINTK_INTERVAL_MS));
+	}
+}
+
+static void log_backend_fs_record_failure(int err, void *ctx)
+{
+	last_error = err;
+	failure_count++;
+
+	if (failure_count >= CONFIG_LOG_BACKEND_FS_DEGRADE_FAILURE_THRESHOLD) {
+		log_backend_fs_degrade(ctx);
+	}
+}
+
+static void log_backend_fs_clear_failure(void)
+{
+	failure_count = 0;
+	last_error = 0;
+}
+
+static int log_backend_fs_recover_file(struct fs_file_t *file, void *ctx)
+{
+	int rc;
+
+	(void)fs_close(file);
+	rc = check_log_file_exist(newest);
+	if ((rc == 0) && (file_ctr > 0)) {
+		file_ctr--;
+	}
+
+	rc = allocate_new_file(file);
+	if (rc < 0) {
+		log_backend_fs_record_failure(rc, ctx);
+		if (!backend_degraded) {
+			backend_state = BACKEND_FS_NOT_INITIALIZED;
+		}
+		return rc;
+	}
+
+	backend_state = BACKEND_FS_OK;
+	return 0;
+}
+
+static ssize_t log_backend_fs_write(struct fs_file_t *file, const void *data, size_t len)
+{
+#ifdef CONFIG_LOG_BACKEND_FS_TESTSUITE
+	if (fail_next_writes > 0) {
+		fail_next_writes--;
+		return fail_next_writes_err;
+	}
+#endif
+
+	return fs_write(file, data, len);
+}
+
+#ifdef CONFIG_LOG_BACKEND_FS_TESTSUITE
+void log_backend_fs_test_reset(void)
+{
+	(void)k_work_cancel_delayable(&log_backend_fs_warning_work);
+	(void)fs_close(&fs_file);
+	fs_file_t_init(&fs_file);
+	backend_state = BACKEND_FS_NOT_INITIALIZED;
+	file_ctr = 0;
+	newest = 0;
+	oldest = 0;
+	failure_count = 0;
+	last_error = 0;
+	backend_degraded = false;
+	fail_next_writes = 0;
+	fail_next_writes_err = -EIO;
+}
+
+void log_backend_fs_test_fail_next_writes(int count, int err)
+{
+	fail_next_writes = count;
+	fail_next_writes_err = err;
+}
+
+bool log_backend_fs_test_warning_pending(void)
+{
+	return k_work_delayable_is_pending(&log_backend_fs_warning_work);
+}
 #endif
 
 static int check_log_volume_available(void)
@@ -107,59 +266,32 @@ static int create_log_dir(const char *path)
 
 }
 
-static int check_log_file_exist(int num)
-{
-	struct fs_dir_t dir;
-	struct fs_dirent ent;
-	int rc;
-
-	fs_dir_t_init(&dir);
-
-	rc = fs_opendir(&dir, CONFIG_LOG_BACKEND_FS_DIR);
-	if (rc) {
-		return -EIO;
-	}
-
-	while (true) {
-		rc = fs_readdir(&dir, &ent);
-		if (rc < 0) {
-			rc = -EIO;
-			goto close_dir;
-		}
-		if (ent.name[0] == 0) {
-			break;
-		}
-
-		rc = get_log_file_id(&ent);
-
-		if (rc == num) {
-			rc = 1;
-			goto close_dir;
-		}
-	}
-
-	rc = 0;
-
-close_dir:
-	(void) fs_closedir(&dir);
-
-	return rc;
-}
-
 int write_log_to_file(uint8_t *data, size_t length, void *ctx)
 {
 	int rc;
+	size_t processed_len = length;
 	struct fs_file_t *f = &fs_file;
+
+	if (backend_degraded) {
+		return processed_len;
+	}
 
 	if (backend_state == BACKEND_FS_NOT_INITIALIZED) {
 		if (check_log_volume_available()) {
-			return length;
+			return processed_len;
 		}
 		rc = create_log_dir(CONFIG_LOG_BACKEND_FS_DIR);
 		if (!rc) {
 			rc = allocate_new_file(&fs_file);
 		}
-		backend_state = (rc ? BACKEND_FS_CORRUPTED : BACKEND_FS_OK);
+		if (rc) {
+			log_backend_fs_record_failure(rc, ctx);
+			if (!backend_degraded) {
+				backend_state = BACKEND_FS_NOT_INITIALIZED;
+			}
+			return processed_len;
+		}
+		backend_state = BACKEND_FS_OK;
 	}
 
 	if (backend_state == BACKEND_FS_OK) {
@@ -170,58 +302,57 @@ int write_log_to_file(uint8_t *data, size_t length, void *ctx)
 		int size = fs_tell(f);
 
 		if (size < 0) {
-			backend_state = BACKEND_FS_CORRUPTED;
-
-			return length;
+			log_backend_fs_record_failure(size, ctx);
+			if (!backend_degraded) {
+				(void)log_backend_fs_recover_file(f, ctx);
+			}
+			return processed_len;
 		} else if ((size + length) > CONFIG_LOG_BACKEND_FS_FILE_SIZE) {
 			rc = allocate_new_file(f);
 
 			if (rc < 0) {
-				goto on_error;
+				log_backend_fs_record_failure(rc, ctx);
+				return processed_len;
 			}
 		}
 
-		rc = fs_write(f, data, length);
+		rc = log_backend_fs_write(f, data, length);
 		if (rc >= 0) {
 			if (IS_ENABLED(CONFIG_LOG_BACKEND_FS_OVERWRITE) &&
 			    (rc != length)) {
 				del_oldest_log();
 
-				return 0;
+				return processed_len;
 			}
-			/* If overwrite is disabled, full memory
-			 * cause the log record abandonment.
+			/* If overwrite is disabled, a partial write means the remaining
+			 * bytes are dropped. Report the full buffer as processed so
+			 * log_output does not retry forever.
 			 */
-			length = rc;
-		} else {
-			if (rc == -EFAULT || check_log_file_exist(newest) <= 0) {
-				/* file was lost somehow
-				 * or fs is corrupted
-				 * try to get a new one
-				 */
-				file_ctr--;
-				rc = allocate_new_file(f);
-				if (rc < 0) {
-					goto on_error;
-				}
-			} else if (rc < 0) {
-				/* fs is corrupted*/
-				goto on_error;
+			if (rc != length) {
+				length = processed_len;
+			} else {
+				length = rc;
 			}
-			length = 0;
+		} else {
+			log_backend_fs_record_failure(rc, ctx);
+			if (!backend_degraded) {
+				(void)log_backend_fs_recover_file(f, ctx);
+			}
+			return processed_len;
 		}
 
 		rc = fs_sync(f);
 		if (rc < 0) {
-			/* Something is wrong */
-			goto on_error;
+			log_backend_fs_record_failure(rc, ctx);
+			if (!backend_degraded) {
+				(void)log_backend_fs_recover_file(f, ctx);
+			}
+			return processed_len;
 		}
+
+		log_backend_fs_clear_failure();
 	}
 
-	return length;
-
-on_error:
-	backend_state = BACKEND_FS_CORRUPTED;
 	return length;
 }
 
@@ -251,6 +382,44 @@ static int get_log_file_id(struct fs_dirent *ent)
 	}
 
 	return -1;
+}
+
+static int check_log_file_exist(int num)
+{
+	struct fs_dir_t dir;
+	struct fs_dirent ent;
+	int rc;
+
+	fs_dir_t_init(&dir);
+
+	rc = fs_opendir(&dir, CONFIG_LOG_BACKEND_FS_DIR);
+	if (rc) {
+		return -EIO;
+	}
+
+	while (true) {
+		rc = fs_readdir(&dir, &ent);
+		if (rc < 0) {
+			rc = -EIO;
+			goto close_dir;
+		}
+		if (ent.name[0] == 0) {
+			break;
+		}
+
+		rc = get_log_file_id(&ent);
+		if (rc == num) {
+			rc = 1;
+			goto close_dir;
+		}
+	}
+
+	rc = 0;
+
+close_dir:
+	(void)fs_closedir(&dir);
+
+	return rc;
 }
 
 static int allocate_new_file(struct fs_file_t *file)
@@ -457,6 +626,7 @@ LOG_OUTPUT_DEFINE(log_output, write_log_to_file, buf, MAX_FLASH_WRITE_SIZE);
 
 static void log_backend_fs_init(const struct log_backend *const backend)
 {
+	log_output_ctx_set(&log_output, (void *)backend);
 }
 
 static void panic(struct log_backend const *const backend)
