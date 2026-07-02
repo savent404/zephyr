@@ -1,0 +1,30 @@
+#include <mem.h>
+
+/ {
+	ramdisk0: ramdisk0 {
+		compatible = "zephyr,ram-disk";
+		disk-name = "RAM";
+		sector-size = <512>;
+		sector-count = <0x80000>;
+
+		partitions {
+			compatible = "fixed-partitions";
+			#address-cells = <1>;
+			#size-cells = <1>;
+
+			lfs0_partition: partition@0 {
+				label = "lfs0";
+				reg = <0x00000000 DT_SIZE_M(128)>;
+			};
+
+			lfs1_partition: partition@8000000 {
+				label = "lfs1";
+				reg = <0x08000000 DT_SIZE_M(128)>;
+			};
+		};
+	};
+};
+
+&dram0 {
+	reg = <0x00000000 DT_SIZE_M(512)>;
+};

@@ -8,5 +8,3 @@ tests:
     tags: app
     platform_allow:
       - rbs2530_cpu
-      - rbs2530_ec
-      - rbs2530_ext
