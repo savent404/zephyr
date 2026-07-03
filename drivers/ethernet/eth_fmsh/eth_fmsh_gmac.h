@@ -48,6 +48,7 @@ struct eth_fmsh_data {
 	struct k_sem tx_sem;
 	struct k_sem rx_sem;
 	struct k_mutex tx_mutex;
+	struct k_spinlock rx_desc_lock;
 
 	/* 接收线程 */
 	struct k_thread rx_thread;
@@ -65,6 +66,9 @@ struct eth_fmsh_data {
 	/* 状态标志 */
 	atomic_t rx_busy; /* NAPI处理状态标志 */
 	int napi_budget;  /* 单次处理配额 */
+	uint8_t rx_desc_held[GMAC_RDES_NUM];
+	bool rx_waiting_on_held_desc;
+	bool rx_dma_stalled; /* DMA因无空闲descriptor而停顿 */
 
 	FGmacPs_RxDescriptor_T *rx_descs;
 	FGmacPs_TxDescriptor_T *tx_descs;

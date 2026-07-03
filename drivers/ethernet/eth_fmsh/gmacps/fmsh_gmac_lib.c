@@ -573,85 +573,148 @@ u8 FGmac_Ps_MacInit(FGmacPs_Instance_T *pGmac, int m2m)
  *
  * **************************************************************************
  */
-void *FGmac_Ps_RcvPollEFrame(FGmacPs_Instance_T *pGmac, u32 *pRcvSize)
+static void FGmac_Ps_RxDescRelease(FGmacPs_Instance_T *pGmac, u16 first_idx, u16 desc_count)
 {
-	FGmacPs_RxDescriptor_T *pRxTd;
+	u16 idx = first_idx;
 
-	u32 tmpIdx;
-	u8 isFrame = 0;
-#if FMSH_CACHE_ENABLE
-	u32 range_start, range_end;
-#endif
-	/* variables init */
-	tmpIdx = pGmac->wRxI;
-	pRxTd = &pGmac->pRxD[tmpIdx];
+	for (u16 i = 0; i < desc_count; i++) {
+		pGmac->pRxD[idx].RDES0.val = (u32)GMAC_RDES0_OWN;
+		GMAC_GCIRC_INC(idx, pGmac->wRxListSize);
+	}
 
-	*pRcvSize = 0;
+	gmac_DmaRxPollDemand(pGmac);
+}
+
+static void FGmac_Ps_RxDescInvalidate(FGmacPs_RxDescriptor_T *pRxTd)
+{
 #if FMSH_CACHE_ENABLE
+	u32 range_start;
+	u32 range_end;
+
 	range_start = (u32)(pRxTd->BufferAdd1) & 0xffffffc0; /* 64 byte aligned */
 	range_end = (((u32)(pRxTd->BufferAdd2) + GMAC_RBUFFER_UNIT_SIZE) & 0xffffffc0) + (1 << 6);
 	FMSH_DCACHE_INVALIDATE((void *)range_start, range_end - range_start);
 	/* invalidate_dcache_range(range_start, range_end); */
+#else
+	ARG_UNUSED(pRxTd);
 #endif
-	/* ownered by HOST */
-	while ((pRxTd->RDES0.val & GMAC_RDES0_OWN) == 0) {
-		/* First Descriptor */
-		if ((pRxTd->RDES0.val & GMAC_RDES0_FS) == GMAC_RDES0_FS) {
-			/* Skip previous fragment */
-			while (tmpIdx != pGmac->wRxI) {
-				pRxTd = &pGmac->pRxD[pGmac->wRxI];
-				pRxTd->RDES0.val |= GMAC_RDES0_OWN; /* ownered by DMA */
-				GMAC_GCIRC_INC(pGmac->wRxI, pGmac->wRxListSize);
-			}
-			/* Start to gather buffers in a frame */
-			isFrame = 1;
-		}
+}
 
-		/* Increase tmpIdx */
-		GMAC_GCIRC_INC(tmpIdx, pGmac->wRxListSize);
+int FGmac_Ps_RcvPollEFrameZeroCopy(FGmacPs_Instance_T *pGmac, FGmacPs_RxFrame_T *frame,
+				   FGmacPs_RxDescHeldFn held_cb, void *held_arg)
+{
+	FGmacPs_RxDescriptor_T *pRxTd;
+	u16 start_idx;
+	u16 scan_idx;
+	u16 desc_count;
+	u16 scanned = 0U;
+	u32 des0;
+	bool dropped = false;
 
-		/* Copy data in the frame buffer */
-		if (isFrame) {
-			if (tmpIdx == pGmac->wRxI) {
-				do {
-					pRxTd = &pGmac->pRxD[pGmac->wRxI];
-					pRxTd->RDES0.val |= GMAC_RDES0_OWN;
-					GMAC_GCIRC_INC(pGmac->wRxI, pGmac->wRxListSize);
-				} while (tmpIdx != pGmac->wRxI);
-				return NULL;
-			}
-			/* EOF has been received, return the data */
-			if ((pRxTd->RDES0.val & GMAC_RDES0_LS) == GMAC_RDES0_LS) {
-				/* Frame size from the GMAC */
-				void *tmp_p = NULL;
-
-				*pRcvSize = (pRxTd->RDES0.val & GMAC_RDES0_FL) >> 16;
-				pGmac->rx_last_des0 = pRxTd->RDES0.val;
-				/* All data have been copied in buffer , release TD */
-				tmp_p = (void *)pRxTd->BufferAdd1;
-				while ((pGmac->wRxI) != tmpIdx) {
-					pRxTd = &pGmac->pRxD[pGmac->wRxI];
-					pRxTd->RDES0.val = (u32)(GMAC_RDES0_OWN);
-					GMAC_GCIRC_INC(pGmac->wRxI, pGmac->wRxListSize);
-				}
-				return tmp_p;
-			}
-		} else {
-			/* isFrame = 0; SOF has not been detected */
-			pRxTd->RDES0.val |= GMAC_RDES0_OWN; /* ownered by DMA */
-			pGmac->wRxI = tmpIdx;
-		}
-		/* Process the next buffer */
-		pRxTd = &pGmac->pRxD[tmpIdx];
-#if FMSH_CACHE_ENABLE
-		range_start = (u32)(pRxTd->BufferAdd1) & 0xffffffc0; /* 64 byte aligned */
-		range_end = (((u32)(pRxTd->BufferAdd2) + GMAC_RBUFFER_UNIT_SIZE) & 0xffffffc0) +
-			    (1 << 6);
-		FMSH_DCACHE_INVALIDATE((void *)range_start, range_end - range_start);
-		/* invalidate_dcache_range(range_start, range_end); */
-#endif
+	if (pGmac == NULL || frame == NULL || pGmac->pRxD == NULL || pGmac->wRxListSize == 0U) {
+		return GMAC_RETURN_CODE_PARAM_ERR;
 	}
-	return NULL;
+
+	memset(frame, 0, sizeof(*frame));
+
+	while (scanned < pGmac->wRxListSize) {
+		if (held_cb != NULL && held_cb(held_arg, pGmac->wRxI)) {
+			return dropped ? GMAC_RETURN_CODE_ERR : GMAC_RETURN_CODE_RX_NULL;
+		}
+
+		pRxTd = &pGmac->pRxD[pGmac->wRxI];
+		FGmac_Ps_RxDescInvalidate(pRxTd);
+		des0 = pRxTd->RDES0.val;
+
+		if ((des0 & GMAC_RDES0_OWN) != 0U) {
+			return dropped ? GMAC_RETURN_CODE_ERR : GMAC_RETURN_CODE_RX_NULL;
+		}
+
+		if ((des0 & GMAC_RDES0_FS) != 0U) {
+			break;
+		}
+
+		/* Discard stray fragments before the next SOF. */
+		FGmac_Ps_RxDescRelease(pGmac, pGmac->wRxI, 1U);
+		GMAC_GCIRC_INC(pGmac->wRxI, pGmac->wRxListSize);
+		scanned++;
+		dropped = true;
+	}
+
+	if (scanned >= pGmac->wRxListSize) {
+		return GMAC_RETURN_CODE_ERR;
+	}
+
+	start_idx = pGmac->wRxI;
+	pRxTd = &pGmac->pRxD[start_idx];
+	des0 = pRxTd->RDES0.val;
+
+	if ((des0 & GMAC_RDES0_LS) == 0U) {
+		scan_idx = start_idx;
+		desc_count = 0U;
+
+		do {
+			if (held_cb != NULL && held_cb(held_arg, scan_idx)) {
+				if (desc_count != 0U) {
+					FGmac_Ps_RxDescRelease(pGmac, start_idx, desc_count);
+					pGmac->wRxI = scan_idx;
+				}
+				return GMAC_RETURN_CODE_ERR;
+			}
+
+			pRxTd = &pGmac->pRxD[scan_idx];
+			FGmac_Ps_RxDescInvalidate(pRxTd);
+			des0 = pRxTd->RDES0.val;
+
+			if ((des0 & GMAC_RDES0_OWN) != 0U) {
+				return dropped ? GMAC_RETURN_CODE_ERR : GMAC_RETURN_CODE_RX_NULL;
+			}
+
+			if (desc_count != 0U && (des0 & GMAC_RDES0_FS) != 0U) {
+				FGmac_Ps_RxDescRelease(pGmac, start_idx, desc_count);
+				pGmac->wRxI = scan_idx;
+				return GMAC_RETURN_CODE_ERR;
+			}
+
+			desc_count++;
+			if ((des0 & GMAC_RDES0_LS) != 0U) {
+				FGmac_Ps_RxDescRelease(pGmac, start_idx, desc_count);
+				GMAC_GCIRC_INC(scan_idx, pGmac->wRxListSize);
+				pGmac->wRxI = scan_idx;
+				pGmac->rx_last_des0 = des0;
+				return GMAC_RETURN_CODE_ERR;
+			}
+
+			GMAC_GCIRC_INC(scan_idx, pGmac->wRxListSize);
+		} while (desc_count < pGmac->wRxListSize);
+
+		FGmac_Ps_RxDescRelease(pGmac, start_idx, desc_count);
+		return GMAC_RETURN_CODE_ERR;
+	}
+
+	frame->last_des0 = des0;
+	pGmac->rx_last_des0 = des0;
+
+	if ((des0 & GMAC_RDES0_ES) != 0U) {
+		FGmac_Ps_RxDescRelease(pGmac, start_idx, 1U);
+		GMAC_GCIRC_INC(pGmac->wRxI, pGmac->wRxListSize);
+		return GMAC_RETURN_CODE_ERR;
+	}
+
+	frame->len = (des0 & GMAC_RDES0_FL) >> 16;
+	if (frame->len == 0U || frame->len > pGmac->RxDesBufSize) {
+		FGmac_Ps_RxDescRelease(pGmac, start_idx, 1U);
+		GMAC_GCIRC_INC(pGmac->wRxI, pGmac->wRxListSize);
+		return GMAC_RETURN_CODE_ERR;
+	}
+
+	frame->data = (void *)pRxTd->BufferAdd1;
+	frame->first_idx = start_idx;
+	frame->desc_count = 1U;
+
+	GMAC_GCIRC_INC(pGmac->wRxI, pGmac->wRxListSize);
+
+	return GMAC_RETURN_CODE_OK;
 }
 
 /* ************************************************************************* */

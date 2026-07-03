@@ -212,6 +212,16 @@ typedef struct _GmacRxDescriptor {
 	volatile u32 BufferAdd2;
 } FGmacPs_RxDescriptor_T;
 
+typedef struct _FGmacPs_RxFrame {
+	void *data;
+	u32 len;
+	u16 first_idx;
+	u16 desc_count;
+	u32 last_des0;
+} FGmacPs_RxFrame_T;
+
+typedef bool (*FGmacPs_RxDescHeldFn)(void *arg, u16 idx);
+
 /* interface type */
 typedef enum _FGmacPs_PathSel {
 	gmac_path_gmii = PHY_ITF_GMIIMII,
@@ -393,7 +403,8 @@ u8 FGmac_Ps_DmaInit(FGmacPs_Instance_T *pGmac, FGmacPs_RxDescriptor_T *g_GMAC_Rx
 
 u8 FGmac_Ps_MacInit(FGmacPs_Instance_T *pGmac, int m2m);
 
-void *FGmac_Ps_RcvPollEFrame(FGmacPs_Instance_T *pGmac, u32 *pRcvSize);
+int FGmac_Ps_RcvPollEFrameZeroCopy(FGmacPs_Instance_T *pGmac, FGmacPs_RxFrame_T *frame,
+				   FGmacPs_RxDescHeldFn held_cb, void *held_arg);
 u8 FGmac_Ps_Send(FGmacPs_Instance_T *pGmac, u8 *pBuffer, u32 size, u8 DisCRC, u8 DisPAD);
 u8 FGmac_Ps_PreSendCopy(FGmacPs_Instance_T *pGmac, u8 *pFrame, u32 size, u8 DisCRC, u8 DisPAD);
 

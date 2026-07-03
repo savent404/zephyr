@@ -389,6 +389,7 @@ void gmac_dma_enable_tsv(FGmacPs_Instance_T *pGmac, u8 enable);
 u8 gmac_enable_rcv(FGmacPs_Instance_T *pGmac, u8 enable);
 u8 gmac_enable_tsv(FGmacPs_Instance_T *pGmac, u8 enable);
 void gmac_DmaTxPollDemand(FGmacPs_Instance_T *pGmac);
+void gmac_DmaRxPollDemand(FGmacPs_Instance_T *pGmac);
 
 void gmac0_bus_rst(FGmacPs_ITF_Type path_sel);
 void gmac1_bus_rst(FGmacPs_ITF_Type path_sel);

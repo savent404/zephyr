@@ -16,6 +16,7 @@
 
 #include "eth_fmsh_gmac_priv.h"
 #include "eth_fmsh_gmac.h"
+#include "gmacps/fmsh_gmac_hw.h"
 
 #define DT_DRV_COMPAT snps_fmsh_gmac
 
@@ -23,9 +24,123 @@
 
 LOG_MODULE_REGISTER(eth_fmsh);
 
+struct fmsh_rx_dma_buf_meta {
+	struct eth_fmsh_data *data;
+	struct net_buf *owner;
+	uint16_t first_idx;
+	uint16_t desc_count;
+};
+
+static void eth_fmsh_rx_dma_buf_destroy(struct net_buf *buf);
+
+#define FMSH_RX_DMA_BUF_META_OFFSET                                                                \
+	ROUND_UP(CONFIG_NET_PKT_BUF_USER_DATA_SIZE, __alignof__(struct fmsh_rx_dma_buf_meta))
+
+static struct fmsh_rx_dma_buf_meta *eth_fmsh_rx_dma_buf_meta(struct net_buf *buf)
+{
+	return (struct fmsh_rx_dma_buf_meta *)((uint8_t *)net_buf_user_data(buf) +
+					       FMSH_RX_DMA_BUF_META_OFFSET);
+}
+
 /* DMA缓冲区池 */
-NET_BUF_POOL_DEFINE(rx_dma_pool, 512, GMAC_RBUFFER_UNIT_SIZE, sizeof(uint32_t), NULL);
+NET_BUF_POOL_DEFINE(rx_dma_pool, 512, GMAC_RBUFFER_UNIT_SIZE,
+		    FMSH_RX_DMA_BUF_META_OFFSET + sizeof(struct fmsh_rx_dma_buf_meta),
+		    eth_fmsh_rx_dma_buf_destroy);
 #define FMSH_ETH_TX_DESC_WAIT_TIMEOUT_MS 1000
+
+static uint16_t eth_fmsh_rx_desc_next(const struct eth_fmsh_data *data, uint16_t idx)
+{
+	idx++;
+	if (idx >= data->gmac_inst->wRxListSize) {
+		idx = 0U;
+	}
+
+	return idx;
+}
+
+static bool eth_fmsh_rx_desc_is_held(struct eth_fmsh_data *data, uint16_t idx)
+{
+	k_spinlock_key_t key;
+	bool held;
+
+	key = k_spin_lock(&data->rx_desc_lock);
+	held = data->rx_desc_held[idx] != 0U;
+	if (held) {
+		data->rx_waiting_on_held_desc = true;
+	}
+	k_spin_unlock(&data->rx_desc_lock, key);
+
+	return held;
+}
+
+static bool eth_fmsh_rx_desc_is_held_cb(void *arg, u16 idx)
+{
+	return eth_fmsh_rx_desc_is_held(arg, idx);
+}
+
+static void eth_fmsh_rx_desc_hold(struct eth_fmsh_data *data, uint16_t first_idx,
+				  uint16_t desc_count)
+{
+	k_spinlock_key_t key;
+	uint16_t idx = first_idx;
+
+	key = k_spin_lock(&data->rx_desc_lock);
+	for (uint16_t i = 0U; i < desc_count; i++) {
+		data->rx_desc_held[idx] = 1U;
+		idx = eth_fmsh_rx_desc_next(data, idx);
+	}
+	k_spin_unlock(&data->rx_desc_lock, key);
+}
+
+static void eth_fmsh_rx_desc_release(struct eth_fmsh_data *data, uint16_t first_idx,
+				     uint16_t desc_count)
+{
+	k_spinlock_key_t key;
+	uint16_t idx = first_idx;
+	bool wake_rx;
+	bool released_held = false;
+	bool dma_stalled;
+
+	key = k_spin_lock(&data->rx_desc_lock);
+	for (uint16_t i = 0U; i < desc_count; i++) {
+		if (data->rx_desc_held[idx] != 0U) {
+			released_held = true;
+		}
+		data->rx_desc_held[idx] = 0U;
+		data->gmac_inst->pRxD[idx].RDES0.val = (u32)GMAC_RDES0_OWN;
+		idx = eth_fmsh_rx_desc_next(data, idx);
+	}
+	wake_rx = data->rx_waiting_on_held_desc;
+	data->rx_waiting_on_held_desc = false;
+	dma_stalled = data->rx_dma_stalled;
+	data->rx_dma_stalled = false;
+	k_spin_unlock(&data->rx_desc_lock, key);
+
+	/* DMA may suspend on a returned descriptor before software observes it.
+	 * Kick after returning a real held descriptor, or a known DMA stall.
+	 */
+	if (dma_stalled || released_held) {
+		gmac_DmaRxPollDemand(data->gmac_inst);
+	}
+	if (wake_rx) {
+		k_sem_give(&data->rx_sem);
+	}
+}
+
+static void eth_fmsh_rx_dma_buf_destroy(struct net_buf *buf)
+{
+	struct fmsh_rx_dma_buf_meta *meta = eth_fmsh_rx_dma_buf_meta(buf);
+
+	if (meta->owner == buf && meta->data != NULL && meta->desc_count != 0U &&
+	    (buf->flags & NET_BUF_EXTERNAL_DATA) != 0U) {
+		eth_fmsh_rx_desc_release(meta->data, meta->first_idx, meta->desc_count);
+		meta->data = NULL;
+		meta->owner = NULL;
+		meta->desc_count = 0U;
+	}
+
+	net_buf_destroy(buf);
+}
 
 /* 回收已完成发送的描述符，并返还可用描述符计数 */
 static void eth_fmsh_tx_reclaim(struct eth_fmsh_data *data)
@@ -198,9 +313,11 @@ static void eth_fmsh_rx_thread(void *arg1, void *arg2, void *arg3)
 	const struct device *dev = arg1;
 	struct eth_fmsh_data *data = dev->data;
 	int budget;
-	uint32_t rx_len;
-	uint8_t *rcv_packet;
+	int ret;
+	FGmacPs_RxFrame_T frame;
 	struct net_pkt *pkt;
+	struct net_buf *buf;
+	struct fmsh_rx_dma_buf_meta *meta;
 
 	while (1) {
 		/* 等待中断触发 */
@@ -209,34 +326,49 @@ static void eth_fmsh_rx_thread(void *arg1, void *arg2, void *arg3)
 		/* 进入轮询模式 */
 		budget = data->napi_budget;
 		while (budget > 0) {
-			rcv_packet = (uint8_t *)FGmac_Ps_RcvPollEFrame(data->gmac_inst, &rx_len);
-			if (rcv_packet == NULL) {
+
+			ret = FGmac_Ps_RcvPollEFrameZeroCopy(data->gmac_inst, &frame,
+							     eth_fmsh_rx_desc_is_held_cb, data);
+			if (ret == GMAC_RETURN_CODE_RX_NULL) {
 				break;
 			}
+			if (ret != GMAC_RETURN_CODE_OK) {
+				data->stats.error_details.rx_frame_errors++;
+				budget--;
+				continue;
+			}
 
-			/* 分配不带buffer的net_pkt */
-			pkt = net_pkt_rx_alloc(K_NO_WAIT);
+			eth_fmsh_rx_desc_hold(data, frame.first_idx, frame.desc_count);
+
+			pkt = net_pkt_rx_alloc_on_iface(data->iface, K_NO_WAIT);
 			if (pkt == NULL) {
 				data->stats.error_details.rx_buf_alloc_failed++;
+				eth_fmsh_rx_desc_release(data, frame.first_idx, frame.desc_count);
 				continue;
 			}
-			struct net_buf *buf = net_buf_alloc_len(&rx_dma_pool, rx_len, K_NO_WAIT);
 
+			buf = net_buf_alloc_with_data(&rx_dma_pool, frame.data, frame.len,
+						      K_NO_WAIT);
 			if (buf == NULL) {
+				data->stats.error_details.rx_buf_alloc_failed++;
 				net_pkt_unref(pkt);
+				eth_fmsh_rx_desc_release(data, frame.first_idx, frame.desc_count);
 				continue;
 			}
 
-			/* 设置buffer数据 */
-			buf->data = rcv_packet;
-			buf->len = rx_len;
+			meta = eth_fmsh_rx_dma_buf_meta(buf);
+			meta->data = data;
+			meta->owner = buf;
+			meta->first_idx = frame.first_idx;
+			meta->desc_count = frame.desc_count;
+
 			net_pkt_append_buffer(pkt, buf);
 
 			if (net_recv_data(data->iface, pkt) < 0) {
 				data->stats.error_details.rx_frame_errors++;
 				net_pkt_unref(pkt);
 			} else {
-				data->stats.bytes.received += rx_len;
+				data->stats.bytes.received += frame.len;
 				data->stats.pkts.rx++;
 			}
 
@@ -292,8 +424,13 @@ static void eth_fmsh_isr(const struct device *dev)
 			clearIrqMask = gdma_irq_rx_overflow;
 			callbackArg = gdma_irq_rx_overflow;
 		} else if (reg_val_32b & gdma_irq_rx_unbuffer) {
+			k_spinlock_key_t key;
+
 			FMSH_ERROR("Receive buffer unavailable");
 			data->stats.error_details.rx_missed_errors++;
+			key = k_spin_lock(&data->rx_desc_lock);
+			data->rx_dma_stalled = true;
+			k_spin_unlock(&data->rx_desc_lock, key);
 			clearIrqMask = gdma_irq_rx_unbuffer;
 			callbackArg = gdma_irq_rx_unbuffer;
 		} else if (reg_val_32b & gdma_irq_rx_stop) {
@@ -553,10 +690,7 @@ static void eth_fmsh_iface_init(struct net_if *iface)
 void FGmacPs_GmacListener(FGmacPs_Instance_T *pGmac, int32_t ecode)
 {
 	FGmacPs_MacPortMap_T *pGmacPortMap = pGmac->base_address;
-	FGmacPs_DmaPortMap_T *pDmaPortMap;
 	u32 reg;
-
-	pDmaPortMap = (FGmacPs_DmaPortMap_T *)((u32)pGmac->base_address + GMAC_DMA_OFFSET);
 
 	switch (ecode) {
 	case gdma_irq_tx_stop:
@@ -576,8 +710,6 @@ void FGmacPs_GmacListener(FGmacPs_Instance_T *pGmac, int32_t ecode)
 		break;
 	case gdma_irq_rx_unbuffer:
 		FMSH_ERROR("> Irq:Rx buffer unavailable");
-		reg = FMSH_IN32_32(pDmaPortMap->GDMA_CRXDES);
-		FGmac_Ps_ResetCurRxDES(pGmac, (FGmacPs_RxDescriptor_T *)reg);
 		break;
 	case gdma_irq_rx_stop:
 		FMSH_ERROR("> Irq:Rx process stopped");
@@ -662,6 +794,9 @@ static int eth_fmsh_init(const struct device *dev)
 	k_sem_init(&data->tx_sem, tx_desc_num - 1U, tx_desc_num - 1U);
 	k_sem_init(&data->rx_sem, 0, 1);
 	k_mutex_init(&data->tx_mutex);
+	memset(data->rx_desc_held, 0, sizeof(data->rx_desc_held));
+	data->rx_waiting_on_held_desc = false;
+	data->rx_dma_stalled = false;
 
 	data->gmac_inst->pFrmBuffer = data->packet_buffer;
 

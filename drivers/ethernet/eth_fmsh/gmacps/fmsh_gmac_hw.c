@@ -141,6 +141,27 @@ void gmac_DmaTxPollDemand(FGmacPs_Instance_T *pGmac)
 
 /*
  *
+ * Dma Rx Poll Demand
+ *
+ * @param  FGmacPs_Instance_T * pGmac
+ *
+ * @return   void
+ *
+ * @note    None.
+ *
+ * **************************************************************************
+ */
+void gmac_DmaRxPollDemand(FGmacPs_Instance_T *pGmac)
+{
+	FGmacPs_DmaPortMap_T *pDma;
+	u32 reg = 1;
+
+	pDma = (FGmacPs_DmaPortMap_T *)((u32)pGmac->base_address + GMAC_DMA_OFFSET);
+	FMSH_OUT32_32(reg, pDma->GDMA_RPD);
+}
+
+/*
+ *
  * SLCR reset GMAC0, set path
  *
  * @param  FGmacPs_PathSel path_sel, GMII or RGMII
