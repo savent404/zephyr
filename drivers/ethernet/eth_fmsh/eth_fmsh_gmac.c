@@ -25,6 +25,36 @@ LOG_MODULE_REGISTER(eth_fmsh);
 
 /* DMA缓冲区池 */
 NET_BUF_POOL_DEFINE(rx_dma_pool, 512, GMAC_RBUFFER_UNIT_SIZE, sizeof(uint32_t), NULL);
+#define FMSH_ETH_TX_DESC_WAIT_TIMEOUT_MS 1000
+
+/* 回收已完成发送的描述符，并返还可用描述符计数 */
+static void eth_fmsh_tx_reclaim(struct eth_fmsh_data *data)
+{
+	FGmacPs_TxDescriptor_T *tx_desc = data->gmac_inst->pTxD;
+	u16 tx_tail = data->gmac_inst->wTxTail;
+	const u16 tx_head = data->gmac_inst->wTxHead;
+	const u16 tx_desc_num = data->gmac_inst->wTxListSize;
+	u16 reclaimed = 0U;
+
+	while (tx_tail != tx_head) {
+		if (tx_desc[tx_tail].TDES0.val & GMAC_TDES0_OWN) {
+			break;
+		}
+
+		tx_tail++;
+		if (tx_tail >= tx_desc_num) {
+			tx_tail = 0U;
+		}
+		reclaimed++;
+	}
+
+	data->gmac_inst->wTxTail = tx_tail;
+
+	while (reclaimed > 0U) {
+		k_sem_give(&data->tx_sem);
+		reclaimed--;
+	}
+}
 
 /* 数据发送接口 */
 static int eth_fmsh_send(const struct device *dev, struct net_pkt *pkt)
@@ -32,20 +62,47 @@ static int eth_fmsh_send(const struct device *dev, struct net_pkt *pkt)
 	struct eth_fmsh_data *ctx = dev->data;
 	int ret;
 
-	/* 获取发送锁 */
-	k_mutex_lock(&ctx->tx_mutex, K_FOREVER);
-	k_sem_reset(&ctx->tx_sem);
-
 	/* 获取当前发送描述符 */
 	FGmacPs_TxDescriptor_T *pTxDES_tmp; /* tmp pDES */
 	u16 TxDES_Idx;                      /* tmp Idx of TxDES */
 	u32 TDes_num = ctx->gmac_inst->wTxListSize;
 	u32 TxDesBufSize = ctx->gmac_inst->TxDesBufSize;
 
-	/* initial */
-	TxDES_Idx = ctx->gmac_inst->wTxHead;
 	pTxDES_tmp = &ctx->gmac_inst->pTxD[0];
 	u32 size = net_pkt_get_len(pkt);
+
+	/* 预占用一个可用Tx描述符，避免永久阻塞 */
+	ret = k_sem_take(&ctx->tx_sem, K_MSEC(FMSH_ETH_TX_DESC_WAIT_TIMEOUT_MS));
+	if (ret == -EAGAIN) {
+		unsigned int key = irq_lock();
+
+		/* 中断丢失时主动回收一次已完成描述符 */
+		eth_fmsh_tx_reclaim(ctx);
+		irq_unlock(key);
+
+		ret = k_sem_take(&ctx->tx_sem, K_NO_WAIT);
+		if (ret == -EAGAIN) {
+			FMSH_ERROR("Timeout waiting for free Tx descriptor");
+			return -ETIMEDOUT;
+		}
+	}
+	if (ret != 0) {
+		return ret;
+	}
+
+	/* 获取发送锁 */
+	k_mutex_lock(&ctx->tx_mutex, K_FOREVER);
+
+	/* initial */
+	TxDES_Idx = ctx->gmac_inst->wTxHead;
+
+	/* 信号量与描述符状态失步时避免覆写DMA仍在使用的描述符 */
+	if (pTxDES_tmp[TxDES_Idx].TDES0.val & GMAC_TDES0_OWN) {
+		FMSH_ERROR("Tx descriptor %u still owned by DMA", TxDES_Idx);
+		k_sem_give(&ctx->tx_sem);
+		k_mutex_unlock(&ctx->tx_mutex);
+		return -EIO;
+	}
 
 	/* 清空描述符状态 */
 	pTxDES_tmp[TxDES_Idx].TDES0.val = 0;
@@ -57,6 +114,8 @@ static int eth_fmsh_send(const struct device *dev, struct net_pkt *pkt)
 	ret = net_pkt_read(pkt, buf_addr, size);
 	if (ret < 0) {
 		FMSH_ERROR("net_pkt_read error");
+		k_sem_give(&ctx->tx_sem);
+		k_mutex_unlock(&ctx->tx_mutex);
 		return ret;
 	}
 
@@ -97,9 +156,6 @@ static int eth_fmsh_send(const struct device *dev, struct net_pkt *pkt)
 
 	/* 触发发送 */
 	gmac_DmaTxPollDemand(ctx->gmac_inst);
-
-	/* 等待发送完成信号量 */
-	k_sem_take(&ctx->tx_sem, K_FOREVER);
 
 	/* 更新统计 */
 	ctx->stats.bytes.sent += size;
@@ -211,6 +267,12 @@ static void eth_fmsh_isr(const struct device *dev)
 	/* 读取中断状态 */
 	reg_val_32b = FMSH_IN32_32(pDma->GDMA_SR);
 
+	/* Tx相关中断优先回收已完成描述符，更新可用描述符计数 */
+	if (reg_val_32b & (gdma_irq_tx | gdma_irq_tx_unbuffer | gdma_irq_tx_stop |
+			   gdma_irq_tx_underflow | gdma_irq_tx_jabber_timeout)) {
+		eth_fmsh_tx_reclaim(data);
+	}
+
 	/* 异常中断处理 */
 	if (reg_val_32b & gdma_irq_aie) {
 		userCallback = data->gmac_inst->listener;
@@ -276,7 +338,6 @@ static void eth_fmsh_isr(const struct device *dev)
 			userCallback = data->gmac_inst->listener;
 		} else if (reg_val_32b & gdma_irq_tx) {
 			FMSH_DEBUG("Transmit interrupt");
-			k_sem_give(&data->tx_sem);
 			clearIrqMask = gdma_irq_tx;
 			callbackArg = gdma_irq_tx;
 			userCallback = data->gmac_inst->txCallback;
@@ -591,10 +652,16 @@ static int eth_fmsh_init(const struct device *dev)
 	struct eth_fmsh_data *data = dev->data;
 	const struct eth_fmsh_config *cfg = dev->config;
 	int ret;
+	u16 tx_desc_num = data->gmac_inst->wTxListSize;
 
 	/* 初始化信号量 */
-	k_sem_init(&data->tx_sem, 0, 1);
+	if (tx_desc_num < 2U) {
+		FMSH_ERROR("Invalid Tx descriptor count: %u", tx_desc_num);
+		return -EINVAL;
+	}
+	k_sem_init(&data->tx_sem, tx_desc_num - 1U, tx_desc_num - 1U);
 	k_sem_init(&data->rx_sem, 0, 1);
+	k_mutex_init(&data->tx_mutex);
 
 	data->gmac_inst->pFrmBuffer = data->packet_buffer;
 
