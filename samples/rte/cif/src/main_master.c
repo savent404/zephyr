@@ -13,6 +13,8 @@ LOG_MODULE_REGISTER(main_m, CONFIG_CIF_LOG_LEVEL);
 
 extern struct context ctx_;
 
+static int master_sock = -1;
+
 static void parse_cmd(void)
 {
 	switch (ctx_.cmd) {
@@ -385,6 +387,9 @@ static void handle_open_ports_echo(int sock)
 		if (!open_ports[i].active) {
 			continue;
 		}
+		if (CIF_IS_ASYNC_PORT(open_ports[i].port)) {
+			continue;
+		}
 
 		struct sockaddr_cif port_addr = {
 			.cif_family = AF_CIF,
@@ -398,7 +403,8 @@ static void handle_open_ports_echo(int sock)
 		int ret;
 
 		now = k_cyc_to_us_near32(k_cycle_get_32());
-		ret = recvfrom(sock, buf, sizeof(buf), 0, (struct sockaddr *)&port_addr, &addr_len);
+		ret = recvfrom(sock, buf, sizeof(buf), MSG_DONTWAIT, (struct sockaddr *)&port_addr,
+			       &addr_len);
 		later = k_cyc_to_us_near32(k_cycle_get_32());
 		if (ret > 0) {
 			open_ports[i].stat_received++;
@@ -566,6 +572,69 @@ static void handle_io_buf(uint8_t *in_buf, uint8_t *out_buf, size_t *out_buf_len
 	}
 }
 
+static bool handle_jitter_one(int sock, uint8_t target, uint8_t sid, uint8_t port, const char *name,
+			      bool reset)
+{
+	struct cif_jitter_stats stat = {
+		.target = target,
+		.slot = sid,
+		.port = port,
+	};
+	socklen_t stat_len = sizeof(stat);
+	int ret;
+
+	if (reset) {
+		ret = setsockopt(sock, SOL_CIF_RAW, CIF_OPT_JITTER, &stat, sizeof(stat));
+		if (ret < 0) {
+			LOG_ERR("Failed to reset jitter for %s SID: %d, Port: %d, errno: %d", name,
+				sid, port, errno);
+			return false;
+		}
+		LOG_INF("Jitter reset - %s SID: %d, Port: %d", name, sid, port);
+		return true;
+	}
+
+	ret = getsockopt(sock, SOL_CIF_RAW, CIF_OPT_JITTER, &stat, &stat_len);
+	if (ret < 0) {
+		LOG_ERR("Failed to get jitter for %s SID: %d, Port: %d, errno: %d", name, sid, port,
+			errno);
+		return false;
+	}
+
+	LOG_INF("Jitter - %s SID: %d, Port: %d, cycle_us: %u, samples: %u, "
+		"last_jitter_us: %d, avg_abs_jitter_us: %u, max_abs_jitter_us: %u, "
+		"avg_err_0p1ms: %u, max_err_0p1ms: %u, expect_us: %llu, real_us: %llu",
+		name, sid, port, stat.cycle_us, stat.samples, stat.last_jitter_us,
+		stat.avg_abs_jitter_us, stat.max_abs_jitter_us, stat.avg_err_0p1ms,
+		stat.max_err_0p1ms, (unsigned long long)stat.expect_timestamp_us,
+		(unsigned long long)stat.real_timestamp_us);
+	return true;
+}
+
+bool master_handle_jitter(bool reset)
+{
+	int sock = master_sock;
+
+	if (sock < 0) {
+		LOG_ERR("Master socket is not ready");
+		return false;
+	}
+
+	handle_jitter_one(sock, CIF_JITTER_TARGET_SYNC, 0, 0, "sync", reset);
+	handle_jitter_one(sock, CIF_JITTER_TARGET_BC, 0, 0, "bc", reset);
+
+	for (int i = 0; i < MAX_OPEN_PORTS; i++) {
+		if (!open_ports[i].active || !CIF_IS_ASYNC_PORT(open_ports[i].port)) {
+			continue;
+		}
+
+		handle_jitter_one(sock, CIF_JITTER_TARGET_PORT, open_ports[i].sid,
+				  open_ports[i].port, "async", reset);
+	}
+
+	return true;
+}
+
 static bool handle_stats_state(int sock)
 {
 	LOG_INF("Getting port statistics:");
@@ -644,6 +713,7 @@ static int main_master(void)
 		LOG_ERR("Failed to create CIF socket, errno %d", errno);
 		return -1;
 	}
+	master_sock = sock;
 
 	/* Step 2: bind the CIF socket */
 	struct sockaddr_cif local = {
@@ -699,8 +769,13 @@ static int main_master(void)
 	while (1) {
 		/* Terminate condition */
 		if (k_sem_take(&ctx_.terminate_sem, K_NO_WAIT) == 0) {
+			master_sock = -1;
 			zsock_close(sock);
 			break;
+		}
+
+		if (ctx_.cmd != CMD_NONE) {
+			parse_cmd();
 		}
 
 		switch (ctx_.state) {

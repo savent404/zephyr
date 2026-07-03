@@ -62,10 +62,12 @@ static int cif_cmd(const struct shell *sh, size_t argc, char **argv)
 		_cmd_perf = CMD_PERF,
 		_cmd_list = CMD_LIST,
 		_cmd_stat = CMD_STATS,
+		_cmd_jitter,
 	} cmd = _cmd_none;
 	const char *subcmd = argv[1];
 	static const char *const subcmd_list[] = {
-		"discovery", "config", "io", "switch", "open", "close", "perf", "list", "stats",
+		"discovery", "config", "io",   "switch", "open",
+		"close",     "perf",   "list", "stats",  "jitter",
 	};
 	for (int i = 0; i < ARRAY_SIZE(subcmd_list); i++) {
 		if (!strcmp(subcmd, subcmd_list[i])) {
@@ -298,6 +300,22 @@ static int cif_cmd(const struct shell *sh, size_t argc, char **argv)
 		handled = true;
 		break;
 	}
+	case _cmd_jitter: {
+		if (ctx_.target_role != role_master) {
+			shell_print(sh, "Only master can get jitter");
+			return -EINVAL;
+		}
+		if (argc > 3 || (argc == 3 && strcmp(argv[2], "reset"))) {
+			shell_print(sh, "Invalid arguments");
+			return -EINVAL;
+		}
+		if (!master_handle_jitter(argc == 3)) {
+			shell_print(sh, "Failed to handle jitter");
+			return -EIO;
+		}
+		handled = true;
+		break;
+	}
 	case _cmd_none:
 	default:
 		break;
@@ -315,6 +333,7 @@ static int cif_cmd(const struct shell *sh, size_t argc, char **argv)
 		shell_print(sh, "\tlist");
 		shell_print(sh, "\tperf on|off");
 		shell_print(sh, "\tstats");
+		shell_print(sh, "\tjitter [reset]");
 		return 0;
 	}
 

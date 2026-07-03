@@ -17,7 +17,7 @@
 #define MCB_POLL_TIME           (655 * 1000)          /* 655us */
 #define SYNC_CYCLE_TIME         20000                 /* 20ms */
 #define SYNC_TIMEOUT_TIME       (SYNC_CYCLE_TIME * 5) /* 100ms (5 times of SYNC_CYCLE_TIME) */
-#define ASYNC_INTERVAL_TIME     (40 * 1000)           /* 40ms */
+#define ASYNC_INTERVAL_TIME     (5 * 1000)            /* 5ms */
 #define ASYNC_TIMEOUT_TIME      (200 * 1000)          /* 200ms */
 #define ASYNC_DEFAULT_BANDWIDTH 0                     /* no limitation */
 
@@ -73,7 +73,7 @@ struct context {
 #define CMD_PERF      7
 #define CMD_LIST      8
 #define CMD_STATS     9
-	uint32_t cmd;
+	volatile uint32_t cmd;
 
 #define STATE_IDLE     0
 #define STATE_DISCOVER 1
@@ -108,6 +108,7 @@ int slave_start(void);
 int slave_cancel(void);
 int master_start(void);
 int master_cancel(void);
+bool master_handle_jitter(bool reset);
 
 /**
  * @brief This function is used to get and handle extra errors.
