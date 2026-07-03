@@ -21,6 +21,17 @@ namespace cif
 
 struct work_queue_if {
 	using id = int32_t;
+	struct jitter_stats {
+		uint32_t cycle_us;
+		uint32_t samples;
+		int32_t last_jitter_us;
+		uint32_t avg_abs_jitter_us;
+		uint32_t max_abs_jitter_us;
+		uint32_t avg_err_0p1ms;
+		uint32_t max_err_0p1ms;
+		uint64_t expect_timestamp_us;
+		uint64_t real_timestamp_us;
+	};
 	virtual ~work_queue_if()
 	{
 	}
@@ -45,6 +56,11 @@ struct work_queue_if {
 	 */
 	virtual void reset(id id, uint32_t delay) = 0;
 
+	virtual void reset_guarded(id wq, uint32_t delay, id guard_id, uint32_t guard_threshold)
+	{
+		reset(wq, delay);
+	}
+
 	/**
 	 * @brief cancel a enqueued function
 	 *
@@ -63,6 +79,16 @@ struct work_queue_if {
 	 * @return false if the function is not ready to be called
 	 */
 	virtual bool is_ready(id id) = 0;
+
+	virtual bool get_jitter(id, jitter_stats *)
+	{
+		return false;
+	}
+
+	virtual bool reset_jitter(id)
+	{
+		return false;
+	}
 
 	/* virtual locking functions */
 	virtual void lock() = 0;

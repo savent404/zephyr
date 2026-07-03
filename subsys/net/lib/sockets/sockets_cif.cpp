@@ -491,6 +491,56 @@ static int cif_sock_getsockopt(struct net_context *ctx, int level, int optname, 
 		memcpy(stat->val, ps.raw, sizeof(ps.raw));
 		return 0;
 	} break;
+	case CIF_OPT_JITTER: {
+		auto stat = reinterpret_cast<cif_jitter_stats *>(optval);
+		ldp_basic::jitter_target target;
+		ldp_basic::conn conn = -1;
+		work_queue_if::jitter_stats wq_stat = {};
+
+		if (*optlen < sizeof(*stat)) {
+			NET_DBG("Invalid jitter stats: buffer too small");
+			return -EINVAL;
+		}
+		*optlen = sizeof(*stat);
+
+		switch (stat->target) {
+		case CIF_JITTER_TARGET_SYNC:
+			target = ldp_basic::JITTER_TARGET_SYNC;
+			break;
+		case CIF_JITTER_TARGET_BC:
+			target = ldp_basic::JITTER_TARGET_BC;
+			break;
+		case CIF_JITTER_TARGET_PORT: {
+			target = ldp_basic::JITTER_TARGET_CONN;
+			auto conn_it = usr_data->conns.find(conn_idx{stat->port, stat->slot});
+
+			if (conn_it == usr_data->conns.end()) {
+				NET_DBG("Connection not found");
+				return -ENOENT;
+			}
+			conn = conn_it->second.conn_id;
+			break;
+		}
+		default:
+			return -EINVAL;
+		}
+
+		if (!(*usr_data->ldp).get_jitter(target, conn, &wq_stat)) {
+			NET_DBG("Failed to get jitter");
+			return -ENOENT;
+		}
+
+		stat->cycle_us = wq_stat.cycle_us;
+		stat->samples = wq_stat.samples;
+		stat->last_jitter_us = wq_stat.last_jitter_us;
+		stat->avg_abs_jitter_us = wq_stat.avg_abs_jitter_us;
+		stat->max_abs_jitter_us = wq_stat.max_abs_jitter_us;
+		stat->avg_err_0p1ms = wq_stat.avg_err_0p1ms;
+		stat->max_err_0p1ms = wq_stat.max_err_0p1ms;
+		stat->expect_timestamp_us = wq_stat.expect_timestamp_us;
+		stat->real_timestamp_us = wq_stat.real_timestamp_us;
+		return 0;
+	} break;
 	default: {
 		return -ENOTSUP;
 	}
@@ -574,6 +624,44 @@ static int cif_sock_setsockopt(struct net_context *ctx, int level, int optname, 
 			NET_DBG("No matched connection");
 		}
 		return matched_cnt ? 0 : -ENOENT;
+	}
+	case CIF_OPT_JITTER: {
+		auto stat = reinterpret_cast<const cif_jitter_stats *>(optval);
+		ldp_basic::jitter_target target;
+		ldp_basic::conn conn = -1;
+
+		if (optlen != sizeof(cif_jitter_stats)) {
+			NET_DBG("Invalid jitter stats");
+			return -EINVAL;
+		}
+
+		switch (stat->target) {
+		case CIF_JITTER_TARGET_SYNC:
+			target = ldp_basic::JITTER_TARGET_SYNC;
+			break;
+		case CIF_JITTER_TARGET_BC:
+			target = ldp_basic::JITTER_TARGET_BC;
+			break;
+		case CIF_JITTER_TARGET_PORT: {
+			target = ldp_basic::JITTER_TARGET_CONN;
+			auto conn_it = usr_data->conns.find(conn_idx{stat->port, stat->slot});
+
+			if (conn_it == usr_data->conns.end()) {
+				NET_DBG("Connection not found");
+				return -ENOENT;
+			}
+			conn = conn_it->second.conn_id;
+			break;
+		}
+		default:
+			return -EINVAL;
+		}
+
+		if (!(*usr_data->ldp).reset_jitter(target, conn)) {
+			NET_DBG("Failed to reset jitter");
+			return -ENOENT;
+		}
+		return 0;
 	}
 	default: {
 		NET_DBG("Invalid option %d", optname);

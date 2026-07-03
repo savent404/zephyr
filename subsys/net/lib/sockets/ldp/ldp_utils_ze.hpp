@@ -109,14 +109,26 @@ struct ldp_wq: public work_queue_if {
 		int id;
 		int32_t cycle;
 		int32_t left;
+		uint64_t expect_start_us;
+		uint64_t last_expect_start_us;
+		uint64_t real_start_us;
+		int32_t last_jitter_us;
+		uint64_t sum_abs_jitter_us;
+		uint32_t max_abs_jitter_us;
+		uint32_t jitter_samples;
+		uint32_t reset_gen;
 	};
 	using work_list = std::list<work_item>;
 
 	virtual id enqueue(void (*fn)(void *, void *), void *arg1, void *arg2,
 			   uint32_t cycle) override;
 	virtual void reset(id wq, uint32_t cycle) override;
+	virtual void reset_guarded(id wq, uint32_t cycle, id guard_wq,
+				   uint32_t guard_threshold) override;
 	virtual void cancel(id wq) override;
 	virtual bool is_ready(id wq) override;
+	virtual bool get_jitter(id wq, jitter_stats *stat) override;
+	virtual bool reset_jitter(id wq) override;
 
 	virtual void lock() override
 	{

@@ -37,6 +37,7 @@ struct ldp_master: public ldp_basic {
 
 	static inline const float bc_ratio_sync = 0.3f;
 	static inline const float bc_ratio_async = 0.2f;
+	static inline const uint32_t sync_reset_guard_us = 0U;
 
 	explicit ldp_master(mcb_if *mcb, work_queue_if *wq) : mcb_(mcb), work_queue_(wq)
 	{
@@ -297,7 +298,62 @@ struct ldp_master: public ldp_basic {
 		return true;
 	}
 
+	virtual bool get_jitter(jitter_target target, conn c, work_queue_if::jitter_stats *stat)
+	{
+		work_queue_if::id wq_id;
+
+		if (!get_jitter_wq_id(target, c, &wq_id)) {
+			return false;
+		}
+		return work_queue_->get_jitter(wq_id, stat);
+	}
+
+	virtual bool reset_jitter(jitter_target target, conn c)
+	{
+		work_queue_if::id wq_id;
+
+		if (!get_jitter_wq_id(target, c, &wq_id)) {
+			return false;
+		}
+		return work_queue_->reset_jitter(wq_id);
+	}
+
       protected:
+	bool get_jitter_wq_id(jitter_target target, conn c, work_queue_if::id *wq_id)
+	{
+		if (!wq_id) {
+			return false;
+		}
+
+		if (target == JITTER_TARGET_SYNC) {
+			*wq_id = sync_wq_id_;
+			return true;
+		}
+
+		if (target == JITTER_TARGET_BC) {
+			*wq_id = bc_wq_id_;
+			return true;
+		}
+
+		std::shared_lock lock(conns_lock);
+		auto async_it = std::find_if(async_conns_.begin(), async_conns_.end(),
+					     [c](const async_conn_ptr &ci) { return ci->id == c; });
+		auto sync_it = std::find_if(sync_conns_.begin(), sync_conns_.end(),
+					    [c](const sync_conn_ptr &ci) { return ci->id == c; });
+
+		if (async_it != async_conns_.end()) {
+			*wq_id = (*async_it)->wq_id;
+			return true;
+		}
+
+		if (sync_it != sync_conns_.end()) {
+			*wq_id = sync_wq_id_;
+			return true;
+		}
+
+		return false;
+	}
+
 	struct async_buf {
 		uint8_t *buf;
 		uint16_t len;
@@ -1103,7 +1159,7 @@ struct ldp_master: public ldp_basic {
 		}
 
 		if (comback_to_me) {
-			work_queue_->reset(ci->wq_id, 0);
+			work_queue_->reset_guarded(ci->wq_id, 0, sync_wq_id_, sync_reset_guard_us);
 			ci->timeout_cnt++; /* next iteration won't cost a cycle */
 		} else {
 			work_queue_->reset(ci->wq_id, ci->cycle);

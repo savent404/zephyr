@@ -70,6 +70,7 @@ enum {
 	CIF_OPT_ERROR,
 	CIF_OPT_INFO,
 	CIF_OPT_STATS,
+	CIF_OPT_JITTER,
 	CIF_OPT_MAX,
 };
 
@@ -161,6 +162,31 @@ struct cif_stats {
 	/* directory: OUT */
 	uint32_t valid_mask;
 	uint32_t val[CIF_STAT_ID_MAX]; /* statistic information */
+};
+
+enum cif_jitter_target {
+	CIF_JITTER_TARGET_SYNC,
+	CIF_JITTER_TARGET_BC,
+	CIF_JITTER_TARGET_PORT,
+};
+
+struct cif_jitter_stats {
+	/* direction: IN */
+	uint8_t target;
+	uint8_t slot;
+	uint8_t port;
+	uint8_t reserved;
+
+	/* direction: OUT */
+	uint32_t cycle_us;
+	uint32_t samples;
+	int32_t last_jitter_us;
+	uint32_t avg_abs_jitter_us;
+	uint32_t max_abs_jitter_us;
+	uint32_t avg_err_0p1ms;
+	uint32_t max_err_0p1ms;
+	uint64_t expect_timestamp_us;
+	uint64_t real_timestamp_us;
 };
 
 /** @endcond */

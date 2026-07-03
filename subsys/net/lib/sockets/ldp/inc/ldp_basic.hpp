@@ -100,6 +100,11 @@ struct port_stat {
 
 struct ldp_basic {
 	using conn = int32_t;
+	enum jitter_target {
+		JITTER_TARGET_SYNC,
+		JITTER_TARGET_BC,
+		JITTER_TARGET_CONN,
+	};
 	virtual ~ldp_basic()
 	{
 	}
@@ -188,6 +193,16 @@ struct ldp_basic {
 	 * @return bool true if successful, false otherwise
 	 */
 	virtual bool get_statistic(conn c, port_stat* stat) = 0;
+
+	virtual bool get_jitter(jitter_target, conn, work_queue_if::jitter_stats *)
+	{
+		return false;
+	}
+
+	virtual bool reset_jitter(jitter_target, conn)
+	{
+		return false;
+	}
 
 	/**
 	 * @brief get error string
