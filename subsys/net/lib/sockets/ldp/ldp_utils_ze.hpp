@@ -114,7 +114,7 @@ struct ldp_wq: public work_queue_if {
 
 	virtual id enqueue(void (*fn)(void *, void *), void *arg1, void *arg2,
 			   uint32_t cycle) override;
-	virtual void reset(id wq, uint32_t cycle) override;
+	virtual void reset(id wq, uint32_t cycle, uint32_t delay) override;
 	virtual void cancel(id wq) override;
 	virtual bool is_ready(id wq) override;
 

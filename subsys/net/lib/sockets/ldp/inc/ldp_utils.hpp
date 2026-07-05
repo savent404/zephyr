@@ -43,7 +43,7 @@ struct work_queue_if {
 	 * @param id id of the enqueued function
 	 * @param delay new delay in microseconds
 	 */
-	virtual void reset(id id, uint32_t delay) = 0;
+	virtual void reset(id id, uint32_t cycle, uint32_t delay) = 0;
 
 	/**
 	 * @brief cancel a enqueued function

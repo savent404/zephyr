@@ -58,8 +58,11 @@ struct mock_work_queue: public systech::cif::work_queue_if {
 		    (override));
 	MOCK_METHOD(void, cancel, (id id), (override));
 	MOCK_METHOD(bool, is_ready, (id id), (override));
-	virtual void reset(id id, uint32_t delay) override
+	virtual void reset(id id, uint32_t cycle, uint32_t delay) override
 	{
+		(void)id;
+		(void)cycle;
+		(void)delay;
 	}
 };
 struct mock_work_queue_manual: public systech::cif::work_queue_if {
@@ -86,8 +89,11 @@ struct mock_work_queue_manual: public systech::cif::work_queue_if {
 	{
 		items.remove_if([id](const item &i) { return i.id == id; });
 	}
-	virtual void reset(id id, uint32_t delay) override
+	virtual void reset(id id, uint32_t cycle, uint32_t delay) override
 	{
+		(void)id;
+		(void)cycle;
+		(void)delay;
 	}
 	void sync()
 	{
@@ -165,12 +171,12 @@ struct simu_work_queue: public systech::cif::work_queue_if {
 		items.push_back(i);
 		return next_id++;
 	}
-	virtual void reset(id id, uint32_t delay) override
+	virtual void reset(id id, uint32_t cycle, uint32_t delay) override
 	{
 		auto it = std::find_if(items.begin(), items.end(),
 				       [id](const item &i) { return i.id == id; });
 		if (it != items.end()) {
-			it->delay = delay;
+			it->delay = cycle;
 			it->time_left = delay;
 		}
 	}

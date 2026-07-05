@@ -45,15 +45,15 @@ void ldp_wq::cancel(id wq)
 	}
 }
 
-void ldp_wq::reset(id wq, uint32_t cycle)
+void ldp_wq::reset(id wq, uint32_t cycle, uint32_t delay)
 {
 	std::lock_guard lock(x_lock_);
 	auto it = std::find_if(work_items_.begin(), work_items_.end(),
 			       [wq](const work_item &wi) { return wi.id == wq; });
 	if (it != work_items_.end()) {
 		it->cycle = (int32_t)cycle;
-		it->left = (int32_t)cycle;
-		LOG_DBG("Reset work item %d, cycle %d", wq, cycle);
+		it->left = (int32_t)delay;
+		LOG_DBG("Reset work item %d, cycle %d, delay %d", wq, cycle, delay);
 	}
 }
 

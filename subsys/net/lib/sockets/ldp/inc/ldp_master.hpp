@@ -98,8 +98,6 @@ struct ldp_master: public ldp_basic {
 	virtual conn create(bool is_async, const ldp_config *config)
 	{
 		conn id;
-		unsigned cycle_time;
-
 		if (!config) {
 			return -LDP_ERR_INVALID;
 		}
@@ -114,17 +112,9 @@ struct ldp_master: public ldp_basic {
 		if (is_async) {
 			auto cfg = static_cast<const ldp_master_async_config *>(config);
 			id = create_async(cfg);
-			cycle_time = cfg->cycle_time;
 		} else {
 			auto cfg = static_cast<const ldp_master_sync_config *>(config);
 			id = create_sync(cfg);
-			cycle_time = cfg->cycle_time;
-		}
-
-		/* update bc interval to minimal cycle of connections */
-		if (id >= 0 && cycle_time > 0 && cycle_time < bc_interval_) {
-			bc_interval_ = cycle_time;
-			work_queue_->reset(bc_wq_id_, bc_interval_);
 		}
 
 		return id;
@@ -271,12 +261,7 @@ struct ldp_master: public ldp_basic {
 	{
 		cycle_time_ = cycle;
 
-		work_queue_->reset(sync_wq_id_, cycle_time_);
-
-		if (cycle_time_ < bc_interval_) {
-			bc_interval_ = cycle_time_;
-			work_queue_->reset(bc_wq_id_, bc_interval_);
-		}
+		work_queue_->reset(sync_wq_id_, cycle_time_, cycle_time_);
 	}
 
 	virtual bool get_statistic(conn c, port_stat *stat)
@@ -450,6 +435,7 @@ struct ldp_master: public ldp_basic {
 		ci->rxid = -1;
 		ci->acked_xid = -1;
 		ci->bc = bc;
+		mcb_->config_port(ci->port, true, true, mcb_if::MCB_MAX_FRAME_LEN);
 		ci->wq_id = work_queue_->enqueue(
 			[](void *arg1, void *arg2) {
 				auto self = static_cast<ldp_master *>(arg1);
@@ -633,6 +619,11 @@ struct ldp_master: public ldp_basic {
 	void configure_port(int port, uint16_t len)
 	{
 		mcb_->config_port(port, true, true, mcb_if::MCB_MAX_FRAME_LEN);
+		configure_tx_len(port, len);
+	}
+
+	void configure_tx_len(int port, uint16_t len)
+	{
 		mcb_->set_tx_len(port, len);
 
 		if (len > mcb_if::MCB_MAX_FRAME_LEN) {
@@ -781,7 +772,9 @@ struct ldp_master: public ldp_basic {
 				       transfer_count);
 				printk("LDP_MASTER: poll timeout, sid=%d, port=%d\n", sid, port);
 			}
-			k_usleep(LDP_POLL_INTERVAL);
+			if (!data_ready && !data_timeout && !port_rejected) {
+				k_usleep(LDP_POLL_INTERVAL);
+			}
 #endif
 		} while (!data_ready && !data_timeout && !port_rejected);
 
@@ -799,6 +792,11 @@ struct ldp_master: public ldp_basic {
 	void sync_handler()
 	{
 		std::shared_lock bus_lock(conns_lock);
+
+		if (sync_conns_.empty()) {
+			work_queue_->reset(sync_wq_id_, cycle_time_, 100 * 1000);
+			return;
+		}
 
 		for (auto &ci : sync_conns_) {
 			std::unique_lock conn_lock(ci->lock);
@@ -985,7 +983,7 @@ struct ldp_master: public ldp_basic {
 			}
 
 			/* Prepare to transmit */
-			configure_port(ci->port, abuf.len + sizeof(ldp_a_header));
+			configure_tx_len(ci->port, abuf.len + sizeof(ldp_a_header));
 
 			uint8_t *tx_buf = mcb_->get_tx_buf(ci->port);
 			uint8_t *tx_data = tx_buf + sizeof(ldp_a_header);
@@ -1112,10 +1110,10 @@ struct ldp_master: public ldp_basic {
 		}
 
 		if (comback_to_me) {
-			work_queue_->reset(ci->wq_id, 0);
+			work_queue_->reset(ci->wq_id, ci->cycle, ci->cycle);
 			ci->timeout_cnt++; /* next iteration won't cost a cycle */
 		} else {
-			work_queue_->reset(ci->wq_id, ci->cycle);
+			work_queue_->reset(ci->wq_id, ci->cycle, ci->cycle);
 		}
 	}
       protected:
@@ -1134,7 +1132,7 @@ struct ldp_master: public ldp_basic {
 	unsigned cycle_time_ = 10000;
 	std::unique_ptr<bc::bc_std> bc_;
 
-	unsigned bc_interval_ = UINT32_MAX;
+	unsigned bc_interval_ = 1000 * 1000; /* 1s */
 
 #if CONFIG_MCB_SYSTECH_HW_WORKAROUND
 	static inline uint32_t LDP_POLL_TIMEOUT = 100;  /* 10ms */
