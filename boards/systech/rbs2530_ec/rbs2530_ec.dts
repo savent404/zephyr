@@ -110,7 +110,6 @@
 		>;
 		gpios = <&gpio2 0 0>;
 		reset_delay = <100>;
-		slave_id = <1>;
 	};
 
 	sf2507_u29: sf2507@1 {
@@ -132,6 +131,5 @@
 		>;
 		gpios = <&gpio2 0 0>;
 		reset_delay = <100>;
-		slave_id = <0>;
 	};
 };

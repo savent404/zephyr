@@ -22,7 +22,6 @@ struct sf2507_config {
 	size_t num_reg_pairs;
 	struct gpio_dt_spec reset_gpio;
 	uint32_t reset_delay;
-	uint16_t slave_id;
 };
 
 struct sf2507_data {
@@ -49,7 +48,7 @@ static int sf2507_write_reg(const struct device *dev, uint16_t addr, uint16_t va
 	struct spi_config spi_cfg = {
 		.frequency = config->bus.config.frequency,
 		.operation = config->bus.config.operation,
-		.slave = config->slave_id,
+		.slave = spi_cs_is_gpio(&config->bus.config) ? 0 : config->bus.config.slave,
 		.cs = config->bus.config.cs,
 	};
 	int ret;
@@ -96,7 +95,7 @@ static int sf2507_read_reg(const struct device *dev, uint16_t addr, uint16_t *va
 	struct spi_config spi_cfg = {
 		.frequency = config->bus.config.frequency,
 		.operation = config->bus.config.operation,
-		.slave = config->slave_id,
+		.slave = spi_cs_is_gpio(&config->bus.config) ? 0 : config->bus.config.slave,
 		.cs = config->bus.config.cs,
 	};
 	int ret;
@@ -211,7 +210,6 @@ static int sf2507_init(const struct device *dev)
 		.num_reg_pairs = ARRAY_SIZE(sf2507_reg_init_##inst),                               \
 		.reset_gpio = GPIO_DT_SPEC_INST_GET_OR(inst, gpios, {0}),                          \
 		.reset_delay = DT_INST_PROP(inst, reset_delay),                                    \
-		.slave_id = DT_INST_PROP(inst, slave_id),                                          \
 	};                                                                                         \
 	static struct sf2507_data sf2507_data_##inst;                                              \
 	DEVICE_DT_INST_DEFINE(inst, sf2507_init, NULL, &sf2507_data_##inst, &sf2507_config_##inst, \

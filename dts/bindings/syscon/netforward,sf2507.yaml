@@ -29,8 +29,3 @@ properties:
       will be used for the reset pin, and the second pin will be used for
       the power down pin. If only one pin is provided, it will be used as
       the reset pin.
-  slave_id:
-    type: int
-    default: 0
-    description: |
-      The identifier of the slave. Default is 0.
