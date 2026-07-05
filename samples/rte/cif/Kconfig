@@ -13,4 +13,50 @@ config CIF_SLAVE_ONLY_RECV
 	  Enable slave only receive mode. In this mode, the CIF will not send any data to the master.
 	  This is useful for testing purposes or when the master is not available.
 
+config CIF_SAMPLE_FAULT_INJECT
+	bool "Enable sample-only slave fault injection shell"
+	default n
+	depends on SHELL
+	help
+	  Enable the sample-only top-level `cif_fault` shell command for deterministic
+	  slave-side recv/send delay injection during issue3 validation.
+
+config CIF_ISSUE3_LATENCY_LOG
+	bool "Enable issue3 async latency logging"
+	default n
+	depends on LOG
+	help
+	  Emit per-attempt ISSUE3_LAT logs from the sample master async path. Keep this
+	  disabled for acceptance and enable it only for targeted measurement images.
+
+config CIF_ISSUE2_SYNC_JITTER_MEASURE
+	bool "Enable issue2 sync jitter summary instrumentation"
+	default n
+	help
+	  Collect summary-only sync scheduler jitter samples in the shared LDP
+	  master and emit one ISSUE2_SYNC_JITTER_SUMMARY line when each sync
+	  connection is torn down. Keep this disabled outside targeted
+	  measurement builds.
+
+config CIF_ASYNC_COMEBACK_LEARNER
+	bool "Enable adaptive async comeback learner"
+	default y
+	help
+	  Enable the issue3 async comeback learner in the shared LDP master. Disable
+	  this to build the prior-comeback A/B variant.
+
+config CIF_SYNC_CYCLE_TIME_US
+	int "Sync cycle time (us)"
+	default 20000
+	range 1 1000000
+	help
+	  Sync cycle time used by the CIF sample master and slave loops.
+
+config CIF_ASYNC_INTERVAL_TIME_US
+	int "Async interval time (us)"
+	default 40000
+	range 1 1000000
+	help
+	  Async interval time used by the CIF sample master.
+
 source "Kconfig.zephyr"
