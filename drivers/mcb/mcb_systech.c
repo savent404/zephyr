@@ -200,7 +200,7 @@ void mcb_systech_tx(const struct device *dev, uint8_t sid, uint8_t port, bool pr
 {
 	struct mcb_systech_data *data = dev->data;
 	uint32_t reg_base = DEVICE_MMIO_NAMED_GET(dev, reg);
-	uint32_t val, wanted;
+	uint32_t val;
 
 	if (port >= MCB_MAX_PORT) {
 		LOG_ERR("Invalid port number");
@@ -221,11 +221,6 @@ void mcb_systech_tx(const struct device *dev, uint8_t sid, uint8_t port, bool pr
 	val |= (preempt ? R_Ack_set : R_Ack_echo) << 2;
 	mcb_write(dev, val, reg_base + MCB_REG_CTRL1);
 
-	wanted = val;
-	val = mcb_read(dev, reg_base + MCB_REG_CTRL1);
-	if (val != wanted) {
-		LOG_WRN("tx reg mismatch, reg: %08x, wanted: %08x", val, wanted);
-	}
 	LOG_DBG("Trigger transmission to sid %d, port %d, len %d", sid, port,
 		mcb_get_tx_len(dev, port));
 	if (mcb_get_tx_len(dev, port)) {
