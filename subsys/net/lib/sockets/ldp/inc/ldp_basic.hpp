@@ -189,6 +189,8 @@ struct ldp_basic {
 	 */
 	virtual bool get_statistic(conn c, port_stat* stat) = 0;
 
+	virtual uint32_t get_rx_port_mask() const = 0;
+
 	/**
 	 * @brief get error string
 	 *

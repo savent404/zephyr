@@ -491,6 +491,17 @@ static int cif_sock_getsockopt(struct net_context *ctx, int level, int optname, 
 		memcpy(stat->val, ps.raw, sizeof(ps.raw));
 		return 0;
 	} break;
+	case CIF_OPT_PORT_RDY_MSK: {
+		if (*optlen < sizeof(cif_ready_map)) {
+			NET_DBG("Invalid ready map: buffer too small");
+			return -EINVAL;
+		}
+		auto ready = reinterpret_cast<cif_ready_map *>(optval);
+
+		ready->ready_mask = (*usr_data->ldp).get_rx_port_mask();
+		*optlen = sizeof(cif_ready_map);
+		return 0;
+	} break;
 	default: {
 		return -ENOTSUP;
 	}

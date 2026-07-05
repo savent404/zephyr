@@ -448,6 +448,13 @@ int mcb_systech_rx_is_ready(const struct device *dev, uint8_t port)
 	return 0;
 }
 
+uint32_t mcb_systech_get_rx_ready_mask(const struct device *dev)
+{
+	uint32_t reg_base = DEVICE_MMIO_NAMED_GET(dev, reg);
+
+	return mcb_read(dev, reg_base + MCB_REG_PORT_RDY_MASK0);
+}
+
 static void mcb_systech_get_mcb_info(const struct device *dev, struct mcb_info *info)
 {
 	const struct mcb_systech_config *cfg = DEV_CFG(dev);
@@ -512,6 +519,7 @@ static const struct mcb_driver_api mcb_systech_api = {
 	.set_tx_len = mcb_systech_set_tx_len,
 	.rx_clr = mcb_systech_rx_clr,
 	.rx_is_ready = mcb_systech_rx_is_ready,
+	.get_rx_ready_mask = mcb_systech_get_rx_ready_mask,
 	.tx = mcb_systech_tx,
 	.get_mcb_info = mcb_systech_get_mcb_info,
 };

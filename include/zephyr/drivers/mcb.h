@@ -136,6 +136,14 @@ typedef void (*mcb_clr_status_t)(const struct device *dev, uint32_t bits);
 typedef int (*mcb_rx_is_ready_t)(const struct device *dev, uint8_t port);
 
 /**
+ *  Get the receive-ready bitmask for ports 0-31
+ *
+ *  dev MCB device instance
+ *  32-bit mask; bit N set means port N has data ready
+ */
+typedef uint32_t (*mcb_get_rx_ready_mask_t)(const struct device *dev);
+
+/**
  * @brief Clear the port's received frame status
  *
  * This function will clear the port's received frame status.
@@ -245,6 +253,7 @@ __subsystem struct mcb_driver_api {
 	mcb_get_status_t get_status;
 	mcb_clr_status_t clr_status;
 	mcb_rx_is_ready_t rx_is_ready;
+	mcb_get_rx_ready_mask_t get_rx_ready_mask;
 	mcb_rx_clr_t rx_clr;
 	mcb_tx_t tx;
 	mcb_get_rx_buf_t get_rx_buf;
@@ -437,6 +446,25 @@ static inline int z_impl_mcb_rx_is_ready(const struct device *dev, uint8_t port)
 	}
 
 	return api->rx_is_ready(dev, port);
+}
+
+/**
+ * @brief Get receive-ready bitmask for ports 0-31
+ *
+ * @param dev MCB device instance
+ * @return 32-bit mask; bit N set means port N is ready
+ */
+__syscall uint32_t mcb_get_rx_ready_mask(const struct device *dev);
+
+static inline uint32_t z_impl_mcb_get_rx_ready_mask(const struct device *dev)
+{
+	const struct mcb_driver_api *api = (const struct mcb_driver_api *)dev->api;
+
+	if (api->get_rx_ready_mask == NULL) {
+		return 0;
+	}
+
+	return api->get_rx_ready_mask(dev);
 }
 
 /**

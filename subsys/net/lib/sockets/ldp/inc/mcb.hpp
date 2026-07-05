@@ -95,6 +95,7 @@ struct mcb_if {
 	virtual void tx(uint8_t port, uint8_t dst_sid, bool r) = 0;
 	virtual bool has_rx(uint8_t port) = 0;
 	virtual void clr_rx(uint8_t port) = 0;
+	virtual uint32_t get_rx_ready_mask() const = 0;
 
 	virtual uint8_t get_sid() = 0;
 

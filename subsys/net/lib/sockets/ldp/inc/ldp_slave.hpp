@@ -301,6 +301,11 @@ template <typename T_cache> struct ldp_slave: public ldp_basic {
 		return false;
 	}
 
+	virtual uint32_t get_rx_port_mask() const
+	{
+		return mcb_->get_rx_ready_mask();
+	}
+
       protected:
 	struct conn_info {
 		conn id;

@@ -82,6 +82,10 @@ struct mcb_zephyr: public mcb_if {
 	{
 		mcb_rx_clr(dev_, port);
 	}
+	uint32_t get_rx_ready_mask() const override
+	{
+		return mcb_get_rx_ready_mask(dev_);
+	}
 
 	uint8_t get_sid() override
 	{

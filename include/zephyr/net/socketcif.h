@@ -70,7 +70,12 @@ enum {
 	CIF_OPT_ERROR,
 	CIF_OPT_INFO,
 	CIF_OPT_STATS,
+	CIF_OPT_PORT_RDY_MSK,
 	CIF_OPT_MAX,
+};
+
+struct cif_ready_map {
+	uint32_t ready_mask; /* bit N=1 means port N has data ready to recvfrom */
 };
 
 struct cif_raw_master_config {

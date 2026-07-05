@@ -155,6 +155,7 @@ struct ldp_master: public ldp_basic {
 				(*sync_it)->rx_buf = nullptr;
 			}
 			bc_->rm_conn(bc);
+			opened_mask_ &= ~BIT((*sync_it)->port);
 			sync_conns_.erase(sync_it);
 		} else {
 			/* call cancel only if wq_id is in the wqs_ */
@@ -173,6 +174,7 @@ struct ldp_master: public ldp_basic {
 				abuf.buf = nullptr;
 			}
 			bc_->rm_conn(bc);
+			opened_mask_ &= ~BIT((*async_it)->port);
 			async_conns_.erase(async_it);
 		}
 		return 0;
@@ -295,6 +297,11 @@ struct ldp_master: public ldp_basic {
 			*stat = (*sync_it)->stat;
 		}
 		return true;
+	}
+
+	virtual uint32_t get_rx_port_mask() const
+	{
+		return mcb_->get_rx_ready_mask() & opened_mask_;
 	}
 
       protected:
@@ -451,6 +458,7 @@ struct ldp_master: public ldp_basic {
 			},
 			this, ci.get(), cfg->cycle_time);
 		wqs_.push_back(ci->wq_id);
+		opened_mask_ |= BIT(cfg->port);
 		async_conns_.push_back(std::move(ci));
 		return next_id_++;
 	}
@@ -498,6 +506,7 @@ struct ldp_master: public ldp_basic {
 		ci->flg_new_data = false;
 		ci->timeout_allowed = cfg->timeout / cfg->cycle_time;
 		ci->timeout_cnt = ci->timeout_allowed;
+		opened_mask_ |= BIT(cfg->port);
 		sync_conns_.push_back(std::move(ci));
 		return next_id_++;
 	}
@@ -1115,6 +1124,7 @@ struct ldp_master: public ldp_basic {
 	T_rwlock conns_lock;
 
 	int32_t next_id_ = 0;
+	uint32_t opened_mask_ = 0;
 	wq_list wqs_;
 	work_queue_if::id sync_wq_id_;
 	work_queue_if::id bc_wq_id_;

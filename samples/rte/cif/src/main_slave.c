@@ -225,51 +225,60 @@ static int slave_task(void)
 
 	/* Goto loop now */
 	while (1) {
+		struct cif_ready_map ready = {};
+		socklen_t ready_len = sizeof(ready);
+
+		ret = getsockopt(sock, SOL_CIF_RAW, CIF_OPT_PORT_RDY_MSK, &ready, &ready_len);
+		if (ret < 0) {
+			LOG_ERR("Failed to query ready ports, errno %d", errno);
+		}
+
+		if (ready.ready_mask == 0) {
+			k_usleep(10);
+			if (k_sem_take(&terminate_sem, K_NO_WAIT) == 0) {
+				zsock_close(sock);
+				break;
+			}
+			continue;
+		}
+
 		socklen_t sl = sizeof(port_cfg);
 		bool new_config = false;
 
-		/* Prepare config data */
-		ret = recvfrom(sock, REG_BUF_MODIFY(config), REG_BUF_LEN(config), 0,
-			       (struct sockaddr *)&port_cfg, &sl);
+		if (ready.ready_mask & BIT(PORT_ID_CFG)) {
+			ret = recvfrom(sock, REG_BUF_MODIFY(config), REG_BUF_LEN(config), 0,
+				       (struct sockaddr *)&port_cfg, &sl);
 
-		if (ret >= 0) {
-			LOG_INF("Received config data");
-			/* Do something with the config data */
-
-			new_config = ret > 0 ? true : false;
-		} else if (errno == EAGAIN) {
-			/* Nothing to do */
-		} else {
-			LOG_ERR("Failed to receive config data, errno %d", errno);
+			if (ret >= 0) {
+				LOG_INF("Received config data");
+				new_config = ret > 0 ? true : false;
+			} else if (errno != EAGAIN) {
+				LOG_ERR("Failed to receive config data, errno %d", errno);
+			}
 		}
 
-		/* If there is new config data, send it back */
 		if (new_config) {
-			/* Update the config data */
 			memcpy(REG_BUF_REG(config), REG_BUF_MODIFY(config), REG_BUF_LEN(config));
 			ret = sendto(sock, REG_BUF_REG(config), REG_BUF_LEN(config), 0,
 				     (struct sockaddr *)&port_cfg, sizeof(port_cfg));
 			if (ret >= 0) {
 				LOG_INF("Sent config data back");
-			} else if (errno == EAGAIN) {
-				/* Nothing to do */
-			} else {
+			} else if (errno != EAGAIN) {
 				LOG_ERR("Failed to send config data, errno %d", errno);
 			}
 		}
 
+		bool new_io = false;
+
 		sl = sizeof(port_io);
-		if (recvfrom(sock, REG_BUF_MODIFY(io), REG_BUF_LEN(io), 0,
+		if ((ready.ready_mask & BIT(PORT_ID_IO)) &&
+		    recvfrom(sock, REG_BUF_MODIFY(io), REG_BUF_LEN(io), 0,
 			     (struct sockaddr *)&port_io, &sl) > 0) {
 			LOG_INF("Received io data");
-
-			/* Do something with the input data (this is only for demo, the actual
-			 * application don't need to do this)
-			 */
 			memcpy(REG_BUF_REG(io), REG_BUF_MODIFY(io), REG_BUF_LEN(io));
+			new_io = true;
 		}
 
-		/* Prepare the output data */
 		REG_BUF_REG(io)[5]++;
 		ret = sendto(sock, REG_BUF_REG(io), REG_BUF_LEN(io), 0, (struct sockaddr *)&port_io,
 			     sizeof(port_io));
@@ -279,13 +288,21 @@ static int slave_task(void)
 
 		int no_job = 0;
 
-		no_job += deal_ethernet_data(sock, PORT_ID_ETH0);
-		no_job += deal_ethernet_data(sock, PORT_ID_ETH1);
-		no_job += deal_ethernet_data(sock, PORT_ID_ETH2);
-		no_job += deal_ethernet_data(sock, PORT_ID_ETH3);
+		if (ready.ready_mask & BIT(PORT_ID_ETH0)) {
+			no_job += deal_ethernet_data(sock, PORT_ID_ETH0);
+		}
+		if (ready.ready_mask & BIT(PORT_ID_ETH1)) {
+			no_job += deal_ethernet_data(sock, PORT_ID_ETH1);
+		}
+		if (ready.ready_mask & BIT(PORT_ID_ETH2)) {
+			no_job += deal_ethernet_data(sock, PORT_ID_ETH2);
+		}
+		if (ready.ready_mask & BIT(PORT_ID_ETH3)) {
+			no_job += deal_ethernet_data(sock, PORT_ID_ETH3);
+		}
 		no_job += handle_extra_errors(sock);
 
-		if (no_job == 0) {
+		if (no_job == 0 && !new_config && !new_io) {
 			k_usleep(10);
 		}
 
