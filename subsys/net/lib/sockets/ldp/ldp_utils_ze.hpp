@@ -57,6 +57,14 @@ struct ze_sem {
 	{
 		k_sem_take(&sem_, K_FOREVER);
 	}
+	bool take(uint32_t timeout_us)
+	{
+		return k_sem_take(&sem_, K_USEC(timeout_us)) == 0;
+	}
+	void reset()
+	{
+		k_sem_reset(&sem_);
+	}
 };
 
 struct ze_mutex {
@@ -142,6 +150,7 @@ struct ldp_wq: public work_queue_if {
 	uint64_t last_update_us_ = 0;
 	uint64_t now_us() const;
 	void account_elapsed(uint64_t now_us);
+	void notify_schedule_update();
 	ze_mutex x_lock_;
 	ze_sem work_sem_;
 };

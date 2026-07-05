@@ -189,6 +189,11 @@ struct ldp_basic {
 	 */
 	virtual bool get_statistic(conn c, port_stat* stat) = 0;
 
+	/**
+	 * @brief Get receive-ready bitmask for ports 0-31
+	 *
+	 * @return 32-bit mask; bit N set means port N has data ready to receive
+	 */
 	virtual uint32_t get_rx_port_mask() const = 0;
 
 	/**

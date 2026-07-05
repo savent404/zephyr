@@ -19,6 +19,24 @@ struct context ctx_ = {0};
 
 struct open_port_s open_ports[MAX_OPEN_PORTS];
 
+K_MSGQ_DEFINE(cif_cmd_msgq, sizeof(struct cif_cmd_req), CIF_CMD_QUEUE_DEPTH, 4);
+
+int cif_cmd_enqueue(const struct cif_cmd_req *req)
+{
+	return k_msgq_put(&cif_cmd_msgq, req, K_NO_WAIT);
+}
+
+bool cif_cmd_dequeue(struct cif_cmd_req *req)
+{
+	return k_msgq_get(&cif_cmd_msgq, req, K_NO_WAIT) == 0;
+}
+
+void cif_cmd_queue_reset(void)
+{
+	k_msgq_purge(&cif_cmd_msgq);
+	ctx_.cmd = CMD_NONE;
+}
+
 int main(void)
 {
 	/* log needs to be initialized first */
@@ -32,6 +50,8 @@ int main(void)
 
 static void unconditional_switch(int role)
 {
+	cif_cmd_queue_reset();
+
 	/* Cancel current role */
 	if (ctx_.target_role == role_master) {
 		master_cancel();
@@ -48,9 +68,22 @@ static void unconditional_switch(int role)
 	ctx_.target_role = role;
 }
 
+static int enqueue_cmd_or_report(const struct shell *sh, const struct cif_cmd_req *req)
+{
+	int ret = cif_cmd_enqueue(req);
+
+	if (ret != 0) {
+		shell_print(sh, "Command queue full");
+		return -ENOMEM;
+	}
+
+	return 0;
+}
+
 static int cif_cmd(const struct shell *sh, size_t argc, char **argv)
 {
 	bool handled = false;
+	struct cif_cmd_req req = {0};
 	enum {
 		_cmd_none = CMD_NONE,
 		_cmd_discovery = CMD_DISCOVERY,
@@ -83,8 +116,11 @@ static int cif_cmd(const struct shell *sh, size_t argc, char **argv)
 			shell_print(sh, "Invalid arguments number");
 			return -EINVAL;
 		}
-		ctx_.cmd = CMD_DISCOVERY;
-		ctx_.target_sid = atoi(argv[2]);
+		req.cmd = CMD_DISCOVERY;
+		req.target_sid = atoi(argv[2]);
+		if (enqueue_cmd_or_report(sh, &req) != 0) {
+			return -ENOMEM;
+		}
 		handled = true;
 	} break;
 	case _cmd_config: {
@@ -96,8 +132,12 @@ static int cif_cmd(const struct shell *sh, size_t argc, char **argv)
 			shell_print(sh, "Invalid arguments number");
 			return -EINVAL;
 		}
-		ctx_.cmd = CMD_CONFIG;
-		ctx_.target_sid = atoi(argv[2]);
+		req.cmd = CMD_CONFIG;
+		req.target_sid = atoi(argv[2]);
+		req.target_opt = ctx_.target_opt;
+		if (enqueue_cmd_or_report(sh, &req) != 0) {
+			return -ENOMEM;
+		}
 		handled = true;
 	} break;
 	case _cmd_io: {
@@ -109,37 +149,40 @@ static int cif_cmd(const struct shell *sh, size_t argc, char **argv)
 			shell_print(sh, "Invalid arguments number");
 			return -EINVAL;
 		}
-		ctx_.cmd = CMD_IO;
-		ctx_.target_sid = atoi(argv[2]);
+		req.cmd = CMD_IO;
+		req.target_sid = atoi(argv[2]);
+		req.target_opt = ctx_.target_opt;
 
 		/* Handle port */
 		if (argc >= 4) {
-			ctx_.target_port = atoi(argv[3]);
+			req.target_port = atoi(argv[3]);
 		} else {
-			ctx_.target_port = PORT_ID_IO;
+			req.target_port = PORT_ID_IO;
 		}
 
 		/* Handle length */
 		if (argc >= 5) {
-			ctx_.initial_data_len = atoi(argv[4]);
+			req.initial_data_len = atoi(argv[4]);
 		} else {
-			ctx_.initial_data_len = 32;
+			req.initial_data_len = 32;
 		}
 
 		/* Handle duration */
 		if (argc >= 6) {
-			ctx_.target_duration = atoi(argv[5]) * 1000;
+			req.target_duration = atoi(argv[5]) * 1000;
 		} else {
-			ctx_.target_duration = 3 * 1000;
+			req.target_duration = 3 * 1000;
 		}
 
 		/* Handle pps */
-		if (argc >= 7 && CIF_IS_ASYNC_PORT(ctx_.target_port)) {
-			ctx_.target_pps = atoi(argv[6]);
+		if (argc >= 7 && CIF_IS_ASYNC_PORT(req.target_port)) {
+			req.target_pps = atoi(argv[6]);
 		} else if (argc >= 7) {
-			ctx_.cmd = CMD_NONE;
 			shell_print(sh, "Invalid port, try async port");
 			return -EINVAL;
+		}
+		if (enqueue_cmd_or_report(sh, &req) != 0) {
+			return -ENOMEM;
 		}
 		handled = true;
 	} break;
@@ -187,24 +230,28 @@ static int cif_cmd(const struct shell *sh, size_t argc, char **argv)
 			shell_print(sh, "Invalid arguments number");
 			return -EINVAL;
 		}
-		ctx_.cmd = CMD_OPEN;
-		ctx_.target_sid = atoi(argv[2]);
-		ctx_.target_port = atoi(argv[3]);
+		req.cmd = CMD_OPEN;
+		req.target_sid = atoi(argv[2]);
+		req.target_port = atoi(argv[3]);
+		req.target_opt = ctx_.target_opt;
 
 		/* Handle initial data */
 		if (argc >= 5) {
-			strncpy((char *)ctx_.initial_data, argv[4], sizeof(ctx_.initial_data) - 1);
-			ctx_.initial_data_len = strlen(argv[4]);
+			strncpy((char *)req.initial_data, argv[4], sizeof(req.initial_data) - 1);
+			req.initial_data_len = strlen(argv[4]);
 		} else {
 			/* Default initial data */
-			strcpy((char *)ctx_.initial_data, "init");
-			ctx_.initial_data_len = 4;
+			strcpy((char *)req.initial_data, "init");
+			req.initial_data_len = 4;
 		}
 		/* Handle check response option */
 		if (argc >= 6 && !strcmp(argv[5], "check")) {
-			ctx_.check_response = true;
+			req.check_response = true;
 		} else {
-			ctx_.check_response = false;
+			req.check_response = false;
+		}
+		if (enqueue_cmd_or_report(sh, &req) != 0) {
+			return -ENOMEM;
 		}
 		handled = true;
 		break;
@@ -218,9 +265,12 @@ static int cif_cmd(const struct shell *sh, size_t argc, char **argv)
 			shell_print(sh, "Invalid arguments number");
 			return -EINVAL;
 		}
-		ctx_.cmd = CMD_CLOSE;
-		ctx_.target_sid = atoi(argv[2]);
-		ctx_.target_port = atoi(argv[3]);
+		req.cmd = CMD_CLOSE;
+		req.target_sid = atoi(argv[2]);
+		req.target_port = atoi(argv[3]);
+		if (enqueue_cmd_or_report(sh, &req) != 0) {
+			return -ENOMEM;
+		}
 		handled = true;
 		break;
 	}
@@ -294,7 +344,10 @@ static int cif_cmd(const struct shell *sh, size_t argc, char **argv)
 			shell_print(sh, "Only master can get stats");
 			return -EINVAL;
 		}
-		ctx_.cmd = CMD_STATS;
+		req.cmd = CMD_STATS;
+		if (enqueue_cmd_or_report(sh, &req) != 0) {
+			return -ENOMEM;
+		}
 		handled = true;
 		break;
 	}

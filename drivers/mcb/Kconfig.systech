@@ -22,6 +22,15 @@ config MCB_SYSTECH_HW_WORKAROUND
 		help
 			This is for HW workaround solutions
 
+config MCB_SYSTECH_TX_CTRL1_VERIFY
+		bool "Verify CTRL1 register after TX trigger"
+		default n
+		depends on MCB_SYSTECH
+		help
+			Enable readback verification of the CTRL1 register after
+			triggering TX. This is intended for debugging register write
+			mismatch issues.
+
 config MCB_SYSTECH_BUFFER_ALIGN
 		int "tx&rx buffer align size"
 		default 1

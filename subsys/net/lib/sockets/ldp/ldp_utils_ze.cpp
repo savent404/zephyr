@@ -24,9 +24,10 @@ ldp_wq::id ldp_wq::enqueue(void (*fn)(void *, void *), void *arg1, void *arg2, u
 	std::lock_guard lock(x_lock_);
 	bool is_empty = work_items_.empty();
 
-	work_item wi = {fn, arg1, arg2, next_id_++, (int32_t)cycle, (int32_t)cycle, 0,
-			PRIORITY_NORMAL};
+	work_item wi = {fn, arg1,           arg2, next_id_++, (int32_t)cycle, (int32_t)cycle,
+			0,  PRIORITY_NORMAL};
 	work_items_.push_back(wi);
+	notify_schedule_update();
 	LOG_INF("Enqueue work item %d", wi.id);
 
 	if (is_empty) {
@@ -42,6 +43,7 @@ void ldp_wq::cancel(id wq)
 			       [wq](const work_item &wi) { return wi.id == wq; });
 	if (it != work_items_.end()) {
 		work_items_.erase(it);
+		notify_schedule_update();
 		LOG_INF("Cancel work item %d", wq);
 	}
 }
@@ -55,6 +57,7 @@ void ldp_wq::reset(id wq, uint32_t cycle, uint32_t delay)
 		it->cycle = (int32_t)cycle;
 		it->left = (int32_t)delay;
 		it->revision++;
+		notify_schedule_update();
 		LOG_DBG("Reset work item %d, cycle %d, delay %d", wq, cycle, delay);
 	}
 }
@@ -66,6 +69,7 @@ void ldp_wq::set_priority(id wq, priority prio)
 			       [wq](const work_item &wi) { return wi.id == wq; });
 	if (it != work_items_.end()) {
 		it->prio = prio;
+		notify_schedule_update();
 	}
 }
 
@@ -109,6 +113,11 @@ void ldp_wq::account_elapsed(uint64_t now_us)
 	}
 }
 
+void ldp_wq::notify_schedule_update()
+{
+	work_sem_.give();
+}
+
 void ldp_wq::schedule()
 {
 	int32_t min_left = INT32_MAX;
@@ -143,11 +152,9 @@ void ldp_wq::schedule()
 			}
 		}
 
-		if (early_id >= 0 && min_left <= 0 &&
-		    next_high_priority_left != INT32_MAX &&
+		if (early_id >= 0 && min_left <= 0 && next_high_priority_left != INT32_MAX &&
 		    ldp_work_item_should_defer_for_priority(selected_priority,
-							    next_high_priority_left,
-							    PRIORITY_HIGH,
+							    next_high_priority_left, PRIORITY_HIGH,
 							    next_high_priority_cycle)) {
 			min_left = next_high_priority_left;
 			early_id = -1;
@@ -183,10 +190,13 @@ void ldp_wq::schedule()
 		} else if (min_left > 0 && early_id < 0 && min_left != INT32_MAX) {
 			sleepTime = static_cast<uint32_t>(min_left);
 		}
+		if (sleepTime) {
+			work_sem_.reset();
+		}
 	}
 
 	if (sleepTime) {
-		k_usleep(sleepTime);
+		work_sem_.take(sleepTime);
 		return;
 	}
 
@@ -201,13 +211,13 @@ void ldp_wq::schedule()
 		if (early_id < 0 || min_left > 0) {
 			if (min_left > 0 && min_left != INT32_MAX) {
 				sleepTime = static_cast<uint32_t>(min_left);
+				work_sem_.reset();
 			}
 		} else {
 			/* Re-find by ID: cancel() or destroy() may have erased the list node. */
-			auto it = std::find_if(work_items_.begin(), work_items_.end(),
-					       [early_id](const work_item &wi) {
-						       return wi.id == early_id;
-					       });
+			auto it = std::find_if(
+				work_items_.begin(), work_items_.end(),
+				[early_id](const work_item &wi) { return wi.id == early_id; });
 			if (it == work_items_.end()) {
 				return;
 			}
@@ -243,15 +253,14 @@ void ldp_wq::schedule()
 				}
 			}
 
-			auto current_it =
-				std::find_if(work_items_.begin(), work_items_.end(),
-					     [early_id](const work_item &wi) {
-						     return wi.id == early_id;
-					     });
+			auto current_it = std::find_if(
+				work_items_.begin(), work_items_.end(),
+				[early_id](const work_item &wi) { return wi.id == early_id; });
 			if (current_it != work_items_.end() && current_it->revision == revision) {
 				if (duration > (uint64_t)current_it->cycle &&
 				    current_it->cycle > 0) {
-					LOG_WRN("work item %d callback time %llu is longer than cycle %d",
+					LOG_WRN("work item %d callback time %llu is longer than "
+						"cycle %d",
 						current_it->id, duration, current_it->cycle);
 				}
 
@@ -269,6 +278,6 @@ void ldp_wq::schedule()
 	}
 
 	if (sleepTime) {
-		k_usleep(sleepTime);
+		work_sem_.take(sleepTime);
 	}
 }

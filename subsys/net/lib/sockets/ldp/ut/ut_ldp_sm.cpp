@@ -47,7 +47,8 @@ simu_mcb::io_mode simu_mcb::io_mode_[max_sid];
 uint32_t simu_mcb::response_delay_us_[max_sid][max_port];
 std::list<void *> mock_mempool::ptrs;
 
-namespace {
+namespace
+{
 
 struct ldp_master_testable: public ldp_master_impl {
 	using ldp_master_impl::ldp_master_impl;
@@ -82,9 +83,9 @@ struct ldp_master_testable: public ldp_master_impl {
 		this->sync_handler();
 	}
 
-#if defined(CONFIG_CIF_ISSUE2_SYNC_JITTER_MEASURE) && CONFIG_CIF_ISSUE2_SYNC_JITTER_MEASURE
-	using ldp_master_impl::issue2_sync_jitter_record_handler_entry;
-	using ldp_master_impl::issue2_sync_jitter_record_tx;
+#if LDP_SYNC_JITTER_MEASURE_ENABLED
+	using ldp_master_impl::sync_jitter_record_handler_entry;
+	using ldp_master_impl::sync_jitter_record_tx;
 
 	sync_conn_info *first_sync_conn()
 	{
@@ -93,8 +94,7 @@ struct ldp_master_testable: public ldp_master_impl {
 #endif
 };
 
-static simu_work_queue::item &require_async_item(simu_work_queue &wq,
-					     const ldp_master_testable &m)
+static simu_work_queue::item &require_async_item(simu_work_queue &wq, const ldp_master_testable &m)
 {
 	auto *item = wq.find_item(m.first_async_wq_id());
 	EXPECT_NE(item, nullptr);
@@ -116,7 +116,7 @@ static void expect_master_payload(ldp_master_testable &m, int conn, const char *
 }
 
 static void pump_until_master_payload(simu_work_queue &wq, ldp_master_testable &m, int conn,
-			      const char *payload, int expected_len, int max_rounds = 8)
+				      const char *payload, int expected_len, int max_rounds = 8)
 {
 	uint8_t rx_buf[32] = {};
 
@@ -135,8 +135,8 @@ static void pump_until_master_payload(simu_work_queue &wq, ldp_master_testable &
 }
 
 static void pump_until_slave_payload(simu_work_queue &wq, ldp_master_testable &m, ldp_slave_impl &s,
-			     int conn, const char *payload, int expected_len,
-			     int max_rounds = 8)
+				     int conn, const char *payload, int expected_len,
+				     int max_rounds = 8)
 {
 	uint8_t rx_buf[32] = {};
 
@@ -155,7 +155,7 @@ static void pump_until_slave_payload(simu_work_queue &wq, ldp_master_testable &m
 }
 
 static void queue_slave_payload(ldp_slave_impl &s, int conn, uint8_t sid, uint8_t port,
-			      const char *payload, uint32_t response_delay_us)
+				const char *payload, uint32_t response_delay_us)
 {
 	using header = ldp_basic::ldp_a_header;
 	auto *tx_hdr = reinterpret_cast<header *>(simu_mcb::tx_buf_[sid][port]);
@@ -171,9 +171,9 @@ static void queue_slave_payload(ldp_slave_impl &s, int conn, uint8_t sid, uint8_
 
 } // namespace
 
-#define NO_TIMEOUT     0x1000'0000
-#define SYNC_PORT(n)   ((0x00 + (n)) & 7)
-#define ASYNC_PORT(n)  ((0x08 + (n)) & 0x1F)
+#define NO_TIMEOUT    0x1000'0000
+#define SYNC_PORT(n)  ((0x00 + (n)) & 7)
+#define ASYNC_PORT(n) ((0x08 + (n)) & 0x1F)
 
 TEST_F(test_ldp_sm, basic_concept)
 {
@@ -994,7 +994,7 @@ TEST_F(test_ldp_sm, async_bandwidth_control)
 	ldp_master_testable m(&bus_m, &wq);
 	ldp_slave_impl s1(&bus_s1), s2(&bus_s2);
 
-	ASSERT_EQ(int(m.bc_ratio_sync * 10), 3); /* max 3 pps for sync */
+	ASSERT_EQ(int(m.bc_ratio_sync * 10), 3);  /* max 3 pps for sync */
 	ASSERT_EQ(int(m.bc_ratio_async * 10), 2); /* at least 2 pps for async */
 
 	int mpu_conn[4], s_conn[4];
@@ -1041,7 +1041,8 @@ TEST_F(test_ldp_sm, async_bandwidth_control)
 
 	uint8_t rx_buf[32];
 	{
-		/* Due to the required bandwidth, the second async port won't be processed for a while */
+		/* Due to the required bandwidth, the second async port won't be processed for a
+		 * while */
 		wq.sync();
 		wq.sync();
 
@@ -1324,7 +1325,6 @@ TEST_F(test_ldp_sm, statistics_async)
 	ASSERT_EQ(m_stat.val(port_stat::STAT_ID_HIST_RX_COUNT_WITH_DATA), 1);
 }
 
-
 TEST_F(test_ldp_sm, async_delay_steady_state_uses_p50_not_p90)
 {
 	simu_work_queue wq;
@@ -1332,7 +1332,8 @@ TEST_F(test_ldp_sm, async_delay_steady_state_uses_p50_not_p90)
 	ldp_master_testable m(&bus_m, &wq);
 	ldp_slave_impl s(&bus_s);
 
-	ldp_master_async_config m_cfg = {ASYNC_PORT(0), 1, 5000, 50000, false, false, false, false, 0};
+	ldp_master_async_config m_cfg = {ASYNC_PORT(0), 1,     5000,  50000, false,
+					 false,         false, false, 0};
 	ldp_slave_async_config s_cfg = {ASYNC_PORT(0), 32};
 	int conn_m = m.create(true, &m_cfg);
 	int conn_s = s.create(true, &s_cfg);
@@ -1361,7 +1362,8 @@ TEST_F(test_ldp_sm, async_delay_first_short_miss_steps_to_guard_then_cycle)
 	ldp_master_testable m(&bus_m, &wq);
 	ldp_slave_impl s(&bus_s);
 
-	ldp_master_async_config m_cfg = {ASYNC_PORT(0), 1, 5000, 50000, false, false, false, false, 0};
+	ldp_master_async_config m_cfg = {ASYNC_PORT(0), 1,     5000,  50000, false,
+					 false,         false, false, 0};
 	ldp_slave_async_config s_cfg = {ASYNC_PORT(0), 32};
 	int conn_m = m.create(true, &m_cfg);
 	int conn_s = s.create(true, &s_cfg);
@@ -1400,7 +1402,8 @@ TEST_F(test_ldp_sm, async_delay_abrupt_rise_uses_latest_sample_for_guard)
 	ldp_master_testable m(&bus_m, &wq);
 	ldp_slave_impl s(&bus_s);
 
-	ldp_master_async_config m_cfg = {ASYNC_PORT(0), 1, 5000, 50000, false, false, false, false, 0};
+	ldp_master_async_config m_cfg = {ASYNC_PORT(0), 1,     5000,  50000, false,
+					 false,         false, false, 0};
 	ldp_slave_async_config s_cfg = {ASYNC_PORT(0), 32};
 	int conn_m = m.create(true, &m_cfg);
 	int conn_s = s.create(true, &s_cfg);
@@ -1408,7 +1411,8 @@ TEST_F(test_ldp_sm, async_delay_abrupt_rise_uses_latest_sample_for_guard)
 	ASSERT_EQ(conn_s, 0);
 
 	for (int i = 0; i < 15; ++i) {
-		char payload[8] = { 'r', 's', 'p', ':', '3', '0', static_cast<char>('0' + (i % 10)), '\0' };
+		char payload[8] = {'r', 's', 'p', ':', '3', '0', static_cast<char>('0' + (i % 10)),
+				   '\0'};
 		m.schedule_bc(1000);
 		queue_slave_payload(s, conn_s, bus_s.sid_, ASYNC_PORT(0), payload, 1000);
 		run_async_round(wq, m);
@@ -1437,7 +1441,8 @@ TEST_F(test_ldp_sm, async_delay_full_cycle_ineffective_streak_clears_history)
 	ldp_master_testable m(&bus_m, &wq);
 	ldp_slave_impl s(&bus_s);
 
-	ldp_master_async_config m_cfg = {ASYNC_PORT(0), 1, 5000, 50000, false, false, false, false, 0};
+	ldp_master_async_config m_cfg = {ASYNC_PORT(0), 1,     5000,  50000, false,
+					 false,         false, false, 0};
 	ldp_slave_async_config s_cfg = {ASYNC_PORT(0), 32};
 	int conn_m = m.create(true, &m_cfg);
 	int conn_s = s.create(true, &s_cfg);
@@ -1445,7 +1450,7 @@ TEST_F(test_ldp_sm, async_delay_full_cycle_ineffective_streak_clears_history)
 	ASSERT_EQ(conn_s, 0);
 
 	for (int i = 0; i < 4; ++i) {
-		char payload[8] = { 'r', 's', 'p', ':', '4', '0', static_cast<char>('0' + i), '\0' };
+		char payload[8] = {'r', 's', 'p', ':', '4', '0', static_cast<char>('0' + i), '\0'};
 		m.schedule_bc(1000);
 		queue_slave_payload(s, conn_s, bus_s.sid_, ASYNC_PORT(0), payload, 3000);
 		run_async_round(wq, m);
@@ -1481,7 +1486,8 @@ TEST_F(test_ldp_sm, async_delay_bc_denial_schedules_full_cycle)
 	ldp_master_testable m(&bus_m, &wq);
 	ldp_slave_impl s(&bus_s);
 
-	ldp_master_async_config m_cfg = {ASYNC_PORT(0), 1, 5000, 50000, false, false, false, false, 1};
+	ldp_master_async_config m_cfg = {ASYNC_PORT(0), 1,     5000,  50000, false,
+					 false,         false, false, 1};
 	ldp_slave_async_config s_cfg = {ASYNC_PORT(0), 32};
 	int conn_m = m.create(true, &m_cfg);
 	int conn_s = s.create(true, &s_cfg);
@@ -1520,10 +1526,10 @@ TEST_F(test_ldp_sm, master_destroy_keeps_ready_mask_while_same_port_still_open)
 	simu_work_queue wq;
 	simu_mcb bus_m(0);
 	ldp_master_testable m(&bus_m, &wq);
-	ldp_master_async_config cfg_a = {ASYNC_PORT(0), 1, 5000, 50000, false, false, false, false,
-					 0};
-	ldp_master_async_config cfg_b = {ASYNC_PORT(0), 2, 5000, 50000, false, false, false, false,
-					 0};
+	ldp_master_async_config cfg_a = {ASYNC_PORT(0), 1,     5000,  50000, false,
+					 false,         false, false, 0};
+	ldp_master_async_config cfg_b = {ASYNC_PORT(0), 2,     5000,  50000, false,
+					 false,         false, false, 0};
 	int conn_a = m.create(true, &cfg_a);
 	int conn_b = m.create(true, &cfg_b);
 
@@ -1567,8 +1573,8 @@ TEST_F(test_ldp_sm, first_async_connection_wakes_bandwidth_control_queue)
 	simu_mcb bus_m(0);
 	ldp_master_testable m(&bus_m, &wq);
 	auto *item = wq.find_item(m.bc_wq_id());
-	ldp_master_async_config cfg = {ASYNC_PORT(0), 1, 5000, 50000, false, false, false, false,
-				       0};
+	ldp_master_async_config cfg = {ASYNC_PORT(0), 1,     5000,  50000, false,
+				       false,         false, false, 0};
 	int conn;
 
 	ASSERT_NE(item, nullptr);
@@ -1578,6 +1584,25 @@ TEST_F(test_ldp_sm, first_async_connection_wakes_bandwidth_control_queue)
 	conn = m.create(true, &cfg);
 	ASSERT_EQ(conn, 0);
 	EXPECT_LT(item->last_reset_delay, item->last_reset_cycle);
+}
+
+TEST_F(test_ldp_sm, sync_cycle_update_keeps_bandwidth_control_interval_above_floor)
+{
+	simu_work_queue wq;
+	simu_mcb bus_m(0);
+	ldp_master_testable m(&bus_m, &wq);
+	auto *item = wq.find_item(m.bc_wq_id());
+
+	ASSERT_NE(item, nullptr);
+	m.set_sync_cycle(5000);
+
+	EXPECT_EQ(item->last_reset_cycle, 1000000u);
+	EXPECT_EQ(item->last_reset_delay, 1000000u);
+
+	m.set_sync_cycle(20000);
+
+	EXPECT_EQ(item->last_reset_cycle, 2000000u);
+	EXPECT_EQ(item->last_reset_delay, 2000000u);
 }
 
 TEST_F(test_ldp_sm, second_sync_connection_does_not_wake_active_sync_queue)
@@ -1608,10 +1633,10 @@ TEST_F(test_ldp_sm, second_async_connection_does_not_wake_active_bandwidth_contr
 	simu_mcb bus_m(0);
 	ldp_master_testable m(&bus_m, &wq);
 	auto *item = wq.find_item(m.bc_wq_id());
-	ldp_master_async_config cfg_a = {ASYNC_PORT(0), 1, 5000, 50000, false, false, false, false,
-				       0};
-	ldp_master_async_config cfg_b = {ASYNC_PORT(1), 1, 5000, 50000, false, false, false, false,
-				       0};
+	ldp_master_async_config cfg_a = {ASYNC_PORT(0), 1,     5000,  50000, false,
+					 false,         false, false, 0};
+	ldp_master_async_config cfg_b = {ASYNC_PORT(1), 1,     5000,  50000, false,
+					 false,         false, false, 0};
 	int conn_a;
 	int conn_b;
 
@@ -1626,7 +1651,7 @@ TEST_F(test_ldp_sm, second_async_connection_does_not_wake_active_bandwidth_contr
 	EXPECT_EQ(item->reset_count, 1u);
 }
 
-#if defined(CONFIG_CIF_ISSUE2_SYNC_JITTER_MEASURE) && CONFIG_CIF_ISSUE2_SYNC_JITTER_MEASURE
+#if LDP_SYNC_JITTER_MEASURE_ENABLED
 TEST_F(test_ldp_sm, sync_jitter_summary_reports_percentiles_on_destroy)
 {
 	simu_work_queue wq;
@@ -1641,20 +1666,20 @@ TEST_F(test_ldp_sm, sync_jitter_summary_reports_percentiles_on_destroy)
 	auto *ci = m.first_sync_conn();
 	ASSERT_NE(ci, nullptr);
 
-	m.issue2_sync_jitter_record_handler_entry(1000);
-	m.issue2_sync_jitter_record_tx(ci, 1000, 1025);
-	m.issue2_sync_jitter_record_handler_entry(2050);
-	m.issue2_sync_jitter_record_tx(ci, 2050, 2060);
-	m.issue2_sync_jitter_record_handler_entry(3010);
-	m.issue2_sync_jitter_record_tx(ci, 3010, 3075);
-	m.issue2_sync_jitter_record_handler_entry(4200);
-	m.issue2_sync_jitter_record_tx(ci, 4200, 4220);
+	m.sync_jitter_record_handler_entry(1000);
+	m.sync_jitter_record_tx(ci, 1000, 1025);
+	m.sync_jitter_record_handler_entry(2050);
+	m.sync_jitter_record_tx(ci, 2050, 2060);
+	m.sync_jitter_record_handler_entry(3010);
+	m.sync_jitter_record_tx(ci, 3010, 3075);
+	m.sync_jitter_record_handler_entry(4200);
+	m.sync_jitter_record_tx(ci, 4200, 4220);
 
 	testing::internal::CaptureStdout();
 	ASSERT_EQ(m.destroy(conn), 0);
 	auto summary = testing::internal::GetCapturedStdout();
 
-	EXPECT_NE(summary.find("ISSUE2_SYNC_JITTER_SUMMARY sid=1 port=0 samples=2 cycle_us=1000"),
+	EXPECT_NE(summary.find("LDP_SYNC_JITTER_SUMMARY sid=1 port=0 samples=2 cycle_us=1000"),
 		  std::string::npos);
 	EXPECT_NE(summary.find("p50_us=40"), std::string::npos);
 	EXPECT_NE(summary.find("p90_us=150"), std::string::npos);
@@ -1676,15 +1701,15 @@ TEST_F(test_ldp_sm, sync_jitter_summary_uses_scheduler_cycle_for_ratio)
 
 	ASSERT_EQ(conn, 0);
 
-	m.issue2_sync_jitter_record_handler_entry(1000);
-	m.issue2_sync_jitter_record_handler_entry(3100);
-	m.issue2_sync_jitter_record_handler_entry(5000);
+	m.sync_jitter_record_handler_entry(1000);
+	m.sync_jitter_record_handler_entry(3100);
+	m.sync_jitter_record_handler_entry(5000);
 
 	testing::internal::CaptureStdout();
 	ASSERT_EQ(m.destroy(conn), 0);
 	auto summary = testing::internal::GetCapturedStdout();
 
-	EXPECT_NE(summary.find("ISSUE2_SYNC_JITTER_SUMMARY sid=1 port=0 samples=1 cycle_us=2000"),
+	EXPECT_NE(summary.find("LDP_SYNC_JITTER_SUMMARY sid=1 port=0 samples=1 cycle_us=2000"),
 		  std::string::npos);
 	EXPECT_NE(summary.find("p50_us=100"), std::string::npos);
 	EXPECT_NE(summary.find("p90_us=100"), std::string::npos);
@@ -1704,16 +1729,16 @@ TEST_F(test_ldp_sm, sync_jitter_summary_ignores_startup_phase_shift)
 
 	ASSERT_EQ(conn, 0);
 
-	m.issue2_sync_jitter_record_handler_entry(1000);
-	m.issue2_sync_jitter_record_handler_entry(5800);
-	m.issue2_sync_jitter_record_handler_entry(6800);
-	m.issue2_sync_jitter_record_handler_entry(7800);
+	m.sync_jitter_record_handler_entry(1000);
+	m.sync_jitter_record_handler_entry(5800);
+	m.sync_jitter_record_handler_entry(6800);
+	m.sync_jitter_record_handler_entry(7800);
 
 	testing::internal::CaptureStdout();
 	ASSERT_EQ(m.destroy(conn), 0);
 	auto summary = testing::internal::GetCapturedStdout();
 
-	EXPECT_NE(summary.find("ISSUE2_SYNC_JITTER_SUMMARY sid=1 port=0 samples=2 cycle_us=1000"),
+	EXPECT_NE(summary.find("LDP_SYNC_JITTER_SUMMARY sid=1 port=0 samples=2 cycle_us=1000"),
 		  std::string::npos);
 	EXPECT_NE(summary.find("p50_us=0"), std::string::npos);
 	EXPECT_NE(summary.find("p90_us=0"), std::string::npos);
@@ -1736,7 +1761,7 @@ TEST_F(test_ldp_sm, sync_jitter_summary_reports_zero_samples_as_fail)
 	ASSERT_EQ(m.destroy(conn), 0);
 	auto summary = testing::internal::GetCapturedStdout();
 
-	EXPECT_NE(summary.find("ISSUE2_SYNC_JITTER_SUMMARY sid=1 port=0 samples=0 cycle_us=1000"),
+	EXPECT_NE(summary.find("LDP_SYNC_JITTER_SUMMARY sid=1 port=0 samples=0 cycle_us=1000"),
 		  std::string::npos);
 	EXPECT_NE(summary.find("pass=0"), std::string::npos);
 	EXPECT_NE(summary.find("overflow=0"), std::string::npos);
@@ -1759,16 +1784,16 @@ TEST_F(test_ldp_sm, sync_jitter_summary_reports_remaining_sync_connections_on_de
 		auto *ci = m.first_sync_conn();
 		ASSERT_NE(ci, nullptr);
 
-		m.issue2_sync_jitter_record_handler_entry(1000);
-		m.issue2_sync_jitter_record_tx(ci, 1000, 1025);
-		m.issue2_sync_jitter_record_handler_entry(2050);
-		m.issue2_sync_jitter_record_tx(ci, 2050, 2060);
-		m.issue2_sync_jitter_record_handler_entry(3010);
-		m.issue2_sync_jitter_record_tx(ci, 3010, 3035);
+		m.sync_jitter_record_handler_entry(1000);
+		m.sync_jitter_record_tx(ci, 1000, 1025);
+		m.sync_jitter_record_handler_entry(2050);
+		m.sync_jitter_record_tx(ci, 2050, 2060);
+		m.sync_jitter_record_handler_entry(3010);
+		m.sync_jitter_record_tx(ci, 3010, 3035);
 	}
 	auto summary = testing::internal::GetCapturedStdout();
 
-	EXPECT_NE(summary.find("ISSUE2_SYNC_JITTER_SUMMARY sid=1 port=0 samples=1 cycle_us=1000"),
+	EXPECT_NE(summary.find("LDP_SYNC_JITTER_SUMMARY sid=1 port=0 samples=1 cycle_us=1000"),
 		  std::string::npos);
 	EXPECT_NE(summary.find("p50_us=40"), std::string::npos);
 	EXPECT_NE(summary.find("p90_us=40"), std::string::npos);

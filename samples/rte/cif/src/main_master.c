@@ -6,6 +6,7 @@
 #include <zephyr/net/socket.h>
 #include <zephyr/net/socketcif.h>
 #include <zephyr/logging/log.h>
+#include <string.h>
 
 #include "cif_main.h"
 
@@ -13,9 +14,25 @@ LOG_MODULE_REGISTER(main_m, CONFIG_CIF_LOG_LEVEL);
 
 extern struct context ctx_;
 
-static void parse_cmd(void)
+static bool parse_cmd(void)
 {
-	switch (ctx_.cmd) {
+	struct cif_cmd_req req;
+
+	if (!cif_cmd_dequeue(&req)) {
+		return false;
+	}
+
+	ctx_.cmd = req.cmd;
+	ctx_.target_sid = req.target_sid;
+	ctx_.target_port = req.target_port;
+	ctx_.target_duration = req.target_duration;
+	ctx_.target_pps = req.target_pps;
+	ctx_.target_opt = req.target_opt;
+	memcpy(ctx_.initial_data, req.initial_data, sizeof(ctx_.initial_data));
+	ctx_.initial_data_len = req.initial_data_len;
+	ctx_.check_response = req.check_response;
+
+	switch (req.cmd) {
 	case CMD_DISCOVERY:
 		ctx_.state = STATE_DISCOVER;
 		break;
@@ -39,6 +56,7 @@ static void parse_cmd(void)
 		break;
 	}
 	ctx_.cmd = CMD_NONE;
+	return true;
 }
 
 static bool dev_discovery(int cif_sock, uint8_t slot)
@@ -256,9 +274,10 @@ int handle_extra_errors(int sock)
 
 static bool handle_idle_state(void)
 {
-	parse_cmd();
-	/* Give up CPU and hand over */
-	k_usleep(SYNC_CYCLE_TIME);
+	if (!parse_cmd()) {
+		/* Give up CPU and hand over */
+		k_usleep(SYNC_CYCLE_TIME);
+	}
 	return true;
 }
 

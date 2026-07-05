@@ -136,10 +136,11 @@ typedef void (*mcb_clr_status_t)(const struct device *dev, uint32_t bits);
 typedef int (*mcb_rx_is_ready_t)(const struct device *dev, uint8_t port);
 
 /**
- *  Get the receive-ready bitmask for ports 0-31
+ * @brief Get the receive-ready bitmask for ports 0-31
  *
- *  dev MCB device instance
- *  32-bit mask; bit N set means port N has data ready
+ * @param dev MCB device instance
+ * @return See the return values for mcb_get_rx_ready_mask()
+ * @see mcb_get_rx_ready_mask()
  */
 typedef uint32_t (*mcb_get_rx_ready_mask_t)(const struct device *dev);
 

@@ -104,6 +104,24 @@ struct context {
 	bool perf_mode;
 };
 
+#define CIF_CMD_QUEUE_DEPTH 32
+
+struct cif_cmd_req {
+	uint32_t cmd;
+	int target_sid;
+	int target_port;
+	uint32_t target_duration;
+	uint32_t target_pps;
+	int target_opt;
+	uint8_t initial_data[64];
+	size_t initial_data_len;
+	bool check_response;
+};
+
+int cif_cmd_enqueue(const struct cif_cmd_req *req);
+bool cif_cmd_dequeue(struct cif_cmd_req *req);
+void cif_cmd_queue_reset(void);
+
 int slave_start(void);
 int slave_cancel(void);
 int master_start(void);

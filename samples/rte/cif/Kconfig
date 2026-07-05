@@ -29,22 +29,6 @@ config CIF_ISSUE3_LATENCY_LOG
 	  Emit per-attempt ISSUE3_LAT logs from the sample master async path. Keep this
 	  disabled for acceptance and enable it only for targeted measurement images.
 
-config CIF_ISSUE2_SYNC_JITTER_MEASURE
-	bool "Enable issue2 sync jitter summary instrumentation"
-	default n
-	help
-	  Collect summary-only sync scheduler jitter samples in the shared LDP
-	  master and emit one ISSUE2_SYNC_JITTER_SUMMARY line when each sync
-	  connection is torn down. Keep this disabled outside targeted
-	  measurement builds.
-
-config CIF_ASYNC_COMEBACK_LEARNER
-	bool "Enable adaptive async comeback learner"
-	default y
-	help
-	  Enable the issue3 async comeback learner in the shared LDP master. Disable
-	  this to build the prior-comeback A/B variant.
-
 config CIF_SYNC_CYCLE_TIME_US
 	int "Sync cycle time (us)"
 	default 20000

@@ -24,27 +24,7 @@
 #include <zephyr/kernel.h>
 #endif
 
-#if defined(CONFIG_CIF_ISSUE2_SYNC_JITTER_MEASURE)
-#if CONFIG_CIF_ISSUE2_SYNC_JITTER_MEASURE
 #define LDP_SYNC_JITTER_MEASURE_ENABLED 1
-#else
-#define LDP_SYNC_JITTER_MEASURE_ENABLED 0
-#endif
-#else
-#define LDP_SYNC_JITTER_MEASURE_ENABLED 0
-#endif
-
-#if defined(CONFIG_CIF_ASYNC_COMEBACK_LEARNER)
-#if CONFIG_CIF_ASYNC_COMEBACK_LEARNER
-#define LDP_ASYNC_COMEBACK_LEARNER_ENABLED 1
-#else
-#define LDP_ASYNC_COMEBACK_LEARNER_ENABLED 0
-#endif
-#elif defined(__ZEPHYR__)
-#define LDP_ASYNC_COMEBACK_LEARNER_ENABLED 0
-#else
-#define LDP_ASYNC_COMEBACK_LEARNER_ENABLED 1
-#endif
 
 namespace systech
 {
@@ -102,7 +82,7 @@ struct ldp_master: public ldp_basic {
 
 		for (auto &ci : sync_conns_) {
 #if LDP_SYNC_JITTER_MEASURE_ENABLED
-			issue2_sync_jitter_emit_summary(ci.get());
+			sync_jitter_emit_summary(ci.get());
 #endif
 			if (ci->tx_buf) {
 				mempool_if::free(ci->tx_buf);
@@ -167,7 +147,7 @@ struct ldp_master: public ldp_basic {
 
 		if (sync_it != sync_conns_.end()) {
 #if LDP_SYNC_JITTER_MEASURE_ENABLED
-			issue2_sync_jitter_emit_summary((*sync_it).get());
+			sync_jitter_emit_summary((*sync_it).get());
 #endif
 			auto bc = (*sync_it)->bc;
 			auto port = (*sync_it)->port;
@@ -296,8 +276,10 @@ struct ldp_master: public ldp_basic {
 	virtual void set_sync_cycle(uint32_t cycle)
 	{
 		cycle_time_ = cycle;
+		bc_interval_ = bc_interval_for_sync_cycle(cycle_time_);
 
 		work_queue_->reset(sync_wq_id_, cycle_time_, cycle_time_);
+		work_queue_->reset(bc_wq_id_, bc_interval_, bc_interval_);
 	}
 
 	virtual bool get_statistic(conn c, port_stat *stat)
@@ -333,7 +315,14 @@ struct ldp_master: public ldp_basic {
 
 	static inline constexpr uint32_t COMEBACK_MIN_DELAY_US = 200;
 	static inline constexpr uint32_t SYNC_IDLE_DELAY_US = 100 * 1000;
+	static inline constexpr uint32_t BC_INTERVAL_US = 1000 * 1000;
+	static inline constexpr uint32_t BC_INTERVAL_FACTOR = 100;
 	static inline constexpr uint8_t COMEBACK_SAMPLE_WINDOW = 16;
+
+	static constexpr uint32_t bc_interval_for_sync_cycle(uint32_t cycle)
+	{
+		return std::max(BC_INTERVAL_US, cycle * BC_INTERVAL_FACTOR);
+	}
 
 	struct async_buf {
 		uint8_t *buf;
@@ -390,7 +379,7 @@ struct ldp_master: public ldp_basic {
 	};
 
 #if LDP_SYNC_JITTER_MEASURE_ENABLED
-	struct issue2_sync_jitter_measurement {
+	struct sync_jitter_measurement {
 		static inline constexpr size_t max_samples = 16384;
 
 		bool started = false;
@@ -411,7 +400,7 @@ struct ldp_master: public ldp_basic {
 		uint16_t tx_len;   /* transmit length */
 		uint16_t rx_len;   /* receive length */
 #if LDP_SYNC_JITTER_MEASURE_ENABLED
-		issue2_sync_jitter_measurement jitter;
+		sync_jitter_measurement jitter;
 #endif
 	};
 
@@ -569,10 +558,11 @@ struct ldp_master: public ldp_basic {
 	uint32_t async_guard_delay_us(const async_conn_info *ci) const
 	{
 		auto base_delay = async_base_delay_us(ci);
-		auto latest_delay = clamp_delay_us(
-			scale_delay_110pct(ci->last_progress_sample_us == 0 ? COMEBACK_MIN_DELAY_US :
-				       ci->last_progress_sample_us),
-			COMEBACK_MIN_DELAY_US, ci->cycle);
+		auto latest_delay =
+			clamp_delay_us(scale_delay_110pct(ci->last_progress_sample_us == 0
+								  ? COMEBACK_MIN_DELAY_US
+								  : ci->last_progress_sample_us),
+				       COMEBACK_MIN_DELAY_US, ci->cycle);
 		auto p90_delay = ci->useful_sample_count == 0 ? latest_delay : ci->p90_delay_us;
 
 		return clamp_delay_us(std::max(base_delay, std::max(p90_delay, latest_delay)),
@@ -581,7 +571,9 @@ struct ldp_master: public ldp_basic {
 
 	void refresh_opened_port_mask(unsigned port)
 	{
-		auto port_in_use = [port](const auto &ci) { return ci->port == port; };
+		auto port_in_use = [port](const auto &ci) {
+			return static_cast<unsigned>(ci->port) == port;
+		};
 		auto bit = port_mask_bit(port);
 
 		if (std::any_of(sync_conns_.begin(), sync_conns_.end(), port_in_use) ||
@@ -626,13 +618,13 @@ struct ldp_master: public ldp_basic {
 		auto p90_sample = sorted[percentile_index(ci->useful_sample_count, 90)];
 
 		ci->p50_delay_us = clamp_delay_us(scale_delay_110pct(p50_sample),
-					      COMEBACK_MIN_DELAY_US, ci->cycle);
+						  COMEBACK_MIN_DELAY_US, ci->cycle);
 		ci->p90_delay_us = clamp_delay_us(scale_delay_110pct(p90_sample),
-					      COMEBACK_MIN_DELAY_US, ci->cycle);
+						  COMEBACK_MIN_DELAY_US, ci->cycle);
 	}
 
 #if LDP_SYNC_JITTER_MEASURE_ENABLED
-	static uint64_t issue2_sync_jitter_now_us()
+	static uint64_t sync_jitter_now_us()
 	{
 #if defined(__ZEPHYR__)
 		return k_ticks_to_us_near64(k_uptime_ticks());
@@ -644,14 +636,14 @@ struct ldp_master: public ldp_basic {
 #endif
 	}
 
-	static uint32_t issue2_sync_jitter_abs_diff_us(uint64_t lhs, uint64_t rhs)
+	static uint32_t sync_jitter_abs_diff_us(uint64_t lhs, uint64_t rhs)
 	{
 		auto diff = lhs >= rhs ? lhs - rhs : rhs - lhs;
 
 		return static_cast<uint32_t>(std::min<uint64_t>(diff, UINT32_MAX));
 	}
 
-	void issue2_sync_jitter_record_handler_entry(uint64_t actual_us)
+	void sync_jitter_record_handler_entry(uint64_t actual_us)
 	{
 		for (auto &ci : sync_conns_) {
 			auto &measurement = ci->jitter;
@@ -671,9 +663,9 @@ struct ldp_master: public ldp_basic {
 
 			measurement.expected_us += std::max(measurement.cycle_us, 1u);
 			auto jitter_us =
-				issue2_sync_jitter_abs_diff_us(actual_us, measurement.expected_us);
+				sync_jitter_abs_diff_us(actual_us, measurement.expected_us);
 
-			if (measurement.sample_count < issue2_sync_jitter_measurement::max_samples) {
+			if (measurement.sample_count < sync_jitter_measurement::max_samples) {
 				measurement.samples_us[measurement.sample_count++] = jitter_us;
 			} else {
 				measurement.overflow = true;
@@ -681,18 +673,16 @@ struct ldp_master: public ldp_basic {
 		}
 	}
 
-	void issue2_sync_jitter_record_tx(sync_conn_info *ci, uint64_t handler_entry_us,
-					  uint64_t tx_us)
+	void sync_jitter_record_tx(sync_conn_info *ci, uint64_t handler_entry_us, uint64_t tx_us)
 	{
 		auto &measurement = ci->jitter;
-		auto handler_to_tx_us =
-			issue2_sync_jitter_abs_diff_us(tx_us, handler_entry_us);
+		auto handler_to_tx_us = sync_jitter_abs_diff_us(tx_us, handler_entry_us);
 
 		measurement.max_handler_to_tx_us =
 			std::max(measurement.max_handler_to_tx_us, handler_to_tx_us);
 	}
 
-	void issue2_sync_jitter_emit_summary(sync_conn_info *ci) const
+	void sync_jitter_emit_summary(sync_conn_info *ci) const
 	{
 		auto &measurement = ci->jitter;
 		uint32_t p50_us = 0;
@@ -702,12 +692,17 @@ struct ldp_master: public ldp_basic {
 		if (measurement.sample_count > 0) {
 			std::sort(measurement.samples_us.begin(),
 				  measurement.samples_us.begin() + measurement.sample_count);
-			p50_us = measurement.samples_us[percentile_index(measurement.sample_count, 50)];
-			p90_us = measurement.samples_us[percentile_index(measurement.sample_count, 90)];
+			p50_us =
+				measurement
+					.samples_us[percentile_index(measurement.sample_count, 50)];
+			p90_us =
+				measurement
+					.samples_us[percentile_index(measurement.sample_count, 90)];
 			max_us = measurement.samples_us[measurement.sample_count - 1u];
 		}
 
-		auto cycle_us = std::max(measurement.cycle_us ? measurement.cycle_us : ci->cycle, 1u);
+		auto cycle_us =
+			std::max(measurement.cycle_us ? measurement.cycle_us : ci->cycle, 1u);
 		auto ratio_x100 =
 			(static_cast<uint64_t>(max_us) * 10000u + cycle_us / 2u) / cycle_us;
 		bool pass = (measurement.sample_count > 0u) && !measurement.overflow &&
@@ -715,7 +710,7 @@ struct ldp_master: public ldp_basic {
 			     static_cast<uint64_t>(cycle_us) * 5u);
 
 #if defined(__ZEPHYR__)
-		printk("ISSUE2_SYNC_JITTER_SUMMARY sid=%d port=%d samples=%lu cycle_us=%u "
+		printk("LDP_SYNC_JITTER_SUMMARY sid=%d port=%d samples=%lu cycle_us=%u "
 		       "p50_us=%u p90_us=%u max_us=%u ratio_max_pct=%llu.%02llu pass=%d "
 		       "overflow=%d max_handler_to_tx_us=%u\n",
 		       ci->sid, ci->port, static_cast<unsigned long>(measurement.sample_count),
@@ -724,14 +719,14 @@ struct ldp_master: public ldp_basic {
 		       static_cast<unsigned long long>(ratio_x100 % 100u), pass ? 1 : 0,
 		       measurement.overflow ? 1 : 0, measurement.max_handler_to_tx_us);
 #else
-		std::printf("ISSUE2_SYNC_JITTER_SUMMARY sid=%d port=%d samples=%lu cycle_us=%u "
-			   "p50_us=%u p90_us=%u max_us=%u ratio_max_pct=%llu.%02llu pass=%d "
-			   "overflow=%d max_handler_to_tx_us=%u\n",
-			   ci->sid, ci->port, static_cast<unsigned long>(measurement.sample_count),
-			   cycle_us, p50_us, p90_us, max_us,
-			   static_cast<unsigned long long>(ratio_x100 / 100u),
-			   static_cast<unsigned long long>(ratio_x100 % 100u), pass ? 1 : 0,
-			   measurement.overflow ? 1 : 0, measurement.max_handler_to_tx_us);
+		std::printf("LDP_SYNC_JITTER_SUMMARY sid=%d port=%d samples=%lu cycle_us=%u "
+			    "p50_us=%u p90_us=%u max_us=%u ratio_max_pct=%llu.%02llu pass=%d "
+			    "overflow=%d max_handler_to_tx_us=%u\n",
+			    ci->sid, ci->port, static_cast<unsigned long>(measurement.sample_count),
+			    cycle_us, p50_us, p90_us, max_us,
+			    static_cast<unsigned long long>(ratio_x100 / 100u),
+			    static_cast<unsigned long long>(ratio_x100 % 100u), pass ? 1 : 0,
+			    measurement.overflow ? 1 : 0, measurement.max_handler_to_tx_us);
 #endif
 	}
 #endif
@@ -1083,17 +1078,19 @@ struct ldp_master: public ldp_basic {
 	void sync_handler()
 	{
 #if LDP_SYNC_JITTER_MEASURE_ENABLED
-		auto handler_entry_us = issue2_sync_jitter_now_us();
+		auto handler_entry_us = sync_jitter_now_us();
 #endif
 		std::shared_lock bus_lock(conns_lock);
 
 		if (sync_conns_.empty()) {
+			/* No sync connection is active, slow down the sync handler until one is
+			 * added. */
 			work_queue_->reset(sync_wq_id_, cycle_time_, SYNC_IDLE_DELAY_US);
 			return;
 		}
 
 #if LDP_SYNC_JITTER_MEASURE_ENABLED
-		issue2_sync_jitter_record_handler_entry(handler_entry_us);
+		sync_jitter_record_handler_entry(handler_entry_us);
 #endif
 
 		for (auto &ci : sync_conns_) {
@@ -1133,8 +1130,8 @@ struct ldp_master: public ldp_basic {
 
 				cache_if::wmb(); /* Make sure buffer is updated */
 #if LDP_SYNC_JITTER_MEASURE_ENABLED
-				issue2_sync_jitter_record_tx(ci.get(), handler_entry_us,
-						      issue2_sync_jitter_now_us());
+				sync_jitter_record_tx(ci.get(), handler_entry_us,
+						      sync_jitter_now_us());
 #endif
 				ci->stat.val(port_stat::STAT_ID_HIST_XFER_COUNT)++;
 				sid = ci->sid;
@@ -1146,8 +1143,8 @@ struct ldp_master: public ldp_basic {
 
 			/* Wait for response without blocking user send on the connection lock. */
 			bool data_ready, data_timeout, port_rejected;
-			uint32_t status =
-				wait_for_bus_operation(port, sid, data_ready, data_timeout, port_rejected);
+			uint32_t status = wait_for_bus_operation(port, sid, data_ready,
+								 data_timeout, port_rejected);
 
 			/* Process received data */
 			uint8_t *rx_buf = mcb_->get_rx_buf(port);
@@ -1157,8 +1154,8 @@ struct ldp_master: public ldp_basic {
 				std::unique_lock conn_lock(ci->lock);
 				bool data_processed = false;
 				if (data_ready && rx_len) {
-					data_processed =
-						process_received_data_sync(ci.get(), rx_buf, rx_len);
+					data_processed = process_received_data_sync(ci.get(),
+										    rx_buf, rx_len);
 					mcb_->clr_rx(port);
 				}
 
@@ -1285,13 +1282,9 @@ struct ldp_master: public ldp_basic {
 		std::unique_lock conn_lock(ci->lock);
 		bool reset_timeout_flag = false;
 		bool flg_wait_for_tx = false;
-#if LDP_ASYNC_COMEBACK_LEARNER_ENABLED
 		bool granted_short_retry = false;
 		uint32_t next_delay_us = ci->cycle;
 		auto had_short_schedule = ci->last_schedule_delay_us < ci->cycle;
-#else
-		bool comeback_to_me = false;
-#endif
 
 		do {
 			if (!bc_->try_grant(ci->bc, 1)) {
@@ -1341,7 +1334,7 @@ struct ldp_master: public ldp_basic {
 			/* Wait for response */
 			bool data_ready, data_timeout, p_error;
 			uint32_t status = wait_for_bus_operation(ci->port, ci->sid, data_ready,
-							 data_timeout, p_error);
+								 data_timeout, p_error);
 
 			auto sample_us = static_cast<uint32_t>(std::min<uint64_t>(
 				std::chrono::duration_cast<std::chrono::microseconds>(
@@ -1365,18 +1358,16 @@ struct ldp_master: public ldp_basic {
 								 we got a response */
 				}
 				if (!rx_result.is_rx_conflict && ci->flg_rx_conflict) {
-					ci->flg_rx_conflict =
-						false; /* Clear conflict flag if we are not on the
-						  first request */
+					ci->flg_rx_conflict = false; /* Clear conflict flag if we
+								are not on the first request */
 				}
 			}
 
-			auto useful_progress =
-				rx_result.is_new_rsp || (rx_result.is_ack_rsp && !rx_result.is_ack_boring);
+			auto useful_progress = rx_result.is_new_rsp ||
+					       (rx_result.is_ack_rsp && !rx_result.is_ack_boring);
 
 			/* Process response and update state */
 			if (useful_progress) {
-#if LDP_ASYNC_COMEBACK_LEARNER_ENABLED
 				async_push_sample(ci, sample_us);
 				ci->short_retry_level = 0;
 				ci->ineffective_full_cycle_streak = 0;
@@ -1385,11 +1376,6 @@ struct ldp_master: public ldp_basic {
 					next_delay_us = async_base_delay_us(ci);
 					granted_short_retry = next_delay_us < ci->cycle;
 				}
-#else
-				if (bc_->try_grant(ci->bc, 1)) {
-					comeback_to_me = true;
-				}
-#endif
 
 				if (rx_result.is_new_rsp && ci->flg_wait_for_rx) {
 					ci->flg_wait_for_rx = false;
@@ -1399,7 +1385,6 @@ struct ldp_master: public ldp_basic {
 					flg_wait_for_tx = false;
 					reset_timeout_flag = true;
 				}
-#if LDP_ASYNC_COMEBACK_LEARNER_ENABLED
 			} else if (rx_result.is_rx_conflict) {
 				ci->short_retry_level = 0;
 				ci->ineffective_full_cycle_streak = 0;
@@ -1424,13 +1409,6 @@ struct ldp_master: public ldp_basic {
 					async_reset_history(ci);
 				}
 			}
-#else
-			}
-
-			if (rx_result.is_rx_conflict && bc_->try_grant(ci->bc, 1)) {
-				comeback_to_me = true;
-			}
-#endif
 
 			if (rx_result.is_ack_rsp && !rx_result.is_ack_boring) {
 				/* Slave accepted the previous transmit data */
@@ -1479,19 +1457,11 @@ struct ldp_master: public ldp_basic {
 			manage_timeout(ci, reset_timeout_flag);
 		}
 
-#if LDP_ASYNC_COMEBACK_LEARNER_ENABLED
 		work_queue_->reset(ci->wq_id, ci->cycle, next_delay_us);
 		ci->last_schedule_delay_us = next_delay_us;
 		if (granted_short_retry) {
 			ci->timeout_cnt++; /* next iteration won't cost a cycle */
 		}
-#else
-		work_queue_->reset(ci->wq_id, ci->cycle, ci->cycle);
-		ci->last_schedule_delay_us = ci->cycle;
-		if (comeback_to_me) {
-			ci->timeout_cnt++;
-		}
-#endif
 	}
 
       protected:
@@ -1510,7 +1480,7 @@ struct ldp_master: public ldp_basic {
 	unsigned cycle_time_ = 10000;
 	std::unique_ptr<bc::bc_std> bc_;
 
-	unsigned bc_interval_ = 1000 * 1000; /* 1s */
+	unsigned bc_interval_ = BC_INTERVAL_US;
 
 #if CONFIG_MCB_SYSTECH_HW_WORKAROUND
 	static inline uint32_t LDP_POLL_TIMEOUT = 100;  /* 10ms */
