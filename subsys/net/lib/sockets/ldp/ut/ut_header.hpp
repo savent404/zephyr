@@ -6,7 +6,9 @@
 
 #include "ldp.hpp"
 
+#include <chrono>
 #include <gmock/gmock.h>
+#include <thread>
 
 struct dummy_cache {
 	static inline void rmb()
@@ -126,6 +128,18 @@ struct mock_mcb: public systech::cif::mcb_if {
 	MOCK_METHOD(void, tx, (uint8_t port, uint8_t dst_sid, bool r), (override));
 	MOCK_METHOD(bool, has_rx, (uint8_t port), (override));
 	MOCK_METHOD(void, clr_rx, (uint8_t port), (override));
+	virtual uint32_t get_rx_ready_mask() const override
+	{
+		uint32_t mask = 0;
+
+		for (uint8_t port = 0; port < MCB_MAX_PORT; ++port) {
+			if (data_ready_[port]) {
+				mask |= static_cast<uint32_t>(1u << port);
+			}
+		}
+
+		return mask;
+	}
 	virtual uint8_t get_sid() override
 	{
 		return sid_;
@@ -158,6 +172,10 @@ struct simu_work_queue: public systech::cif::work_queue_if {
 		void *arg2;
 		uint32_t delay;
 		int32_t time_left;
+		uint32_t last_reset_cycle;
+		uint32_t last_reset_delay;
+		uint32_t reset_count;
+		uint32_t fire_count;
 		unsigned id;
 	};
 	using items_t = std::list<item>;
@@ -167,7 +185,16 @@ struct simu_work_queue: public systech::cif::work_queue_if {
 	virtual id enqueue(void (*fn)(void *, void *), void *arg1, void *arg2,
 			   uint32_t delay) override
 	{
-		item i{fn, arg1, arg2, delay, (int32_t)delay, next_id};
+		item i{fn,
+		       arg1,
+		       arg2,
+		       delay,
+		       (int32_t)delay,
+		       delay,
+		       delay,
+		       0,
+		       0,
+		       next_id};
 		items.push_back(i);
 		return next_id++;
 	}
@@ -178,6 +205,9 @@ struct simu_work_queue: public systech::cif::work_queue_if {
 		if (it != items.end()) {
 			it->delay = cycle;
 			it->time_left = delay;
+			it->last_reset_cycle = cycle;
+			it->last_reset_delay = delay;
+			it->reset_count++;
 		}
 	}
 	virtual void cancel(id id) override
@@ -209,6 +239,7 @@ struct simu_work_queue: public systech::cif::work_queue_if {
 
 			if (ptr && min_time_left <= 0) {
 				ptr->time_left = ptr->delay;
+				ptr->fire_count++;
 				ptr->fn(ptr->arg1, ptr->arg2);
 			}
 
@@ -221,6 +252,18 @@ struct simu_work_queue: public systech::cif::work_queue_if {
 		} while (things_to_do);
 
 		printf("=================================\n");
+	}
+	const item *find_item(id id) const
+	{
+		auto it = std::find_if(items.begin(), items.end(),
+				       [id](const item &i) { return i.id == id; });
+		return it == items.end() ? nullptr : &(*it);
+	}
+	item *find_item(id id)
+	{
+		auto it = std::find_if(items.begin(), items.end(),
+				       [id](const item &i) { return i.id == id; });
+		return it == items.end() ? nullptr : &(*it);
 	}
 	MOCK_METHOD(bool, is_ready, (id id), (override));
 };
@@ -319,6 +362,18 @@ struct simu_mcb: public systech::cif::mcb_if {
 	{
 		data_ready_[sid_][port] = false;
 	}
+	virtual uint32_t get_rx_ready_mask() const override
+	{
+		uint32_t mask = 0;
+
+		for (uint8_t port = 0; port < max_port; ++port) {
+			if (data_ready_[sid_][port]) {
+				mask |= static_cast<uint32_t>(1u << port);
+			}
+		}
+
+		return mask;
+	}
 	virtual void tx(uint8_t port, uint8_t dst_sid, bool r) override
 	{
 		EXPECT_EQ(role_[sid_], master);
@@ -366,6 +421,11 @@ struct simu_mcb: public systech::cif::mcb_if {
 				rx_len_[sid_][port] = 0;
 				break;
 			}
+			auto response_delay = response_delay_us_[dst_sid][port];
+			if (response_delay > 0) {
+				std::this_thread::sleep_for(
+					std::chrono::microseconds(response_delay));
+			}
 			EXPECT_EQ(write_allowed_[sid_][port], true);
 			EXPECT_GE(max_rx_[sid_][port], tx_len_[dst_sid][port]);
 			memcpy(rx_buf_[sid_][port], tx_buf_[dst_sid][port], tx_len_[dst_sid][port]);
@@ -409,6 +469,7 @@ struct simu_mcb: public systech::cif::mcb_if {
 		memset(status_, 0, sizeof(status_));
 		memset(role_, 0, sizeof(role_));
 		memset(io_mode_, 0, sizeof(io_mode_));
+		memset(response_delay_us_, 0, sizeof(response_delay_us_));
 		for (auto &m : io_mode_) {
 			m = dead;
 		}
@@ -427,6 +488,7 @@ struct simu_mcb: public systech::cif::mcb_if {
 	static uint32_t status_[max_sid];
 	static role role_[max_sid];
 	static io_mode io_mode_[max_sid];
+	static uint32_t response_delay_us_[max_sid][max_port];
 	uint32_t bus_pps_;
 };
 

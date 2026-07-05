@@ -13,11 +13,26 @@
 
 #include "ldp_basic.hpp"
 #include "ldp_bc.hpp"
+
+#include <array>
+#include <chrono>
 #if CONFIG_MCB_SYSTECH_HW_WORKAROUND
 #include <zephyr/kernel.h>
 #endif
 
 #include <shared_mutex>
+
+#if defined(CONFIG_CIF_ASYNC_COMEBACK_LEARNER)
+#if CONFIG_CIF_ASYNC_COMEBACK_LEARNER
+#define LDP_ASYNC_COMEBACK_LEARNER_ENABLED 1
+#else
+#define LDP_ASYNC_COMEBACK_LEARNER_ENABLED 0
+#endif
+#elif defined(__ZEPHYR__)
+#define LDP_ASYNC_COMEBACK_LEARNER_ENABLED 0
+#else
+#define LDP_ASYNC_COMEBACK_LEARNER_ENABLED 1
+#endif
 
 namespace systech
 {
@@ -136,6 +151,7 @@ struct ldp_master: public ldp_basic {
 
 		if (sync_it != sync_conns_.end()) {
 			auto bc = (*sync_it)->bc;
+			auto port = (*sync_it)->port;
 			if ((*sync_it)->tx_buf) {
 				mempool_if::free((*sync_it)->tx_buf);
 				(*sync_it)->tx_buf = nullptr;
@@ -145,12 +161,13 @@ struct ldp_master: public ldp_basic {
 				(*sync_it)->rx_buf = nullptr;
 			}
 			bc_->rm_conn(bc);
-			opened_mask_ &= ~BIT((*sync_it)->port);
 			sync_conns_.erase(sync_it);
+			refresh_opened_port_mask(port);
 		} else {
 			/* call cancel only if wq_id is in the wqs_ */
 			auto wq_it = std::find(wqs_.begin(), wqs_.end(), (*async_it)->wq_id);
 			auto bc = (*async_it)->bc;
+			auto port = (*async_it)->port;
 			if (wq_it != wqs_.end()) {
 				work_queue_->cancel((*async_it)->wq_id);
 				wqs_.remove((*async_it)->wq_id);
@@ -164,8 +181,8 @@ struct ldp_master: public ldp_basic {
 				abuf.buf = nullptr;
 			}
 			bc_->rm_conn(bc);
-			opened_mask_ &= ~BIT((*async_it)->port);
 			async_conns_.erase(async_it);
+			refresh_opened_port_mask(port);
 		}
 		return 0;
 	}
@@ -290,6 +307,15 @@ struct ldp_master: public ldp_basic {
 	}
 
       protected:
+	static constexpr uint32_t port_mask_bit(unsigned port)
+	{
+		return static_cast<uint32_t>(1u << port);
+	}
+
+	static inline constexpr uint32_t COMEBACK_MIN_DELAY_US = 200;
+	static inline constexpr uint32_t SYNC_IDLE_DELAY_US = 100 * 1000;
+	static inline constexpr uint8_t COMEBACK_SAMPLE_WINDOW = 16;
+
 	struct async_buf {
 		uint8_t *buf;
 		uint16_t len;
@@ -330,6 +356,15 @@ struct ldp_master: public ldp_basic {
 		int rxid;          /* last received transaction id, -1 means no response received */
 		uint8_t acked_xid; /* last received transaction id from slave, -1 means no response
 				      received yet */
+		uint32_t last_schedule_delay_us;
+		uint32_t last_progress_sample_us;
+		uint32_t p50_delay_us;
+		uint32_t p90_delay_us;
+		uint8_t short_retry_level;
+		uint8_t ineffective_full_cycle_streak;
+		std::array<uint32_t, COMEBACK_SAMPLE_WINDOW> useful_samples_us;
+		uint8_t useful_sample_count;
+		uint8_t useful_sample_head;
 
 		std::list<async_buf> rx_bufs; /* received buffers */
 		std::list<async_buf> tx_bufs; /* transmit buffers */
@@ -393,6 +428,7 @@ struct ldp_master: public ldp_basic {
 	conn create_async(const ldp_master_async_config *config)
 	{
 		auto cfg = static_cast<const ldp_master_async_config *>(config);
+		bool was_empty = async_conns_.empty();
 		auto ci = std::make_unique<async_conn_info>();
 		auto bc = std::make_shared<bc::conn_item>(
 			cfg->pps > 0 ? bc_mode::BC_MODE_ASYNC : bc_mode::BC_MODE_ASYNC_AUTO,
@@ -434,6 +470,15 @@ struct ldp_master: public ldp_basic {
 		ci->xid = LDP_INITIAL_XID;
 		ci->rxid = -1;
 		ci->acked_xid = -1;
+		ci->last_schedule_delay_us = ci->cycle;
+		ci->last_progress_sample_us = 0;
+		ci->p50_delay_us = COMEBACK_MIN_DELAY_US;
+		ci->p90_delay_us = COMEBACK_MIN_DELAY_US;
+		ci->short_retry_level = 0;
+		ci->ineffective_full_cycle_streak = 0;
+		ci->useful_samples_us.fill(0);
+		ci->useful_sample_count = 0;
+		ci->useful_sample_head = 0;
 		ci->bc = bc;
 		mcb_->config_port(ci->port, true, true, mcb_if::MCB_MAX_FRAME_LEN);
 		ci->wq_id = work_queue_->enqueue(
@@ -444,14 +489,115 @@ struct ldp_master: public ldp_basic {
 			},
 			this, ci.get(), cfg->cycle_time);
 		wqs_.push_back(ci->wq_id);
-		opened_mask_ |= BIT(cfg->port);
+		opened_mask_ |= port_mask_bit(cfg->port);
 		async_conns_.push_back(std::move(ci));
+		if (was_empty) {
+			work_queue_->reset(bc_wq_id_, bc_interval_, 0);
+		}
 		return next_id_++;
+	}
+
+	static uint8_t percentile_index(uint8_t count, uint8_t percent)
+	{
+		auto rank = (static_cast<uint16_t>(count) * percent + 99u) / 100u;
+
+		if (rank == 0) {
+			rank = 1;
+		}
+
+		return static_cast<uint8_t>(rank - 1u);
+	}
+
+	static uint32_t scale_delay_110pct(uint32_t delay_us)
+	{
+		auto scaled = static_cast<uint64_t>(delay_us) * 11u;
+
+		return static_cast<uint32_t>((scaled + 9u) / 10u);
+	}
+
+	static uint32_t clamp_delay_us(uint32_t delay_us, uint32_t floor_us, uint32_t cycle_us)
+	{
+		return std::min(cycle_us, std::max(floor_us, delay_us));
+	}
+
+	uint32_t async_base_delay_us(const async_conn_info *ci) const
+	{
+		if (ci->useful_sample_count == 0) {
+			return std::min(ci->cycle, COMEBACK_MIN_DELAY_US);
+		}
+
+		return ci->p50_delay_us;
+	}
+
+	uint32_t async_guard_delay_us(const async_conn_info *ci) const
+	{
+		auto base_delay = async_base_delay_us(ci);
+		auto latest_delay = clamp_delay_us(
+			scale_delay_110pct(ci->last_progress_sample_us == 0 ? COMEBACK_MIN_DELAY_US :
+				       ci->last_progress_sample_us),
+			COMEBACK_MIN_DELAY_US, ci->cycle);
+		auto p90_delay = ci->useful_sample_count == 0 ? latest_delay : ci->p90_delay_us;
+
+		return clamp_delay_us(std::max(base_delay, std::max(p90_delay, latest_delay)),
+				      base_delay, ci->cycle);
+	}
+
+	void refresh_opened_port_mask(unsigned port)
+	{
+		auto port_in_use = [port](const auto &ci) { return ci->port == port; };
+		auto bit = port_mask_bit(port);
+
+		if (std::any_of(sync_conns_.begin(), sync_conns_.end(), port_in_use) ||
+		    std::any_of(async_conns_.begin(), async_conns_.end(), port_in_use)) {
+			opened_mask_ |= bit;
+		} else {
+			opened_mask_ &= ~bit;
+		}
+	}
+
+	void async_reset_history(async_conn_info *ci)
+	{
+		ci->last_progress_sample_us = 0;
+		ci->p50_delay_us = COMEBACK_MIN_DELAY_US;
+		ci->p90_delay_us = COMEBACK_MIN_DELAY_US;
+		ci->short_retry_level = 0;
+		ci->ineffective_full_cycle_streak = 0;
+		ci->useful_sample_count = 0;
+		ci->useful_sample_head = 0;
+		ci->useful_samples_us.fill(0);
+	}
+
+	void async_push_sample(async_conn_info *ci, uint32_t sample_us)
+	{
+		std::array<uint32_t, COMEBACK_SAMPLE_WINDOW> sorted = {};
+		auto slot = ci->useful_sample_head;
+
+		ci->last_progress_sample_us = sample_us;
+		ci->useful_samples_us[slot] = sample_us;
+		ci->useful_sample_head = (slot + 1u) % COMEBACK_SAMPLE_WINDOW;
+		if (ci->useful_sample_count < COMEBACK_SAMPLE_WINDOW) {
+			ci->useful_sample_count++;
+		}
+
+		for (uint8_t i = 0; i < ci->useful_sample_count; ++i) {
+			sorted[i] = ci->useful_samples_us[i];
+		}
+
+		std::sort(sorted.begin(), sorted.begin() + ci->useful_sample_count);
+
+		auto p50_sample = sorted[percentile_index(ci->useful_sample_count, 50)];
+		auto p90_sample = sorted[percentile_index(ci->useful_sample_count, 90)];
+
+		ci->p50_delay_us = clamp_delay_us(scale_delay_110pct(p50_sample),
+					      COMEBACK_MIN_DELAY_US, ci->cycle);
+		ci->p90_delay_us = clamp_delay_us(scale_delay_110pct(p90_sample),
+					      COMEBACK_MIN_DELAY_US, ci->cycle);
 	}
 
 	conn create_sync(const ldp_master_sync_config *config)
 	{
 		auto cfg = static_cast<const ldp_master_sync_config *>(config);
+		bool was_empty = sync_conns_.empty();
 		auto ci = std::make_unique<sync_conn_info>();
 		auto bc = std::make_shared<bc::conn_item>(bc_mode::BC_MODE_SYNC,
 							  1'000'000 / cfg->cycle_time, 1);
@@ -492,8 +638,11 @@ struct ldp_master: public ldp_basic {
 		ci->flg_new_data = false;
 		ci->timeout_allowed = cfg->timeout / cfg->cycle_time;
 		ci->timeout_cnt = ci->timeout_allowed;
-		opened_mask_ |= BIT(cfg->port);
+		opened_mask_ |= port_mask_bit(cfg->port);
 		sync_conns_.push_back(std::move(ci));
+		if (was_empty) {
+			work_queue_->reset(sync_wq_id_, cycle_time_, 0);
+		}
 		return next_id_++;
 	}
 
@@ -794,7 +943,7 @@ struct ldp_master: public ldp_basic {
 		std::shared_lock bus_lock(conns_lock);
 
 		if (sync_conns_.empty()) {
-			work_queue_->reset(sync_wq_id_, cycle_time_, 100 * 1000);
+			work_queue_->reset(sync_wq_id_, cycle_time_, SYNC_IDLE_DELAY_US);
 			return;
 		}
 
@@ -960,11 +1109,19 @@ struct ldp_master: public ldp_basic {
 
 	void async_handler(async_conn_info *ci)
 	{
+		using steady_clock = std::chrono::steady_clock;
+
 		std::shared_lock bus_lock(conns_lock);
 		std::unique_lock conn_lock(ci->lock);
 		bool reset_timeout_flag = false;
-		bool comback_to_me = false;
 		bool flg_wait_for_tx = false;
+#if LDP_ASYNC_COMEBACK_LEARNER_ENABLED
+		bool granted_short_retry = false;
+		uint32_t next_delay_us = ci->cycle;
+		auto had_short_schedule = ci->last_schedule_delay_us < ci->cycle;
+#else
+		bool comeback_to_me = false;
+#endif
 
 		do {
 			if (!bc_->try_grant(ci->bc, 1)) {
@@ -1007,14 +1164,20 @@ struct ldp_master: public ldp_basic {
 			tx_hdr->magic = LDP_MAGIC;
 
 			cache_if::wmb(); /* Make sure buffer is updated */
+			auto tx_started = steady_clock::now();
 			mcb_->tx(ci->port, ci->sid, ci->preempt);
 			ci->stat.val(port_stat::STAT_ID_HIST_XFER_COUNT)++;
 
 			/* Wait for response */
 			bool data_ready, data_timeout, p_error;
 			uint32_t status = wait_for_bus_operation(ci->port, ci->sid, data_ready,
-								 data_timeout, p_error);
+							 data_timeout, p_error);
 
+			auto sample_us = static_cast<uint32_t>(std::min<uint64_t>(
+				std::chrono::duration_cast<std::chrono::microseconds>(
+					steady_clock::now() - tx_started)
+					.count(),
+				static_cast<uint64_t>(UINT32_MAX)));
 			AsyncRxResult rx_result = {};
 
 			/* Process received data */
@@ -1029,23 +1192,34 @@ struct ldp_master: public ldp_basic {
 
 				if (ci->flg_is_first_req) {
 					ci->flg_is_first_req = false; /* Reset first request flag if
-									 we got a response */
+								 we got a response */
 				}
 				if (!rx_result.is_rx_conflict && ci->flg_rx_conflict) {
 					ci->flg_rx_conflict =
 						false; /* Clear conflict flag if we are not on the
-							  first request */
+						  first request */
 				}
 			}
 
-			/* Process response and update state */
-			if (rx_result.is_new_rsp ||
-			    (rx_result.is_ack_rsp && !rx_result.is_ack_boring)) {
+			auto useful_progress =
+				rx_result.is_new_rsp || (rx_result.is_ack_rsp && !rx_result.is_ack_boring);
 
-				/* Grant more resource if progress made */
+			/* Process response and update state */
+			if (useful_progress) {
+#if LDP_ASYNC_COMEBACK_LEARNER_ENABLED
+				async_push_sample(ci, sample_us);
+				ci->short_retry_level = 0;
+				ci->ineffective_full_cycle_streak = 0;
+
 				if (bc_->try_grant(ci->bc, 1)) {
-					comback_to_me = true;
+					next_delay_us = async_base_delay_us(ci);
+					granted_short_retry = next_delay_us < ci->cycle;
 				}
+#else
+				if (bc_->try_grant(ci->bc, 1)) {
+					comeback_to_me = true;
+				}
+#endif
 
 				if (rx_result.is_new_rsp && ci->flg_wait_for_rx) {
 					ci->flg_wait_for_rx = false;
@@ -1055,12 +1229,38 @@ struct ldp_master: public ldp_basic {
 					flg_wait_for_tx = false;
 					reset_timeout_flag = true;
 				}
+#if LDP_ASYNC_COMEBACK_LEARNER_ENABLED
+			} else if (rx_result.is_rx_conflict) {
+				ci->short_retry_level = 0;
+				ci->ineffective_full_cycle_streak = 0;
+
+				if (bc_->try_grant(ci->bc, 1)) {
+					next_delay_us = async_base_delay_us(ci);
+					granted_short_retry = next_delay_us < ci->cycle;
+				}
+			} else if (had_short_schedule) {
+				if (ci->short_retry_level == 0 && bc_->try_grant(ci->bc, 1)) {
+					next_delay_us = async_guard_delay_us(ci);
+					ci->short_retry_level = 1;
+					granted_short_retry = next_delay_us < ci->cycle;
+				} else {
+					next_delay_us = ci->cycle;
+					ci->short_retry_level = 0;
+				}
+			} else {
+				ci->short_retry_level = 0;
+				ci->ineffective_full_cycle_streak++;
+				if (ci->ineffective_full_cycle_streak >= 3) {
+					async_reset_history(ci);
+				}
+			}
+#else
 			}
 
-			/* Handle RX conflict */
 			if (rx_result.is_rx_conflict && bc_->try_grant(ci->bc, 1)) {
-				comback_to_me = true;
+				comeback_to_me = true;
 			}
+#endif
 
 			if (rx_result.is_ack_rsp && !rx_result.is_ack_boring) {
 				/* Slave accepted the previous transmit data */
@@ -1109,13 +1309,21 @@ struct ldp_master: public ldp_basic {
 			manage_timeout(ci, reset_timeout_flag);
 		}
 
-		if (comback_to_me) {
-			work_queue_->reset(ci->wq_id, ci->cycle, ci->cycle);
+#if LDP_ASYNC_COMEBACK_LEARNER_ENABLED
+		work_queue_->reset(ci->wq_id, ci->cycle, next_delay_us);
+		ci->last_schedule_delay_us = next_delay_us;
+		if (granted_short_retry) {
 			ci->timeout_cnt++; /* next iteration won't cost a cycle */
-		} else {
-			work_queue_->reset(ci->wq_id, ci->cycle, ci->cycle);
 		}
+#else
+		work_queue_->reset(ci->wq_id, ci->cycle, ci->cycle);
+		ci->last_schedule_delay_us = ci->cycle;
+		if (comeback_to_me) {
+			ci->timeout_cnt++;
+		}
+#endif
 	}
+
       protected:
 	sync_conn_list sync_conns_;
 	async_conn_list async_conns_;

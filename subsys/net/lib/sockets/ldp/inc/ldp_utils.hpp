@@ -37,11 +37,13 @@ struct work_queue_if {
 	virtual id enqueue(void (*fn)(void *, void *), void *arg1, void *arg2, uint32_t delay) = 0;
 
 	/**
-	 * @brief reset the delay of a function
+	 * @brief reset the schedule of a function
 	 *
-	 * @note this function is used to change/reset the delay of a function
+	 * @note this function is used to change/reset both the recurring cycle and
+	 * the delay before the next run of an enqueued function
 	 * @param id id of the enqueued function
-	 * @param delay new delay in microseconds
+	 * @param cycle recurring cycle in microseconds after the next run
+	 * @param delay delay in microseconds before the next run
 	 */
 	virtual void reset(id id, uint32_t cycle, uint32_t delay) = 0;
 

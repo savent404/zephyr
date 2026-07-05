@@ -5,7 +5,10 @@
 #include <zephyr/kernel.h>
 #include <zephyr/net/socket.h>
 #include <zephyr/net/socketcif.h>
+#include <zephyr/shell/shell.h>
 #include <zephyr/logging/log.h>
+#include <stdlib.h>
+#include <string.h>
 
 #include "cif_main.h"
 
@@ -32,6 +35,284 @@ REG_BUF_DEF(eth2, 32);
 REG_BUF_REG_DEF(eth3, 32) = {'e', 't', 'h', '3', ':', '0', '0', '0'};
 REG_BUF_DEF(eth3, 32);
 static struct k_sem terminate_sem;
+
+#define CIF_FAULT_PORT_COUNT 32
+#define CIF_FAULT_PORT_ALL   0xff
+
+enum fault_mode {
+	FAULT_OFF = 0,
+	FAULT_LOW,
+	FAULT_HIGH,
+};
+
+struct slave_fault_cfg {
+	bool enabled;
+	enum fault_mode mode;
+	uint8_t selector;
+	uint32_t recv_us;
+	uint32_t send_us;
+	uint32_t every_n;
+	uint32_t rx_seen[CIF_FAULT_PORT_COUNT];
+	uint32_t tx_seen[CIF_FAULT_PORT_COUNT];
+	uint32_t rx_injected[CIF_FAULT_PORT_COUNT];
+	uint32_t tx_injected[CIF_FAULT_PORT_COUNT];
+	struct k_spinlock lock;
+};
+
+#if CONFIG_CIF_SAMPLE_FAULT_INJECT
+static struct slave_fault_cfg slave_fault;
+
+static const uint8_t fault_ports[] = {
+	PORT_ID_CFG, PORT_ID_IO, PORT_ID_ETH0, PORT_ID_ETH1, PORT_ID_ETH2, PORT_ID_ETH3,
+};
+
+static const char *fault_mode_name(enum fault_mode mode)
+{
+	switch (mode) {
+	case FAULT_LOW:
+		return "low";
+	case FAULT_HIGH:
+		return "high";
+	case FAULT_OFF:
+	default:
+		return "off";
+	}
+}
+
+static const char *fault_port_name(uint8_t port)
+{
+	switch (port) {
+	case PORT_ID_CFG:
+		return "cfg";
+	case PORT_ID_IO:
+		return "io";
+	case PORT_ID_ETH0:
+		return "eth0";
+	case PORT_ID_ETH1:
+		return "eth1";
+	case PORT_ID_ETH2:
+		return "eth2";
+	case PORT_ID_ETH3:
+		return "eth3";
+	case CIF_FAULT_PORT_ALL:
+		return "all";
+	default:
+		return "unknown";
+	}
+}
+
+static bool fault_parse_port(const char *name, uint8_t *port)
+{
+	struct {
+		const char *name;
+		uint8_t port;
+	} map[] = {
+		{"cfg", PORT_ID_CFG},        {"io", PORT_ID_IO},     {"eth0", PORT_ID_ETH0},
+		{"eth1", PORT_ID_ETH1},      {"eth2", PORT_ID_ETH2}, {"eth3", PORT_ID_ETH3},
+		{"all", CIF_FAULT_PORT_ALL},
+	};
+
+	for (size_t i = 0; i < ARRAY_SIZE(map); ++i) {
+		if (strcmp(name, map[i].name) == 0) {
+			*port = map[i].port;
+			return true;
+		}
+	}
+
+	return false;
+}
+
+static bool fault_port_matches(uint8_t selector, uint8_t port)
+{
+	return selector == CIF_FAULT_PORT_ALL || selector == port;
+}
+
+static uint32_t fault_claim_delay(uint8_t port, bool is_tx)
+{
+	uint32_t delay_us = 0;
+	k_spinlock_key_t key = k_spin_lock(&slave_fault.lock);
+	uint32_t *seen = is_tx ? slave_fault.tx_seen : slave_fault.rx_seen;
+	uint32_t *injected = is_tx ? slave_fault.tx_injected : slave_fault.rx_injected;
+
+	if (!slave_fault.enabled || port >= CIF_FAULT_PORT_COUNT ||
+	    !fault_port_matches(slave_fault.selector, port)) {
+		k_spin_unlock(&slave_fault.lock, key);
+		return 0;
+	}
+
+	seen[port]++;
+	if (slave_fault.mode == FAULT_HIGH ||
+	    (slave_fault.mode == FAULT_LOW && slave_fault.every_n != 0 &&
+	     (seen[port] % slave_fault.every_n) == 0U)) {
+		injected[port]++;
+		delay_us = is_tx ? slave_fault.send_us : slave_fault.recv_us;
+	}
+
+	k_spin_unlock(&slave_fault.lock, key);
+	return delay_us;
+}
+
+static uint32_t fault_delay_before_rx(uint8_t port)
+{
+	return fault_claim_delay(port, false);
+}
+
+static uint32_t fault_delay_before_tx(uint8_t port)
+{
+	return fault_claim_delay(port, true);
+}
+
+static void fault_sleep_if_needed(uint32_t delay_us)
+{
+	if (delay_us > 0U) {
+		k_usleep(delay_us);
+	}
+}
+
+static int cif_fault_cmd(const struct shell *sh, size_t argc, char **argv)
+{
+	if (argc < 2) {
+		shell_print(sh, "usage: cif_fault show|off|set <low|high> "
+				"<cfg|io|eth0|eth1|eth2|eth3|all> <recv_us> <send_us> [every_n]");
+		return -EINVAL;
+	}
+
+	if (strcmp(argv[1], "show") == 0) {
+		bool enabled;
+		enum fault_mode mode;
+		uint8_t selector;
+		uint32_t recv_us;
+		uint32_t send_us;
+		uint32_t every_n;
+		uint32_t rx_seen[CIF_FAULT_PORT_COUNT];
+		uint32_t tx_seen[CIF_FAULT_PORT_COUNT];
+		uint32_t rx_injected[CIF_FAULT_PORT_COUNT];
+		uint32_t tx_injected[CIF_FAULT_PORT_COUNT];
+		k_spinlock_key_t key = k_spin_lock(&slave_fault.lock);
+
+		enabled = slave_fault.enabled;
+		mode = slave_fault.mode;
+		selector = slave_fault.selector;
+		recv_us = slave_fault.recv_us;
+		send_us = slave_fault.send_us;
+		every_n = slave_fault.every_n;
+		memcpy(rx_seen, slave_fault.rx_seen, sizeof(rx_seen));
+		memcpy(tx_seen, slave_fault.tx_seen, sizeof(tx_seen));
+		memcpy(rx_injected, slave_fault.rx_injected, sizeof(rx_injected));
+		memcpy(tx_injected, slave_fault.tx_injected, sizeof(tx_injected));
+		k_spin_unlock(&slave_fault.lock, key);
+
+		shell_print(sh, "enabled=%d mode=%s selector=%s recv_us=%u send_us=%u every_n=%u",
+			    enabled, fault_mode_name(mode), fault_port_name(selector), recv_us,
+			    send_us, every_n);
+		for (size_t i = 0; i < ARRAY_SIZE(fault_ports); ++i) {
+			uint8_t port = fault_ports[i];
+
+			shell_print(sh, "%s rx_seen=%u rx_injected=%u tx_seen=%u tx_injected=%u",
+				    fault_port_name(port), rx_seen[port], rx_injected[port],
+				    tx_seen[port], tx_injected[port]);
+		}
+		return 0;
+	}
+
+	if (strcmp(argv[1], "off") == 0) {
+		k_spinlock_key_t key = k_spin_lock(&slave_fault.lock);
+
+		slave_fault.enabled = false;
+		slave_fault.mode = FAULT_OFF;
+		slave_fault.selector = CIF_FAULT_PORT_ALL;
+		slave_fault.recv_us = 0;
+		slave_fault.send_us = 0;
+		slave_fault.every_n = 0;
+		k_spin_unlock(&slave_fault.lock, key);
+		shell_print(sh, "fault injection disabled");
+		return 0;
+	}
+
+	if (strcmp(argv[1], "set") == 0) {
+		enum fault_mode mode;
+		uint8_t selector;
+		uint32_t recv_us;
+		uint32_t send_us;
+		uint32_t every_n;
+
+		if (argc < 6 || argc > 7) {
+			shell_print(
+				sh,
+				"usage: cif_fault set <low|high> <cfg|io|eth0|eth1|eth2|eth3|all> "
+				"<recv_us> <send_us> [every_n]");
+			return -EINVAL;
+		}
+
+		if (strcmp(argv[2], "low") == 0) {
+			mode = FAULT_LOW;
+		} else if (strcmp(argv[2], "high") == 0) {
+			mode = FAULT_HIGH;
+		} else {
+			shell_print(sh, "invalid mode: %s", argv[2]);
+			return -EINVAL;
+		}
+
+		if (!fault_parse_port(argv[3], &selector)) {
+			shell_print(sh, "invalid port selector: %s", argv[3]);
+			return -EINVAL;
+		}
+
+		recv_us = (uint32_t)strtoul(argv[4], NULL, 0);
+		send_us = (uint32_t)strtoul(argv[5], NULL, 0);
+		every_n = (argc == 7) ? (uint32_t)strtoul(argv[6], NULL, 0) : 8U;
+		if (mode == FAULT_HIGH) {
+			every_n = 1U;
+		} else if (every_n == 0U) {
+			shell_print(sh, "every_n must be > 0 for low mode");
+			return -EINVAL;
+		}
+
+		k_spinlock_key_t key = k_spin_lock(&slave_fault.lock);
+
+		slave_fault.enabled = true;
+		slave_fault.mode = mode;
+		slave_fault.selector = selector;
+		slave_fault.recv_us = recv_us;
+		slave_fault.send_us = send_us;
+		slave_fault.every_n = every_n;
+		memset(slave_fault.rx_seen, 0, sizeof(slave_fault.rx_seen));
+		memset(slave_fault.tx_seen, 0, sizeof(slave_fault.tx_seen));
+		memset(slave_fault.rx_injected, 0, sizeof(slave_fault.rx_injected));
+		memset(slave_fault.tx_injected, 0, sizeof(slave_fault.tx_injected));
+		k_spin_unlock(&slave_fault.lock, key);
+
+		shell_print(sh,
+			    "fault injection enabled: mode=%s selector=%s recv_us=%u send_us=%u "
+			    "every_n=%u",
+			    fault_mode_name(mode), fault_port_name(selector), recv_us, send_us,
+			    every_n);
+		return 0;
+	}
+
+	shell_print(sh, "unknown subcommand: %s", argv[1]);
+	return -EINVAL;
+}
+
+SHELL_CMD_REGISTER(cif_fault, NULL, "CIF sample fault injection", cif_fault_cmd);
+#else
+static uint32_t fault_delay_before_rx(uint8_t port)
+{
+	ARG_UNUSED(port);
+	return 0;
+}
+
+static uint32_t fault_delay_before_tx(uint8_t port)
+{
+	ARG_UNUSED(port);
+	return 0;
+}
+
+static void fault_sleep_if_needed(uint32_t delay_us)
+{
+	ARG_UNUSED(delay_us);
+}
+#endif
 
 static bool dev_port_open(int cif_sock, uint8_t port, uint8_t *initial_tx, uint16_t initial_tx_len,
 			  uint16_t max_rx_len)
@@ -76,6 +357,7 @@ static int deal_ethernet_data(int sock, uint8_t port)
 
 	if (!ctx_.perf_mode) {
 		/* don't care about the performance, using echo to validate loopback */
+		fault_sleep_if_needed(fault_delay_before_rx(port));
 		ret = recvfrom(sock, rx_buf, sizeof(rx_buf), 0, (struct sockaddr *)&port_addr, &sl);
 		if (ret < 0 && errno != EAGAIN) {
 			LOG_ERR("Failed to receive data, errno %d", errno);
@@ -84,6 +366,7 @@ static int deal_ethernet_data(int sock, uint8_t port)
 			LOG_HEXDUMP_INF(rx_buf, ret, "Data:");
 
 #if !CONFIG_CIF_SLAVE_ONLY_RECV
+			fault_sleep_if_needed(fault_delay_before_tx(port));
 			ret = sendto(sock, rx_buf, ret, 0, (struct sockaddr *)&port_addr, sl);
 			if (ret < 0 && errno != EAGAIN) {
 				LOG_ERR("Failed to send data back, errno %d", errno);
@@ -94,6 +377,7 @@ static int deal_ethernet_data(int sock, uint8_t port)
 		}
 	} else {
 		/* performance mode, send any data to the port */
+		fault_sleep_if_needed(fault_delay_before_rx(port));
 		ret = recvfrom(sock, rx_buf, sizeof(rx_buf), 0, (struct sockaddr *)&port_addr, &sl);
 
 		if (ret < 0 && errno != EAGAIN) {
@@ -105,6 +389,7 @@ static int deal_ethernet_data(int sock, uint8_t port)
 		}
 
 #if !CONFIG_CIF_SLAVE_ONLY_RECV
+		fault_sleep_if_needed(fault_delay_before_tx(port));
 		ret = sendto(sock, rx_buf, 1500, 0, (struct sockaddr *)&port_addr, sl);
 		if (ret < 0 && errno != EAGAIN) {
 			LOG_ERR("Failed to send data back, errno %d", errno);
@@ -246,6 +531,7 @@ static int slave_task(void)
 		bool new_config = false;
 
 		if (ready.ready_mask & BIT(PORT_ID_CFG)) {
+			fault_sleep_if_needed(fault_delay_before_rx(PORT_ID_CFG));
 			ret = recvfrom(sock, REG_BUF_MODIFY(config), REG_BUF_LEN(config), 0,
 				       (struct sockaddr *)&port_cfg, &sl);
 
@@ -259,6 +545,7 @@ static int slave_task(void)
 
 		if (new_config) {
 			memcpy(REG_BUF_REG(config), REG_BUF_MODIFY(config), REG_BUF_LEN(config));
+			fault_sleep_if_needed(fault_delay_before_tx(PORT_ID_CFG));
 			ret = sendto(sock, REG_BUF_REG(config), REG_BUF_LEN(config), 0,
 				     (struct sockaddr *)&port_cfg, sizeof(port_cfg));
 			if (ret >= 0) {
@@ -271,15 +558,21 @@ static int slave_task(void)
 		bool new_io = false;
 
 		sl = sizeof(port_io);
-		if ((ready.ready_mask & BIT(PORT_ID_IO)) &&
-		    recvfrom(sock, REG_BUF_MODIFY(io), REG_BUF_LEN(io), 0,
-			     (struct sockaddr *)&port_io, &sl) > 0) {
-			LOG_INF("Received io data");
-			memcpy(REG_BUF_REG(io), REG_BUF_MODIFY(io), REG_BUF_LEN(io));
-			new_io = true;
+		if (ready.ready_mask & BIT(PORT_ID_IO)) {
+			fault_sleep_if_needed(fault_delay_before_rx(PORT_ID_IO));
+			ret = recvfrom(sock, REG_BUF_MODIFY(io), REG_BUF_LEN(io), 0,
+				       (struct sockaddr *)&port_io, &sl);
+			if (ret > 0) {
+				LOG_INF("Received io data");
+				memcpy(REG_BUF_REG(io), REG_BUF_MODIFY(io), REG_BUF_LEN(io));
+				new_io = true;
+			} else if (ret < 0 && errno != EAGAIN) {
+				LOG_ERR("Failed to receive io data, errno %d", errno);
+			}
 		}
 
 		REG_BUF_REG(io)[5]++;
+		fault_sleep_if_needed(fault_delay_before_tx(PORT_ID_IO));
 		ret = sendto(sock, REG_BUF_REG(io), REG_BUF_LEN(io), 0, (struct sockaddr *)&port_io,
 			     sizeof(port_io));
 		if (ret < 0) {

@@ -14,12 +14,12 @@
 
 #define MAX_DEV 2
 
-#define MCB_POLL_TIME           (655 * 1000)          /* 655us */
-#define SYNC_CYCLE_TIME         20000                 /* 20ms */
-#define SYNC_TIMEOUT_TIME       (SYNC_CYCLE_TIME * 5) /* 100ms (5 times of SYNC_CYCLE_TIME) */
-#define ASYNC_INTERVAL_TIME     (40 * 1000)           /* 40ms */
-#define ASYNC_TIMEOUT_TIME      (200 * 1000)          /* 200ms */
-#define ASYNC_DEFAULT_BANDWIDTH 0                     /* no limitation */
+#define MCB_POLL_TIME           (655 * 1000)                      /* 655us */
+#define SYNC_CYCLE_TIME         CONFIG_CIF_SYNC_CYCLE_TIME_US     /* us */
+#define SYNC_TIMEOUT_TIME       (SYNC_CYCLE_TIME * 5)             /* 5 cycles */
+#define ASYNC_INTERVAL_TIME     CONFIG_CIF_ASYNC_INTERVAL_TIME_US /* us */
+#define ASYNC_TIMEOUT_TIME      (200 * 1000)                      /* 200ms */
+#define ASYNC_DEFAULT_BANDWIDTH 0                                 /* no limitation */
 
 #if CONFIG_MCB_SYSTECH_HW_WORKAROUND
 #define PORT_ID_DISC 0x00
@@ -116,7 +116,7 @@ int master_cancel(void);
  */
 int handle_extra_errors(int sock);
 
-#define MAX_OPEN_PORTS  8
+#define MAX_OPEN_PORTS  16
 #define MAX_OPEN_ERRORS 32
 struct open_port_s {
 	uint8_t sid;
@@ -131,6 +131,8 @@ struct open_port_s {
 	uint32_t prev_stat_received;
 	uint32_t prev_stat_error;
 	uint32_t prev_timestamp;
+	uint32_t issue3_last_tx_us;
+	bool issue3_waiting_rx;
 	uint32_t lag_rx_avg;
 	uint32_t lag_rx_max;
 	uint32_t lag_tx_avg;

@@ -402,6 +402,23 @@ static void handle_open_ports_echo(int sock)
 		later = k_cyc_to_us_near32(k_cycle_get_32());
 		if (ret > 0) {
 			open_ports[i].stat_received++;
+#if defined(CONFIG_CIF_ISSUE3_LATENCY_LOG)
+			if (CIF_IS_ASYNC_PORT(open_ports[i].port) &&
+			    open_ports[i].issue3_waiting_rx) {
+				uint32_t delta_us;
+
+				if (open_ports[i].issue3_last_tx_us > later) {
+					delta_us = (uint32_t)((uint64_t)UINT32_MAX + later -
+							      open_ports[i].issue3_last_tx_us);
+				} else {
+					delta_us = later - open_ports[i].issue3_last_tx_us;
+				}
+
+				LOG_INF("ISSUE3_LAT sid=%u port=%u delta_us=%u outcome=data",
+					open_ports[i].sid, open_ports[i].port, delta_us);
+				open_ports[i].issue3_waiting_rx = false;
+			}
+#endif
 			LOG_DBG("Echoing data for port %d", open_ports[i].port);
 			need_echo = true;
 		} else if (errno != EAGAIN) {
@@ -437,6 +454,12 @@ static void handle_open_ports_echo(int sock)
 
 			if (ret >= 0) {
 				open_ports[i].stat_sent++;
+#if defined(CONFIG_CIF_ISSUE3_LATENCY_LOG)
+				if (CIF_IS_ASYNC_PORT(open_ports[i].port)) {
+					open_ports[i].issue3_last_tx_us = later;
+					open_ports[i].issue3_waiting_rx = true;
+				}
+#endif
 			}
 			if (ret < 0 && errno != EAGAIN) {
 				LOG_ERR("Failed to echo data, errno %d", errno);
@@ -502,6 +525,11 @@ static bool handle_open_state(int sock, uint8_t *response_buf, size_t response_b
 			open_ports[i].port = ctx_.target_port;
 			open_ports[i].active = true;
 			open_ports[i].open_timestamp = k_uptime_get_32();
+#if defined(CONFIG_CIF_ISSUE3_LATENCY_LOG)
+			open_ports[i].issue3_last_tx_us = k_cyc_to_us_near32(k_cycle_get_32());
+			open_ports[i].issue3_waiting_rx =
+				ctx_.initial_data_len > 0 && CIF_IS_ASYNC_PORT(ctx_.target_port);
+#endif
 			LOG_INF("Port %d registered as open", ctx_.target_port);
 			no_space = false;
 			break;
@@ -692,7 +720,7 @@ static int main_master(void)
 
 	static uint8_t in_buf[CIF_MTU];
 	static uint8_t out_buf[CIF_MTU];
-	static uint8_t response_buf[64];
+	static uint8_t response_buf[2000];
 	size_t out_buf_len;
 	uint32_t timeout = 0;
 

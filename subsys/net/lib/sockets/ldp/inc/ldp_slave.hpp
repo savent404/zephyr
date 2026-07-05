@@ -97,6 +97,7 @@ template <typename T_cache> struct ldp_slave: public ldp_basic {
 					  cfg->max_recv_len + sizeof(ldp_a_header));
 		}
 
+		opened_mask_ |= static_cast<uint32_t>(1u << config->port);
 		conns_.push_back(std::move(ci));
 		return next_id_++;
 	}
@@ -111,6 +112,7 @@ template <typename T_cache> struct ldp_slave: public ldp_basic {
 		}
 
 		mcb_->config_port((*it)->port, false, false, 0);
+		opened_mask_ &= ~static_cast<uint32_t>(1u << (*it)->port);
 		conns_.erase(it);
 		return 0;
 	}
@@ -303,7 +305,7 @@ template <typename T_cache> struct ldp_slave: public ldp_basic {
 
 	virtual uint32_t get_rx_port_mask() const
 	{
-		return mcb_->get_rx_ready_mask();
+		return mcb_->get_rx_ready_mask() & opened_mask_;
 	}
 
       protected:
@@ -320,6 +322,7 @@ template <typename T_cache> struct ldp_slave: public ldp_basic {
 	mcb_if *mcb_;
 	conn_list conns_;
 	int32_t next_id_;
+	uint32_t opened_mask_ = 0;
 
 	using cache_if = ldp_cache<T_cache>;
 };
