@@ -51,6 +51,9 @@ LOG_MODULE_REGISTER(pcf8563);
 #define PCF8563_DAYS_MASK     GENMASK(5, 0)
 #define PCF8563_WEEKDAYS_MASK GENMASK(2, 0)
 #define PCF8563_MONTHS_MASK   GENMASK(4, 0)
+#define PCF8563_MONTHS_OFFSET 1
+#define PCF8563_YEARS_MASK    GENMASK(7, 0)
+#define PCF8563_YEARS_OFFSET  (2000 - 1900)
 
 /* RTC alarm time fields supported by the PCF8563, page 7 of the datasheet */
 #define PCF8563_RTC_ALARM_TIME_MASK                                                                \
@@ -114,6 +117,12 @@ int pcf8563_set_time(const struct device *dev, const struct rtc_time *timeptr)
 		return -EINVAL;
 	}
 
+	if (timeptr->tm_year < PCF8563_YEARS_OFFSET ||
+	    timeptr->tm_year > PCF8563_YEARS_OFFSET + 99) {
+		LOG_ERR("invalid time");
+		return -EINVAL;
+	}
+
 	/* Set seconds */
 	raw_time[0] = bin2bcd(timeptr->tm_sec);
 
@@ -129,11 +138,11 @@ int pcf8563_set_time(const struct device *dev, const struct rtc_time *timeptr)
 	/* Set weekdays */
 	raw_time[4] = timeptr->tm_wday;
 
-	/*Set month */
-	raw_time[5] = bin2bcd(timeptr->tm_mon);
+	/* Set month */
+	raw_time[5] = bin2bcd(timeptr->tm_mon + PCF8563_MONTHS_OFFSET) & PCF8563_MONTHS_MASK;
 
 	/* Set year */
-	raw_time[6] = bin2bcd(timeptr->tm_year);
+	raw_time[6] = bin2bcd(timeptr->tm_year - PCF8563_YEARS_OFFSET) & PCF8563_YEARS_MASK;
 
 	/* Write to device */
 	ret = i2c_burst_write_dt(&config->i2c, PCF8563_TIME_DATE_REGISTER,
@@ -184,10 +193,10 @@ int pcf8563_get_time(const struct device *dev, struct rtc_time *timeptr)
 	timeptr->tm_wday = raw_time[4] & PCF8563_WEEKDAYS_MASK;
 
 	/* Get month */
-	timeptr->tm_mon = bcd2bin(raw_time[5] & PCF8563_MONTHS_MASK);
+	timeptr->tm_mon = bcd2bin(raw_time[5] & PCF8563_MONTHS_MASK) - PCF8563_MONTHS_OFFSET;
 
 	/* Get year */
-	timeptr->tm_year = bcd2bin(raw_time[6]);
+	timeptr->tm_year = bcd2bin(raw_time[6] & PCF8563_YEARS_MASK) + PCF8563_YEARS_OFFSET;
 
 	/* Day number not used */
 	timeptr->tm_yday = -1;
