@@ -8,8 +8,21 @@
  *
  */
 #include <assert.h>
+#include <atomic>
+#include <cstdint>
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
+
+#if CONFIG_MCB_SYSTECH_HW_WORKAROUND && !defined(__ZEPHYR__)
+extern "C" int printk(const char *, ...)
+{
+	return 0;
+}
+
+extern "C" void k_usleep(uint32_t)
+{
+}
+#endif
 
 #include "ldp.hpp"
 #include "ut_header.hpp"
@@ -33,8 +46,6 @@ simu_mcb::role simu_mcb::role_[max_sid];
 simu_mcb::io_mode simu_mcb::io_mode_[max_sid];
 uint32_t simu_mcb::response_delay_us_[max_sid][max_port];
 std::list<void *> mock_mempool::ptrs;
-
-using err = ldp_basic::ldp_error;
 
 namespace {
 
@@ -65,6 +76,21 @@ struct ldp_master_testable: public ldp_master_impl {
 	{
 		return this->bc_wq_id_;
 	}
+
+	void run_sync_handler()
+	{
+		this->sync_handler();
+	}
+
+#if defined(CONFIG_CIF_ISSUE2_SYNC_JITTER_MEASURE) && CONFIG_CIF_ISSUE2_SYNC_JITTER_MEASURE
+	using ldp_master_impl::issue2_sync_jitter_record_handler_entry;
+	using ldp_master_impl::issue2_sync_jitter_record_tx;
+
+	sync_conn_info *first_sync_conn()
+	{
+		return this->sync_conns_.front().get();
+	}
+#endif
 };
 
 static simu_work_queue::item &require_async_item(simu_work_queue &wq,
@@ -445,6 +471,86 @@ TEST_F(test_ldp_sm, sync_timeout)
 			ASSERT_EQ(ret, -err::LDP_ERR_ATIMEOUT);
 		}
 	}
+}
+
+#if CONFIG_MCB_SYSTECH_HW_WORKAROUND
+TEST_F(test_ldp_sm, sync_handler_before_first_send_does_not_break_send)
+{
+	simu_work_queue wq;
+	simu_mcb bus_m(0), bus_s1(1);
+	ldp_master_testable m(&bus_m, &wq);
+	ldp_slave_impl s1(&bus_s1);
+
+	ldp_master_sync_config m_cfg = {SYNC_PORT(0), 1, 1000, 3000, false, false};
+	ldp_slave_sync_config s_cfg = {SYNC_PORT(0), 32, true};
+
+	int m_conn = m.create(false, &m_cfg);
+	int s_conn = s1.create(false, &s_cfg);
+
+	ASSERT_EQ(m_conn, 0);
+	ASSERT_EQ(s_conn, 0);
+
+	m.run_sync_handler();
+
+	EXPECT_EQ(m.send(m_conn, reinterpret_cast<const uint8_t *>("io:000"), 8), 8);
+}
+#endif
+
+TEST_F(test_ldp_sm, sync_send_does_not_wait_for_slow_handler_bus_operation)
+{
+	struct delayed_master_mcb: public simu_mcb {
+		delayed_master_mcb(uint8_t sid, std::atomic_bool &entered, uint32_t delay_us)
+			: simu_mcb(sid), entered_(entered), delay_us_(delay_us)
+		{
+		}
+
+		void tx(uint8_t port, uint8_t dst_sid, bool r) override
+		{
+			entered_.store(true, std::memory_order_release);
+			std::this_thread::sleep_for(std::chrono::microseconds(delay_us_));
+			simu_mcb::tx(port, dst_sid, r);
+		}
+
+		std::atomic_bool &entered_;
+		uint32_t delay_us_;
+	};
+
+	simu_work_queue wq;
+	std::atomic_bool handler_in_tx{false};
+	delayed_master_mcb bus_m(0, handler_in_tx, 80 * 1000);
+	simu_mcb bus_s1(1);
+	ldp_master_testable m(&bus_m, &wq);
+	ldp_slave_impl s1(&bus_s1);
+
+	ldp_master_sync_config m_cfg = {SYNC_PORT(0), 1, 1000, 3000, false, false};
+	ldp_slave_sync_config s_cfg = {SYNC_PORT(0), 32, true};
+
+	int m_conn = m.create(false, &m_cfg);
+	int s_conn = s1.create(false, &s_cfg);
+
+	ASSERT_EQ(m_conn, 0);
+	ASSERT_EQ(s_conn, 0);
+	ASSERT_EQ(m.send(m_conn, reinterpret_cast<const uint8_t *>("seed"), 4), 4);
+
+	std::thread handler([&m] { m.run_sync_handler(); });
+	auto wait_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(1);
+	while (!handler_in_tx.load(std::memory_order_acquire) &&
+	       std::chrono::steady_clock::now() < wait_deadline) {
+		std::this_thread::sleep_for(std::chrono::milliseconds(1));
+	}
+
+	if (!handler_in_tx.load(std::memory_order_acquire)) {
+		handler.join();
+		FAIL() << "sync handler did not enter delayed tx";
+	}
+
+	auto begin = std::chrono::steady_clock::now();
+	int ret = m.send(m_conn, reinterpret_cast<const uint8_t *>("next"), 4);
+	auto elapsed = std::chrono::steady_clock::now() - begin;
+	handler.join();
+
+	EXPECT_EQ(ret, 4);
+	EXPECT_LT(std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count(), 40);
 }
 
 TEST_F(test_ldp_sm, async_timeout)
@@ -1519,3 +1625,154 @@ TEST_F(test_ldp_sm, second_async_connection_does_not_wake_active_bandwidth_contr
 	ASSERT_EQ(conn_b, 1);
 	EXPECT_EQ(item->reset_count, 1u);
 }
+
+#if defined(CONFIG_CIF_ISSUE2_SYNC_JITTER_MEASURE) && CONFIG_CIF_ISSUE2_SYNC_JITTER_MEASURE
+TEST_F(test_ldp_sm, sync_jitter_summary_reports_percentiles_on_destroy)
+{
+	simu_work_queue wq;
+	simu_mcb bus_m(0);
+	ldp_master_testable m(&bus_m, &wq);
+	ldp_master_sync_config cfg = {SYNC_PORT(0), 1, 1000, NO_TIMEOUT, false, false};
+	m.set_sync_cycle(cfg.cycle_time);
+	int conn = m.create(false, &cfg);
+
+	ASSERT_EQ(conn, 0);
+
+	auto *ci = m.first_sync_conn();
+	ASSERT_NE(ci, nullptr);
+
+	m.issue2_sync_jitter_record_handler_entry(1000);
+	m.issue2_sync_jitter_record_tx(ci, 1000, 1025);
+	m.issue2_sync_jitter_record_handler_entry(2050);
+	m.issue2_sync_jitter_record_tx(ci, 2050, 2060);
+	m.issue2_sync_jitter_record_handler_entry(3010);
+	m.issue2_sync_jitter_record_tx(ci, 3010, 3075);
+	m.issue2_sync_jitter_record_handler_entry(4200);
+	m.issue2_sync_jitter_record_tx(ci, 4200, 4220);
+
+	testing::internal::CaptureStdout();
+	ASSERT_EQ(m.destroy(conn), 0);
+	auto summary = testing::internal::GetCapturedStdout();
+
+	EXPECT_NE(summary.find("ISSUE2_SYNC_JITTER_SUMMARY sid=1 port=0 samples=2 cycle_us=1000"),
+		  std::string::npos);
+	EXPECT_NE(summary.find("p50_us=40"), std::string::npos);
+	EXPECT_NE(summary.find("p90_us=150"), std::string::npos);
+	EXPECT_NE(summary.find("max_us=150"), std::string::npos);
+	EXPECT_NE(summary.find("ratio_max_pct=15.00"), std::string::npos);
+	EXPECT_NE(summary.find("pass=0"), std::string::npos);
+	EXPECT_NE(summary.find("overflow=0"), std::string::npos);
+	EXPECT_NE(summary.find("max_handler_to_tx_us=65"), std::string::npos);
+}
+
+TEST_F(test_ldp_sm, sync_jitter_summary_uses_scheduler_cycle_for_ratio)
+{
+	simu_work_queue wq;
+	simu_mcb bus_m(0);
+	ldp_master_testable m(&bus_m, &wq);
+	ldp_master_sync_config cfg = {SYNC_PORT(0), 1, 1000, NO_TIMEOUT, false, false};
+	m.set_sync_cycle(2000);
+	int conn = m.create(false, &cfg);
+
+	ASSERT_EQ(conn, 0);
+
+	m.issue2_sync_jitter_record_handler_entry(1000);
+	m.issue2_sync_jitter_record_handler_entry(3100);
+	m.issue2_sync_jitter_record_handler_entry(5000);
+
+	testing::internal::CaptureStdout();
+	ASSERT_EQ(m.destroy(conn), 0);
+	auto summary = testing::internal::GetCapturedStdout();
+
+	EXPECT_NE(summary.find("ISSUE2_SYNC_JITTER_SUMMARY sid=1 port=0 samples=1 cycle_us=2000"),
+		  std::string::npos);
+	EXPECT_NE(summary.find("p50_us=100"), std::string::npos);
+	EXPECT_NE(summary.find("p90_us=100"), std::string::npos);
+	EXPECT_NE(summary.find("max_us=100"), std::string::npos);
+	EXPECT_NE(summary.find("ratio_max_pct=5.00"), std::string::npos);
+	EXPECT_NE(summary.find("pass=1"), std::string::npos);
+}
+
+TEST_F(test_ldp_sm, sync_jitter_summary_ignores_startup_phase_shift)
+{
+	simu_work_queue wq;
+	simu_mcb bus_m(0);
+	ldp_master_testable m(&bus_m, &wq);
+	ldp_master_sync_config cfg = {SYNC_PORT(0), 1, 1000, NO_TIMEOUT, false, false};
+	m.set_sync_cycle(cfg.cycle_time);
+	int conn = m.create(false, &cfg);
+
+	ASSERT_EQ(conn, 0);
+
+	m.issue2_sync_jitter_record_handler_entry(1000);
+	m.issue2_sync_jitter_record_handler_entry(5800);
+	m.issue2_sync_jitter_record_handler_entry(6800);
+	m.issue2_sync_jitter_record_handler_entry(7800);
+
+	testing::internal::CaptureStdout();
+	ASSERT_EQ(m.destroy(conn), 0);
+	auto summary = testing::internal::GetCapturedStdout();
+
+	EXPECT_NE(summary.find("ISSUE2_SYNC_JITTER_SUMMARY sid=1 port=0 samples=2 cycle_us=1000"),
+		  std::string::npos);
+	EXPECT_NE(summary.find("p50_us=0"), std::string::npos);
+	EXPECT_NE(summary.find("p90_us=0"), std::string::npos);
+	EXPECT_NE(summary.find("max_us=0"), std::string::npos);
+	EXPECT_NE(summary.find("pass=1"), std::string::npos);
+}
+
+TEST_F(test_ldp_sm, sync_jitter_summary_reports_zero_samples_as_fail)
+{
+	simu_work_queue wq;
+	simu_mcb bus_m(0);
+	ldp_master_testable m(&bus_m, &wq);
+	ldp_master_sync_config cfg = {SYNC_PORT(0), 1, 1000, NO_TIMEOUT, false, false};
+	m.set_sync_cycle(cfg.cycle_time);
+	int conn = m.create(false, &cfg);
+
+	ASSERT_EQ(conn, 0);
+
+	testing::internal::CaptureStdout();
+	ASSERT_EQ(m.destroy(conn), 0);
+	auto summary = testing::internal::GetCapturedStdout();
+
+	EXPECT_NE(summary.find("ISSUE2_SYNC_JITTER_SUMMARY sid=1 port=0 samples=0 cycle_us=1000"),
+		  std::string::npos);
+	EXPECT_NE(summary.find("pass=0"), std::string::npos);
+	EXPECT_NE(summary.find("overflow=0"), std::string::npos);
+}
+
+TEST_F(test_ldp_sm, sync_jitter_summary_reports_remaining_sync_connections_on_destructor)
+{
+	simu_work_queue wq;
+	simu_mcb bus_m(0);
+
+	testing::internal::CaptureStdout();
+	{
+		ldp_master_testable m(&bus_m, &wq);
+		ldp_master_sync_config cfg = {SYNC_PORT(0), 1, 1000, NO_TIMEOUT, false, false};
+		m.set_sync_cycle(cfg.cycle_time);
+		int conn = m.create(false, &cfg);
+
+		ASSERT_EQ(conn, 0);
+
+		auto *ci = m.first_sync_conn();
+		ASSERT_NE(ci, nullptr);
+
+		m.issue2_sync_jitter_record_handler_entry(1000);
+		m.issue2_sync_jitter_record_tx(ci, 1000, 1025);
+		m.issue2_sync_jitter_record_handler_entry(2050);
+		m.issue2_sync_jitter_record_tx(ci, 2050, 2060);
+		m.issue2_sync_jitter_record_handler_entry(3010);
+		m.issue2_sync_jitter_record_tx(ci, 3010, 3035);
+	}
+	auto summary = testing::internal::GetCapturedStdout();
+
+	EXPECT_NE(summary.find("ISSUE2_SYNC_JITTER_SUMMARY sid=1 port=0 samples=1 cycle_us=1000"),
+		  std::string::npos);
+	EXPECT_NE(summary.find("p50_us=40"), std::string::npos);
+	EXPECT_NE(summary.find("p90_us=40"), std::string::npos);
+	EXPECT_NE(summary.find("max_us=40"), std::string::npos);
+}
+
+#endif

@@ -109,12 +109,15 @@ struct ldp_wq: public work_queue_if {
 		int id;
 		int32_t cycle;
 		int32_t left;
+		uint32_t revision;
+		priority prio;
 	};
 	using work_list = std::list<work_item>;
 
 	virtual id enqueue(void (*fn)(void *, void *), void *arg1, void *arg2,
 			   uint32_t cycle) override;
 	virtual void reset(id wq, uint32_t cycle, uint32_t delay) override;
+	virtual void set_priority(id wq, priority prio) override;
 	virtual void cancel(id wq) override;
 	virtual bool is_ready(id wq) override;
 
@@ -136,6 +139,9 @@ struct ldp_wq: public work_queue_if {
 
 	work_list work_items_;
 	int next_id_;
+	uint64_t last_update_us_ = 0;
+	uint64_t now_us() const;
+	void account_elapsed(uint64_t now_us);
 	ze_mutex x_lock_;
 	ze_sem work_sem_;
 };

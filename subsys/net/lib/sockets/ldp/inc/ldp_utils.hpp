@@ -21,6 +21,11 @@ namespace cif
 
 struct work_queue_if {
 	using id = int32_t;
+	enum priority : uint8_t {
+		PRIORITY_NORMAL = 0,
+		PRIORITY_HIGH = 1,
+	};
+
 	virtual ~work_queue_if()
 	{
 	}
@@ -47,6 +52,12 @@ struct work_queue_if {
 	 */
 	virtual void reset(id id, uint32_t cycle, uint32_t delay) = 0;
 
+	virtual void set_priority(id wq, priority prio)
+	{
+		(void)wq;
+		(void)prio;
+	}
+
 	/**
 	 * @brief cancel a enqueued function
 	 *
@@ -70,6 +81,48 @@ struct work_queue_if {
 	virtual void lock() = 0;
 	virtual void unlock() = 0;
 };
+
+static inline bool ldp_work_item_should_select(int32_t candidate_left,
+					       work_queue_if::priority candidate_priority,
+					       int32_t selected_left,
+					       work_queue_if::priority selected_priority,
+					       bool selected_due)
+{
+	bool candidate_due = candidate_left <= 0;
+
+	if (candidate_due && selected_due && candidate_priority != selected_priority) {
+		return candidate_priority > selected_priority;
+	}
+
+	if (candidate_left <= 0) {
+		return !selected_due || candidate_left < selected_left;
+	}
+
+	if (selected_due) {
+		return false;
+	}
+
+	return candidate_left < selected_left;
+}
+
+static inline uint32_t ldp_work_item_priority_guard_us(uint32_t high_priority_cycle_us)
+{
+	auto guard_us = high_priority_cycle_us / 10u;
+
+	return guard_us ? guard_us : 1u;
+}
+
+static inline bool ldp_work_item_should_defer_for_priority(
+	work_queue_if::priority selected_priority, int32_t next_high_priority_left,
+	work_queue_if::priority high_priority, uint32_t high_priority_cycle_us)
+{
+	if (selected_priority >= high_priority || next_high_priority_left <= 0) {
+		return false;
+	}
+
+	return static_cast<uint32_t>(next_high_priority_left) <=
+	       ldp_work_item_priority_guard_us(high_priority_cycle_us);
+}
 
 /**
  * @brief Cache interface

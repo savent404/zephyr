@@ -38,3 +38,41 @@ TEST(memcpy, partial_copy)
         EXPECT_EQ(dst[i], 0);
     }
 }
+
+TEST(work_queue_schedule, selects_due_item_over_sleeping_candidate)
+{
+    EXPECT_TRUE(ldp_work_item_should_select(-10, work_queue_if::PRIORITY_NORMAL, 1000,
+                                            work_queue_if::PRIORITY_NORMAL, false));
+}
+
+TEST(work_queue_schedule, selects_high_priority_due_item_over_more_overdue_normal_item)
+{
+    EXPECT_TRUE(ldp_work_item_should_select(-100, work_queue_if::PRIORITY_HIGH, -5000,
+                                            work_queue_if::PRIORITY_NORMAL, true));
+}
+
+TEST(work_queue_schedule, keeps_earliest_sleep_when_no_item_is_due)
+{
+    EXPECT_TRUE(ldp_work_item_should_select(500, work_queue_if::PRIORITY_NORMAL, 1000,
+                                            work_queue_if::PRIORITY_NORMAL, false));
+    EXPECT_FALSE(ldp_work_item_should_select(1500, work_queue_if::PRIORITY_NORMAL, 1000,
+                                             work_queue_if::PRIORITY_NORMAL, false));
+}
+
+TEST(work_queue_schedule, keeps_most_overdue_item_when_priorities_match)
+{
+    EXPECT_TRUE(ldp_work_item_should_select(-5000, work_queue_if::PRIORITY_NORMAL, -100,
+                                            work_queue_if::PRIORITY_NORMAL, true));
+}
+
+TEST(work_queue_schedule, defers_normal_due_item_when_high_priority_is_near_due)
+{
+    EXPECT_TRUE(ldp_work_item_should_defer_for_priority(work_queue_if::PRIORITY_NORMAL, 120,
+                                                        work_queue_if::PRIORITY_HIGH, 5000));
+    EXPECT_TRUE(ldp_work_item_should_defer_for_priority(work_queue_if::PRIORITY_NORMAL, 400,
+                                                        work_queue_if::PRIORITY_HIGH, 5000));
+    EXPECT_FALSE(ldp_work_item_should_defer_for_priority(work_queue_if::PRIORITY_NORMAL, 700,
+                                                         work_queue_if::PRIORITY_HIGH, 5000));
+    EXPECT_FALSE(ldp_work_item_should_defer_for_priority(work_queue_if::PRIORITY_HIGH, 120,
+                                                         work_queue_if::PRIORITY_HIGH, 5000));
+}

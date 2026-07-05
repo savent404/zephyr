@@ -14,13 +14,25 @@
 #include "ldp_basic.hpp"
 #include "ldp_bc.hpp"
 
+#include <algorithm>
 #include <array>
 #include <chrono>
-#if CONFIG_MCB_SYSTECH_HW_WORKAROUND
+#include <cstdio>
+#include <shared_mutex>
+
+#if defined(__ZEPHYR__)
 #include <zephyr/kernel.h>
 #endif
 
-#include <shared_mutex>
+#if defined(CONFIG_CIF_ISSUE2_SYNC_JITTER_MEASURE)
+#if CONFIG_CIF_ISSUE2_SYNC_JITTER_MEASURE
+#define LDP_SYNC_JITTER_MEASURE_ENABLED 1
+#else
+#define LDP_SYNC_JITTER_MEASURE_ENABLED 0
+#endif
+#else
+#define LDP_SYNC_JITTER_MEASURE_ENABLED 0
+#endif
 
 #if defined(CONFIG_CIF_ASYNC_COMEBACK_LEARNER)
 #if CONFIG_CIF_ASYNC_COMEBACK_LEARNER
@@ -75,6 +87,7 @@ struct ldp_master: public ldp_basic {
 				self->sync_handler();
 			},
 			this, nullptr, cycle_time_);
+		work_queue_->set_priority(sync_wq_id_, work_queue_if::PRIORITY_HIGH);
 		wqs_.push_back(sync_wq_id_);
 	}
 
@@ -88,6 +101,9 @@ struct ldp_master: public ldp_basic {
 		}
 
 		for (auto &ci : sync_conns_) {
+#if LDP_SYNC_JITTER_MEASURE_ENABLED
+			issue2_sync_jitter_emit_summary(ci.get());
+#endif
 			if (ci->tx_buf) {
 				mempool_if::free(ci->tx_buf);
 				ci->tx_buf = nullptr;
@@ -150,6 +166,9 @@ struct ldp_master: public ldp_basic {
 		}
 
 		if (sync_it != sync_conns_.end()) {
+#if LDP_SYNC_JITTER_MEASURE_ENABLED
+			issue2_sync_jitter_emit_summary((*sync_it).get());
+#endif
 			auto bc = (*sync_it)->bc;
 			auto port = (*sync_it)->port;
 			if ((*sync_it)->tx_buf) {
@@ -370,12 +389,30 @@ struct ldp_master: public ldp_basic {
 		std::list<async_buf> tx_bufs; /* transmit buffers */
 	};
 
+#if LDP_SYNC_JITTER_MEASURE_ENABLED
+	struct issue2_sync_jitter_measurement {
+		static inline constexpr size_t max_samples = 16384;
+
+		bool started = false;
+		bool warmup_done = false;
+		bool overflow = false;
+		size_t sample_count = 0;
+		uint64_t expected_us = 0;
+		uint32_t cycle_us = 0;
+		uint32_t max_handler_to_tx_us = 0;
+		std::array<uint32_t, max_samples> samples_us = {};
+	};
+#endif
+
 	struct sync_conn_info: public conn_info_base {
 		bool flg_new_data; /* new data received */
 		uint8_t *tx_buf;   /* transmit buffer */
 		uint8_t *rx_buf;   /* receive buffer */
 		uint16_t tx_len;   /* transmit length */
 		uint16_t rx_len;   /* receive length */
+#if LDP_SYNC_JITTER_MEASURE_ENABLED
+		issue2_sync_jitter_measurement jitter;
+#endif
 	};
 
 	using sync_conn_ptr = std::unique_ptr<sync_conn_info>;
@@ -497,15 +534,15 @@ struct ldp_master: public ldp_basic {
 		return next_id_++;
 	}
 
-	static uint8_t percentile_index(uint8_t count, uint8_t percent)
+	static size_t percentile_index(size_t count, uint8_t percent)
 	{
-		auto rank = (static_cast<uint16_t>(count) * percent + 99u) / 100u;
+		auto rank = (count * percent + 99u) / 100u;
 
 		if (rank == 0) {
 			rank = 1;
 		}
 
-		return static_cast<uint8_t>(rank - 1u);
+		return rank - 1u;
 	}
 
 	static uint32_t scale_delay_110pct(uint32_t delay_us)
@@ -593,6 +630,111 @@ struct ldp_master: public ldp_basic {
 		ci->p90_delay_us = clamp_delay_us(scale_delay_110pct(p90_sample),
 					      COMEBACK_MIN_DELAY_US, ci->cycle);
 	}
+
+#if LDP_SYNC_JITTER_MEASURE_ENABLED
+	static uint64_t issue2_sync_jitter_now_us()
+	{
+#if defined(__ZEPHYR__)
+		return k_ticks_to_us_near64(k_uptime_ticks());
+#else
+		auto now = std::chrono::steady_clock::now().time_since_epoch();
+
+		return static_cast<uint64_t>(
+			std::chrono::duration_cast<std::chrono::microseconds>(now).count());
+#endif
+	}
+
+	static uint32_t issue2_sync_jitter_abs_diff_us(uint64_t lhs, uint64_t rhs)
+	{
+		auto diff = lhs >= rhs ? lhs - rhs : rhs - lhs;
+
+		return static_cast<uint32_t>(std::min<uint64_t>(diff, UINT32_MAX));
+	}
+
+	void issue2_sync_jitter_record_handler_entry(uint64_t actual_us)
+	{
+		for (auto &ci : sync_conns_) {
+			auto &measurement = ci->jitter;
+
+			if (!measurement.started) {
+				measurement.started = true;
+				measurement.expected_us = actual_us;
+				measurement.cycle_us = std::max(cycle_time_, 1u);
+				continue;
+			}
+
+			if (!measurement.warmup_done) {
+				measurement.warmup_done = true;
+				measurement.expected_us = actual_us;
+				continue;
+			}
+
+			measurement.expected_us += std::max(measurement.cycle_us, 1u);
+			auto jitter_us =
+				issue2_sync_jitter_abs_diff_us(actual_us, measurement.expected_us);
+
+			if (measurement.sample_count < issue2_sync_jitter_measurement::max_samples) {
+				measurement.samples_us[measurement.sample_count++] = jitter_us;
+			} else {
+				measurement.overflow = true;
+			}
+		}
+	}
+
+	void issue2_sync_jitter_record_tx(sync_conn_info *ci, uint64_t handler_entry_us,
+					  uint64_t tx_us)
+	{
+		auto &measurement = ci->jitter;
+		auto handler_to_tx_us =
+			issue2_sync_jitter_abs_diff_us(tx_us, handler_entry_us);
+
+		measurement.max_handler_to_tx_us =
+			std::max(measurement.max_handler_to_tx_us, handler_to_tx_us);
+	}
+
+	void issue2_sync_jitter_emit_summary(sync_conn_info *ci) const
+	{
+		auto &measurement = ci->jitter;
+		uint32_t p50_us = 0;
+		uint32_t p90_us = 0;
+		uint32_t max_us = 0;
+
+		if (measurement.sample_count > 0) {
+			std::sort(measurement.samples_us.begin(),
+				  measurement.samples_us.begin() + measurement.sample_count);
+			p50_us = measurement.samples_us[percentile_index(measurement.sample_count, 50)];
+			p90_us = measurement.samples_us[percentile_index(measurement.sample_count, 90)];
+			max_us = measurement.samples_us[measurement.sample_count - 1u];
+		}
+
+		auto cycle_us = std::max(measurement.cycle_us ? measurement.cycle_us : ci->cycle, 1u);
+		auto ratio_x100 =
+			(static_cast<uint64_t>(max_us) * 10000u + cycle_us / 2u) / cycle_us;
+		bool pass = (measurement.sample_count > 0u) && !measurement.overflow &&
+			    (static_cast<uint64_t>(max_us) * 100u <=
+			     static_cast<uint64_t>(cycle_us) * 5u);
+
+#if defined(__ZEPHYR__)
+		printk("ISSUE2_SYNC_JITTER_SUMMARY sid=%d port=%d samples=%lu cycle_us=%u "
+		       "p50_us=%u p90_us=%u max_us=%u ratio_max_pct=%llu.%02llu pass=%d "
+		       "overflow=%d max_handler_to_tx_us=%u\n",
+		       ci->sid, ci->port, static_cast<unsigned long>(measurement.sample_count),
+		       cycle_us, p50_us, p90_us, max_us,
+		       static_cast<unsigned long long>(ratio_x100 / 100u),
+		       static_cast<unsigned long long>(ratio_x100 % 100u), pass ? 1 : 0,
+		       measurement.overflow ? 1 : 0, measurement.max_handler_to_tx_us);
+#else
+		std::printf("ISSUE2_SYNC_JITTER_SUMMARY sid=%d port=%d samples=%lu cycle_us=%u "
+			   "p50_us=%u p90_us=%u max_us=%u ratio_max_pct=%llu.%02llu pass=%d "
+			   "overflow=%d max_handler_to_tx_us=%u\n",
+			   ci->sid, ci->port, static_cast<unsigned long>(measurement.sample_count),
+			   cycle_us, p50_us, p90_us, max_us,
+			   static_cast<unsigned long long>(ratio_x100 / 100u),
+			   static_cast<unsigned long long>(ratio_x100 % 100u), pass ? 1 : 0,
+			   measurement.overflow ? 1 : 0, measurement.max_handler_to_tx_us);
+#endif
+	}
+#endif
 
 	conn create_sync(const ldp_master_sync_config *config)
 	{
@@ -940,6 +1082,9 @@ struct ldp_master: public ldp_basic {
 
 	void sync_handler()
 	{
+#if LDP_SYNC_JITTER_MEASURE_ENABLED
+		auto handler_entry_us = issue2_sync_jitter_now_us();
+#endif
 		std::shared_lock bus_lock(conns_lock);
 
 		if (sync_conns_.empty()) {
@@ -947,57 +1092,82 @@ struct ldp_master: public ldp_basic {
 			return;
 		}
 
+#if LDP_SYNC_JITTER_MEASURE_ENABLED
+		issue2_sync_jitter_record_handler_entry(handler_entry_us);
+#endif
+
 		for (auto &ci : sync_conns_) {
-			std::unique_lock conn_lock(ci->lock);
+			int sid = 0;
+			int port = 0;
+			bool preempt = false;
 
-			if (!should_process_connection(ci.get())) {
-				continue;
-			}
+			{
+				std::unique_lock conn_lock(ci->lock);
 
-			if (!bc_->try_grant(ci->bc, 1)) {
-				/* If no resource available, we should wait for a while */
-				continue;
-			}
+				if (!should_process_connection(ci.get())) {
+					continue;
+				}
 
-			/* Prepare frame */
-			configure_port(ci->port, ci->tx_len);
+				if (!bc_->try_grant(ci->bc, 1)) {
+					/* If no resource available, we should wait for a while */
+					continue;
+				}
+
+				/* Prepare frame while holding the connection state lock. */
+				uint16_t tx_len = ci->tx_len;
 
 #if CONFIG_MCB_SYSTECH_HW_WORKAROUND
-			/* Force to output, HW can't send frame if len==0 */
-			if (ci->tx_len == 0) {
-				ci->tx_len = 4;
-			}
+				/* Force hardware output without changing user payload state. */
+				if (tx_len == 0) {
+					tx_len = 4;
+				}
 #endif
-			uint8_t *tx_buf = mcb_->get_tx_buf(ci->port);
-			if (ci->tx_len) {
-				ldp_memcpy::memcpy(tx_buf, ci->tx_buf, ci->tx_len);
+				configure_port(ci->port, tx_len);
+
+				uint8_t *tx_buf = mcb_->get_tx_buf(ci->port);
+				if (ci->tx_len && ci->tx_buf) {
+					ldp_memcpy::memcpy(tx_buf, ci->tx_buf, ci->tx_len);
+				} else if (tx_len) {
+					std::memset(tx_buf, 0, tx_len);
+				}
+
+				cache_if::wmb(); /* Make sure buffer is updated */
+#if LDP_SYNC_JITTER_MEASURE_ENABLED
+				issue2_sync_jitter_record_tx(ci.get(), handler_entry_us,
+						      issue2_sync_jitter_now_us());
+#endif
+				ci->stat.val(port_stat::STAT_ID_HIST_XFER_COUNT)++;
+				sid = ci->sid;
+				port = ci->port;
+				preempt = ci->preempt;
 			}
 
-			cache_if::wmb(); /* Make sure buffer is updated */
-			mcb_->tx(ci->port, ci->sid, ci->preempt);
-			ci->stat.val(port_stat::STAT_ID_HIST_XFER_COUNT)++;
+			mcb_->tx(port, sid, preempt);
 
-			/* Wait for response */
+			/* Wait for response without blocking user send on the connection lock. */
 			bool data_ready, data_timeout, port_rejected;
-			uint32_t status = wait_for_bus_operation(ci->port, ci->sid, data_ready,
-								 data_timeout, port_rejected);
+			uint32_t status =
+				wait_for_bus_operation(port, sid, data_ready, data_timeout, port_rejected);
 
 			/* Process received data */
-			uint8_t *rx_buf = mcb_->get_rx_buf(ci->port);
-			uint16_t rx_len = mcb_->get_rx_len(ci->port);
+			uint8_t *rx_buf = mcb_->get_rx_buf(port);
+			uint16_t rx_len = mcb_->get_rx_len(port);
 
-			bool data_processed = false;
-			if (data_ready && rx_len) {
-				data_processed =
-					process_received_data_sync(ci.get(), rx_buf, rx_len);
-				mcb_->clr_rx(ci->port);
+			{
+				std::unique_lock conn_lock(ci->lock);
+				bool data_processed = false;
+				if (data_ready && rx_len) {
+					data_processed =
+						process_received_data_sync(ci.get(), rx_buf, rx_len);
+					mcb_->clr_rx(port);
+				}
+
+				/* Manage timeout */
+				manage_timeout(ci.get(), data_processed);
+
+				/* Process bus status and errors */
+				process_bus_status(ci.get(), status);
 			}
-
-			/* Manage timeout */
-			manage_timeout(ci.get(), data_processed);
-
-			/* Process bus status and errors */
-			process_bus_status(ci.get(), status);
 		}
 	}
 
