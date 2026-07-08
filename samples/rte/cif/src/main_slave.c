@@ -56,11 +56,18 @@ struct slave_fault_cfg {
 	uint32_t tx_seen[CIF_FAULT_PORT_COUNT];
 	uint32_t rx_injected[CIF_FAULT_PORT_COUNT];
 	uint32_t tx_injected[CIF_FAULT_PORT_COUNT];
+	uint32_t fault_delay_due_us[2][CIF_FAULT_PORT_COUNT];
+	bool fault_delay_pending[2][CIF_FAULT_PORT_COUNT];
 	struct k_spinlock lock;
 };
 
 #if CONFIG_CIF_SAMPLE_FAULT_INJECT
 static struct slave_fault_cfg slave_fault;
+
+enum fault_delay_dir {
+	FAULT_DELAY_RX = 0,
+	FAULT_DELAY_TX = 1,
+};
 
 static const uint8_t fault_ports[] = {
 	PORT_ID_CFG, PORT_ID_IO, PORT_ID_ETH0, PORT_ID_ETH1, PORT_ID_ETH2, PORT_ID_ETH3,
@@ -127,17 +134,41 @@ static bool fault_port_matches(uint8_t selector, uint8_t port)
 	return selector == CIF_FAULT_PORT_ALL || selector == port;
 }
 
-static uint32_t fault_claim_delay(uint8_t port, bool is_tx)
+static uint32_t fault_now_us(void)
+{
+	return k_cyc_to_us_near32(k_cycle_get_32());
+}
+
+static bool fault_deadline_reached(uint32_t now_us, uint32_t due_us)
+{
+	return (int32_t)(now_us - due_us) >= 0;
+}
+
+static bool fault_delay_ready(uint8_t port, bool is_tx)
 {
 	uint32_t delay_us = 0;
+	uint32_t now_us = fault_now_us();
+	enum fault_delay_dir dir = is_tx ? FAULT_DELAY_TX : FAULT_DELAY_RX;
 	k_spinlock_key_t key = k_spin_lock(&slave_fault.lock);
 	uint32_t *seen = is_tx ? slave_fault.tx_seen : slave_fault.rx_seen;
 	uint32_t *injected = is_tx ? slave_fault.tx_injected : slave_fault.rx_injected;
+	uint32_t *due_us = slave_fault.fault_delay_due_us[dir];
+	bool *pending = slave_fault.fault_delay_pending[dir];
 
 	if (!slave_fault.enabled || port >= CIF_FAULT_PORT_COUNT ||
 	    !fault_port_matches(slave_fault.selector, port)) {
 		k_spin_unlock(&slave_fault.lock, key);
-		return 0;
+		return true;
+	}
+
+	if (pending[port]) {
+		if (!fault_deadline_reached(now_us, due_us[port])) {
+			k_spin_unlock(&slave_fault.lock, key);
+			return false;
+		}
+		pending[port] = false;
+		k_spin_unlock(&slave_fault.lock, key);
+		return true;
 	}
 
 	seen[port]++;
@@ -148,25 +179,29 @@ static uint32_t fault_claim_delay(uint8_t port, bool is_tx)
 		delay_us = is_tx ? slave_fault.send_us : slave_fault.recv_us;
 	}
 
-	k_spin_unlock(&slave_fault.lock, key);
-	return delay_us;
-}
-
-static uint32_t fault_delay_before_rx(uint8_t port)
-{
-	return fault_claim_delay(port, false);
-}
-
-static uint32_t fault_delay_before_tx(uint8_t port)
-{
-	return fault_claim_delay(port, true);
-}
-
-static void fault_sleep_if_needed(uint32_t delay_us)
-{
 	if (delay_us > 0U) {
-		k_usleep(delay_us);
+		due_us[port] = now_us + delay_us;
+		pending[port] = true;
+		k_spin_unlock(&slave_fault.lock, key);
+		return false;
 	}
+
+	k_spin_unlock(&slave_fault.lock, key);
+	return true;
+}
+
+static bool fault_delay_pending_for(uint8_t port, bool is_tx)
+{
+	if (port >= CIF_FAULT_PORT_COUNT) {
+		return false;
+	}
+
+	enum fault_delay_dir dir = is_tx ? FAULT_DELAY_TX : FAULT_DELAY_RX;
+	k_spinlock_key_t key = k_spin_lock(&slave_fault.lock);
+	bool pending = slave_fault.enabled && slave_fault.fault_delay_pending[dir][port];
+
+	k_spin_unlock(&slave_fault.lock, key);
+	return pending;
 }
 
 static int cif_fault_cmd(const struct shell *sh, size_t argc, char **argv)
@@ -224,6 +259,8 @@ static int cif_fault_cmd(const struct shell *sh, size_t argc, char **argv)
 		slave_fault.recv_us = 0;
 		slave_fault.send_us = 0;
 		slave_fault.every_n = 0;
+		memset(slave_fault.fault_delay_due_us, 0, sizeof(slave_fault.fault_delay_due_us));
+		memset(slave_fault.fault_delay_pending, 0, sizeof(slave_fault.fault_delay_pending));
 		k_spin_unlock(&slave_fault.lock, key);
 		shell_print(sh, "fault injection disabled");
 		return 0;
@@ -280,6 +317,8 @@ static int cif_fault_cmd(const struct shell *sh, size_t argc, char **argv)
 		memset(slave_fault.tx_seen, 0, sizeof(slave_fault.tx_seen));
 		memset(slave_fault.rx_injected, 0, sizeof(slave_fault.rx_injected));
 		memset(slave_fault.tx_injected, 0, sizeof(slave_fault.tx_injected));
+		memset(slave_fault.fault_delay_due_us, 0, sizeof(slave_fault.fault_delay_due_us));
+		memset(slave_fault.fault_delay_pending, 0, sizeof(slave_fault.fault_delay_pending));
 		k_spin_unlock(&slave_fault.lock, key);
 
 		shell_print(sh,
@@ -296,21 +335,18 @@ static int cif_fault_cmd(const struct shell *sh, size_t argc, char **argv)
 
 SHELL_CMD_REGISTER(cif_fault, NULL, "CIF sample fault injection", cif_fault_cmd);
 #else
-static uint32_t fault_delay_before_rx(uint8_t port)
+static bool fault_delay_ready(uint8_t port, bool is_tx)
 {
 	ARG_UNUSED(port);
-	return 0;
+	ARG_UNUSED(is_tx);
+	return true;
 }
 
-static uint32_t fault_delay_before_tx(uint8_t port)
+static bool fault_delay_pending_for(uint8_t port, bool is_tx)
 {
 	ARG_UNUSED(port);
-	return 0;
-}
-
-static void fault_sleep_if_needed(uint32_t delay_us)
-{
-	ARG_UNUSED(delay_us);
+	ARG_UNUSED(is_tx);
+	return false;
 }
 #endif
 
@@ -344,6 +380,65 @@ static bool dev_port_open(int cif_sock, uint8_t port, uint8_t *initial_tx, uint1
 	return true;
 }
 
+struct eth_tx_pending_state {
+	bool active;
+	uint16_t len;
+	uint8_t buf[CIF_ASYNC_MTU];
+};
+
+static struct eth_tx_pending_state eth_tx_pending[CIF_FAULT_PORT_COUNT];
+
+static bool queue_eth_tx(uint8_t port, const uint8_t *buf, uint16_t len)
+{
+	if (port >= CIF_FAULT_PORT_COUNT) {
+		return false;
+	}
+
+	if (len > CIF_ASYNC_MTU) {
+		len = CIF_ASYNC_MTU;
+	}
+
+	memcpy(eth_tx_pending[port].buf, buf, len);
+	eth_tx_pending[port].len = len;
+	eth_tx_pending[port].active = true;
+	return true;
+}
+
+static int flush_pending_eth_tx(int sock, uint8_t port, const struct sockaddr_cif *port_addr,
+					socklen_t sl)
+{
+	int ret;
+
+	if (port >= CIF_FAULT_PORT_COUNT || !eth_tx_pending[port].active) {
+		return 0;
+	}
+
+	if (!fault_delay_ready(port, true)) {
+		return 0;
+	}
+
+	ret = sendto(sock, eth_tx_pending[port].buf, eth_tx_pending[port].len, 0,
+		     (const struct sockaddr *)port_addr, sl);
+	if (ret >= 0) {
+		eth_tx_pending[port].active = false;
+		LOG_INF("Sent data back to port %d", port);
+		return 1;
+	}
+
+	if (errno != EAGAIN) {
+		eth_tx_pending[port].active = false;
+		LOG_ERR("Failed to send data back, errno %d", errno);
+	}
+	return 0;
+}
+
+static bool eth_port_needs_service(uint32_t ready_mask, uint8_t port)
+{
+	return (ready_mask & BIT(port)) ||
+	       (port < CIF_FAULT_PORT_COUNT &&
+	        (eth_tx_pending[port].active || fault_delay_pending_for(port, false)));
+}
+
 static int deal_ethernet_data(int sock, uint8_t port)
 {
 	static uint8_t rx_buf[CIF_ASYNC_MTU];
@@ -355,9 +450,15 @@ static int deal_ethernet_data(int sock, uint8_t port)
 	socklen_t sl = sizeof(port_addr);
 	bool something2do = false;
 
+	if (port < CIF_FAULT_PORT_COUNT && eth_tx_pending[port].active) {
+		return flush_pending_eth_tx(sock, port, &port_addr, sl);
+	}
+
 	if (!ctx_.perf_mode) {
 		/* don't care about the performance, using echo to validate loopback */
-		fault_sleep_if_needed(fault_delay_before_rx(port));
+		if (!fault_delay_ready(port, false)) {
+			return 0;
+		}
 		ret = recvfrom(sock, rx_buf, sizeof(rx_buf), 0, (struct sockaddr *)&port_addr, &sl);
 		if (ret < 0 && errno != EAGAIN) {
 			LOG_ERR("Failed to receive data, errno %d", errno);
@@ -366,10 +467,13 @@ static int deal_ethernet_data(int sock, uint8_t port)
 			LOG_HEXDUMP_INF(rx_buf, ret, "Data:");
 
 #if !CONFIG_CIF_SLAVE_ONLY_RECV
-			fault_sleep_if_needed(fault_delay_before_tx(port));
-			ret = sendto(sock, rx_buf, ret, 0, (struct sockaddr *)&port_addr, sl);
-			if (ret < 0 && errno != EAGAIN) {
-				LOG_ERR("Failed to send data back, errno %d", errno);
+			if (!fault_delay_ready(port, true)) {
+				queue_eth_tx(port, rx_buf, ret);
+			} else {
+				ret = sendto(sock, rx_buf, ret, 0, (struct sockaddr *)&port_addr, sl);
+				if (ret < 0 && errno != EAGAIN) {
+					LOG_ERR("Failed to send data back, errno %d", errno);
+				}
 			}
 #endif
 
@@ -377,7 +481,9 @@ static int deal_ethernet_data(int sock, uint8_t port)
 		}
 	} else {
 		/* performance mode, send any data to the port */
-		fault_sleep_if_needed(fault_delay_before_rx(port));
+		if (!fault_delay_ready(port, false)) {
+			return 0;
+		}
 		ret = recvfrom(sock, rx_buf, sizeof(rx_buf), 0, (struct sockaddr *)&port_addr, &sl);
 
 		if (ret < 0 && errno != EAGAIN) {
@@ -389,13 +495,17 @@ static int deal_ethernet_data(int sock, uint8_t port)
 		}
 
 #if !CONFIG_CIF_SLAVE_ONLY_RECV
-		fault_sleep_if_needed(fault_delay_before_tx(port));
-		ret = sendto(sock, rx_buf, 1500, 0, (struct sockaddr *)&port_addr, sl);
-		if (ret < 0 && errno != EAGAIN) {
-			LOG_ERR("Failed to send data back, errno %d", errno);
-		} else if (ret > 0) {
-			LOG_INF("Sent data back to port %d", port);
+		if (!fault_delay_ready(port, true)) {
+			queue_eth_tx(port, rx_buf, 1500);
 			something2do = true;
+		} else {
+			ret = sendto(sock, rx_buf, 1500, 0, (struct sockaddr *)&port_addr, sl);
+			if (ret < 0 && errno != EAGAIN) {
+				LOG_ERR("Failed to send data back, errno %d", errno);
+			} else if (ret > 0) {
+				LOG_INF("Sent data back to port %d", port);
+				something2do = true;
+			}
 		}
 #endif
 	}
@@ -530,8 +640,7 @@ static int slave_task(void)
 		socklen_t sl = sizeof(port_cfg);
 		bool new_config = false;
 
-		if (ready_mask & BIT(PORT_ID_CFG)) {
-			fault_sleep_if_needed(fault_delay_before_rx(PORT_ID_CFG));
+		if ((ready_mask & BIT(PORT_ID_CFG)) && fault_delay_ready(PORT_ID_CFG, false)) {
 			ret = recvfrom(sock, REG_BUF_MODIFY(config), REG_BUF_LEN(config), 0,
 				       (struct sockaddr *)&port_cfg, &sl);
 
@@ -545,21 +654,21 @@ static int slave_task(void)
 
 		if (new_config) {
 			memcpy(REG_BUF_REG(config), REG_BUF_MODIFY(config), REG_BUF_LEN(config));
-			fault_sleep_if_needed(fault_delay_before_tx(PORT_ID_CFG));
-			ret = sendto(sock, REG_BUF_REG(config), REG_BUF_LEN(config), 0,
-				     (struct sockaddr *)&port_cfg, sizeof(port_cfg));
-			if (ret >= 0) {
-				LOG_INF("Sent config data back");
-			} else if (errno != EAGAIN) {
-				LOG_ERR("Failed to send config data, errno %d", errno);
+			if (fault_delay_ready(PORT_ID_CFG, true)) {
+				ret = sendto(sock, REG_BUF_REG(config), REG_BUF_LEN(config), 0,
+					     (struct sockaddr *)&port_cfg, sizeof(port_cfg));
+				if (ret >= 0) {
+					LOG_INF("Sent config data back");
+				} else if (errno != EAGAIN) {
+					LOG_ERR("Failed to send config data, errno %d", errno);
+				}
 			}
 		}
 
 		bool new_io = false;
 
 		sl = sizeof(port_io);
-		if (ready_mask & BIT(PORT_ID_IO)) {
-			fault_sleep_if_needed(fault_delay_before_rx(PORT_ID_IO));
+		if ((ready_mask & BIT(PORT_ID_IO)) && fault_delay_ready(PORT_ID_IO, false)) {
 			ret = recvfrom(sock, REG_BUF_MODIFY(io), REG_BUF_LEN(io), 0,
 				       (struct sockaddr *)&port_io, &sl);
 			if (ret > 0) {
@@ -572,25 +681,26 @@ static int slave_task(void)
 		}
 
 		REG_BUF_REG(io)[5]++;
-		fault_sleep_if_needed(fault_delay_before_tx(PORT_ID_IO));
-		ret = sendto(sock, REG_BUF_REG(io), REG_BUF_LEN(io), 0, (struct sockaddr *)&port_io,
-			     sizeof(port_io));
-		if (ret < 0) {
-			LOG_INF("Failed to send io data, errno %d", errno);
+		if (fault_delay_ready(PORT_ID_IO, true)) {
+			ret = sendto(sock, REG_BUF_REG(io), REG_BUF_LEN(io), 0,
+				     (struct sockaddr *)&port_io, sizeof(port_io));
+			if (ret < 0) {
+				LOG_INF("Failed to send io data, errno %d", errno);
+			}
 		}
 
 		int has_job = 0;
 
-		if (ready_mask & BIT(PORT_ID_ETH0)) {
+		if (eth_port_needs_service(ready_mask, PORT_ID_ETH0)) {
 			has_job += deal_ethernet_data(sock, PORT_ID_ETH0);
 		}
-		if (ready_mask & BIT(PORT_ID_ETH1)) {
+		if (eth_port_needs_service(ready_mask, PORT_ID_ETH1)) {
 			has_job += deal_ethernet_data(sock, PORT_ID_ETH1);
 		}
-		if (ready_mask & BIT(PORT_ID_ETH2)) {
+		if (eth_port_needs_service(ready_mask, PORT_ID_ETH2)) {
 			has_job += deal_ethernet_data(sock, PORT_ID_ETH2);
 		}
-		if (ready_mask & BIT(PORT_ID_ETH3)) {
+		if (eth_port_needs_service(ready_mask, PORT_ID_ETH3)) {
 			has_job += deal_ethernet_data(sock, PORT_ID_ETH3);
 		}
 		has_job += handle_extra_errors(sock);
