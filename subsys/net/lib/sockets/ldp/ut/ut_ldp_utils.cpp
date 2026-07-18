@@ -94,6 +94,19 @@ TEST(work_queue_schedule, forces_normal_strictly_past_overdue_limit)
     EXPECT_FALSE(decision.clear_repayment);
 }
 
+TEST(work_queue_schedule, forces_async_after_40ms_deadline_plus_100ms_overdue)
+{
+    constexpr int32_t async_initial_delay_us = 40000;
+    constexpr uint32_t max_overdue_us = 100000;
+    auto at_boundary = ldp_work_item_priority_decision(
+        true, true, async_initial_delay_us - 140000, false, max_overdue_us);
+    auto past_boundary = ldp_work_item_priority_decision(
+        true, true, async_initial_delay_us - 140001, false, max_overdue_us);
+
+    EXPECT_EQ(at_boundary.choice, ldp_work_item_due_choice::DEFAULT);
+    EXPECT_EQ(past_boundary.choice, ldp_work_item_due_choice::FORCE_NORMAL);
+}
+
 TEST(work_queue_schedule, repays_high_before_forcing_another_normal)
 {
     auto decision = ldp_work_item_priority_decision(true, true, -200000, true, 100000);
@@ -158,6 +171,85 @@ TEST(work_queue_dispatch, repays_high_before_forcing_normal_again)
     auto next = ldp_work_item_priority_decision(true, true, -200000,
                                                  state.high_repayment_pending, 100000);
     EXPECT_EQ(next.choice, ldp_work_item_due_choice::FORCE_NORMAL);
+}
+
+TEST(work_queue_dispatch, visits_all_overdue_normal_items_with_high_repayment)
+{
+    struct test_item {
+        work_queue_if::id id;
+        int32_t left;
+        work_queue_if::priority priority;
+    };
+    constexpr work_queue_if::id high_id = 1;
+    constexpr work_queue_if::id normal_a_id = 2;
+    constexpr work_queue_if::id normal_b_id = 3;
+    constexpr work_queue_if::id normal_c_id = 4;
+    std::array<test_item, 4> items{{
+        {high_id, -200000, work_queue_if::PRIORITY_HIGH},
+        {normal_a_id, -130000, work_queue_if::PRIORITY_NORMAL},
+        {normal_b_id, -120000, work_queue_if::PRIORITY_NORMAL},
+        {normal_c_id, -110000, work_queue_if::PRIORITY_NORMAL},
+    }};
+    std::array<work_queue_if::id, 5> dispatched{};
+    ldp_work_item_dispatch_state state{};
+
+    for (size_t step = 0; step < dispatched.size(); ++step) {
+        work_queue_if::id due_high_id = -1;
+        work_queue_if::id due_normal_id = -1;
+        int32_t due_high_left = INT32_MAX;
+        int32_t due_normal_left = INT32_MAX;
+
+        for (const auto &item : items) {
+            if (item.left > 0) {
+                continue;
+            }
+            if (item.priority == work_queue_if::PRIORITY_HIGH &&
+                ldp_work_item_should_select(item.left, item.priority, due_high_left,
+                                            work_queue_if::PRIORITY_HIGH,
+                                            due_high_id >= 0)) {
+                due_high_id = item.id;
+                due_high_left = item.left;
+            } else if (item.priority == work_queue_if::PRIORITY_NORMAL &&
+                       ldp_work_item_should_select(item.left, item.priority,
+                                                   due_normal_left,
+                                                   work_queue_if::PRIORITY_NORMAL,
+                                                   due_normal_id >= 0)) {
+                due_normal_id = item.id;
+                due_normal_left = item.left;
+            }
+        }
+
+        auto decision = ldp_work_item_priority_decision(
+            due_high_id >= 0, due_high_id >= 0, due_normal_left,
+            state.high_repayment_pending, 100000);
+        auto selected_id = decision.choice == ldp_work_item_due_choice::REPAY_HIGH
+                                   ? due_high_id
+                                   : due_normal_id;
+
+        ASSERT_GE(selected_id, 0);
+        dispatched[step] = selected_id;
+        ldp_work_item_apply_dispatch(
+            state,
+            {decision.choice, true, selected_id, due_high_id,
+             decision.choice == ldp_work_item_due_choice::FORCE_NORMAL
+                     ? static_cast<uint64_t>(-static_cast<int64_t>(due_normal_left))
+                     : 0u,
+             step * 1000u},
+            1000000);
+
+        if (decision.choice == ldp_work_item_due_choice::FORCE_NORMAL) {
+            auto selected = std::find_if(items.begin(), items.end(),
+                                         [selected_id](const test_item &item) {
+                                             return item.id == selected_id;
+                                         });
+            ASSERT_NE(selected, items.end());
+            selected->left = 40000;
+        }
+    }
+
+    EXPECT_THAT(dispatched,
+                testing::ElementsAre(normal_a_id, high_id, normal_b_id, high_id,
+                                     normal_c_id));
 }
 
 TEST(work_queue_dispatch, aggregates_forced_reports_inside_interval)
