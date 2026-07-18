@@ -133,55 +133,98 @@ struct ldp_master: public ldp_basic {
 
 	virtual int destroy(conn c)
 	{
-		std::unique_lock lock_wq(*work_queue_);
-		std::unique_lock lock(conns_lock);
+		struct async_close_diagnostic {
+			bool pending = false;
+			conn id = -1;
+			unsigned int sid = 0;
+			unsigned int port = 0;
+			size_t tx_count = 0;
+			size_t tx_bytes = 0;
+			size_t rx_count = 0;
+			size_t rx_bytes = 0;
+		} diagnostic;
 
-		auto sync_it = std::find_if(sync_conns_.begin(), sync_conns_.end(),
-					    [c](const sync_conn_ptr &ci) { return ci->id == c; });
-		auto async_it = std::find_if(async_conns_.begin(), async_conns_.end(),
-					     [c](const async_conn_ptr &ci) { return ci->id == c; });
+		{
+			std::unique_lock lock_wq(*work_queue_);
+			std::unique_lock lock(conns_lock);
 
-		if (sync_it == sync_conns_.end() && async_it == async_conns_.end()) {
-			return -LDP_ERR_CONN_NOT_FOUND;
+			auto sync_it = std::find_if(sync_conns_.begin(), sync_conns_.end(),
+						    [c](const sync_conn_ptr &ci) { return ci->id == c; });
+			auto async_it = std::find_if(async_conns_.begin(), async_conns_.end(),
+						     [c](const async_conn_ptr &ci) { return ci->id == c; });
+
+			if (sync_it == sync_conns_.end() && async_it == async_conns_.end()) {
+				return -LDP_ERR_CONN_NOT_FOUND;
+			}
+
+			if (sync_it != sync_conns_.end()) {
+#if LDP_SYNC_JITTER_MEASURE_ENABLED
+				sync_jitter_emit_summary((*sync_it).get());
+#endif
+				auto bc = (*sync_it)->bc;
+				auto port = (*sync_it)->port;
+				if ((*sync_it)->tx_buf) {
+					mempool_if::free((*sync_it)->tx_buf);
+					(*sync_it)->tx_buf = nullptr;
+				}
+				if ((*sync_it)->rx_buf) {
+					mempool_if::free((*sync_it)->rx_buf);
+					(*sync_it)->rx_buf = nullptr;
+				}
+				bc_->rm_conn(bc);
+				sync_conns_.erase(sync_it);
+				refresh_opened_port_mask(port);
+			} else {
+				auto *async_conn = async_it->get();
+
+				diagnostic.pending =
+					!async_conn->tx_bufs.empty() || !async_conn->rx_bufs.empty();
+				diagnostic.id = async_conn->id;
+				diagnostic.sid = async_conn->sid;
+				diagnostic.port = async_conn->port;
+				diagnostic.tx_count = async_conn->tx_bufs.size();
+				diagnostic.rx_count = async_conn->rx_bufs.size();
+				for (const auto &abuf : async_conn->tx_bufs) {
+					diagnostic.tx_bytes += abuf.len;
+				}
+				for (const auto &abuf : async_conn->rx_bufs) {
+					diagnostic.rx_bytes += abuf.len;
+				}
+
+				/* call cancel only if wq_id is in the wqs_ */
+				auto wq_it = std::find(wqs_.begin(), wqs_.end(), async_conn->wq_id);
+				auto bc = async_conn->bc;
+				auto port = async_conn->port;
+				if (wq_it != wqs_.end()) {
+					work_queue_->cancel(async_conn->wq_id);
+					wqs_.remove(async_conn->wq_id);
+				}
+				for (auto &abuf : async_conn->tx_bufs) {
+					mempool_if::free(abuf.buf);
+					abuf.buf = nullptr;
+				}
+				for (auto &abuf : async_conn->rx_bufs) {
+					mempool_if::free(abuf.buf);
+					abuf.buf = nullptr;
+				}
+				bc_->rm_conn(bc);
+				async_conns_.erase(async_it);
+				refresh_opened_port_mask(port);
+			}
 		}
 
-		if (sync_it != sync_conns_.end()) {
-#if LDP_SYNC_JITTER_MEASURE_ENABLED
-			sync_jitter_emit_summary((*sync_it).get());
+		if (diagnostic.pending) {
+#if defined(__ZEPHYR__)
+			LOG_WRN("Closing async connection %d sid=%u port=%u with pending buffers: "
+				"tx=%zu/%zuB rx=%zu/%zuB",
+				diagnostic.id, diagnostic.sid, diagnostic.port, diagnostic.tx_count,
+				diagnostic.tx_bytes, diagnostic.rx_count, diagnostic.rx_bytes);
+#else
+			std::printf("Closing async connection %d sid=%u port=%u with pending buffers: "
+				    "tx=%zu/%zuB rx=%zu/%zuB\n",
+				    diagnostic.id, diagnostic.sid, diagnostic.port, diagnostic.tx_count,
+				    diagnostic.tx_bytes, diagnostic.rx_count, diagnostic.rx_bytes);
 #endif
-			auto bc = (*sync_it)->bc;
-			auto port = (*sync_it)->port;
-			if ((*sync_it)->tx_buf) {
-				mempool_if::free((*sync_it)->tx_buf);
-				(*sync_it)->tx_buf = nullptr;
-			}
-			if ((*sync_it)->rx_buf) {
-				mempool_if::free((*sync_it)->rx_buf);
-				(*sync_it)->rx_buf = nullptr;
-			}
-			bc_->rm_conn(bc);
-			sync_conns_.erase(sync_it);
-			refresh_opened_port_mask(port);
-		} else {
-			/* call cancel only if wq_id is in the wqs_ */
-			auto wq_it = std::find(wqs_.begin(), wqs_.end(), (*async_it)->wq_id);
-			auto bc = (*async_it)->bc;
-			auto port = (*async_it)->port;
-			if (wq_it != wqs_.end()) {
-				work_queue_->cancel((*async_it)->wq_id);
-				wqs_.remove((*async_it)->wq_id);
-			}
-			for (auto &abuf : (*async_it)->tx_bufs) {
-				mempool_if::free(abuf.buf);
-				abuf.buf = nullptr;
-			}
-			for (auto &abuf : (*async_it)->rx_bufs) {
-				mempool_if::free(abuf.buf);
-				abuf.buf = nullptr;
-			}
-			bc_->rm_conn(bc);
-			async_conns_.erase(async_it);
-			refresh_opened_port_mask(port);
 		}
 		return 0;
 	}

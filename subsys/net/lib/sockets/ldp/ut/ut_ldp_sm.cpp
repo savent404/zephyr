@@ -1325,6 +1325,73 @@ TEST_F(test_ldp_sm, statistics_async)
 	ASSERT_EQ(m_stat.val(port_stat::STAT_ID_HIST_RX_COUNT_WITH_DATA), 1);
 }
 
+TEST_F(test_ldp_sm, master_destroy_async_warns_for_pending_tx)
+{
+	simu_work_queue wq;
+	simu_mcb bus_m(0);
+	ldp_master_testable m(&bus_m, &wq);
+	ldp_master_async_config cfg = {
+		ASYNC_PORT(0), 1, 1'000'000, 1'000'000, false, false, false,
+	};
+
+	int conn = m.create(true, &cfg);
+	ASSERT_EQ(conn, 0);
+	ASSERT_EQ(m.send(conn, reinterpret_cast<const uint8_t *>("aio:000"), 8), 8);
+
+	testing::internal::CaptureStdout();
+	ASSERT_EQ(m.destroy(conn), 0);
+	std::string output = testing::internal::GetCapturedStdout();
+
+	EXPECT_THAT(output, HasSubstr("Closing async connection 0 sid=1 port=8"));
+	EXPECT_THAT(output, HasSubstr("tx=1/8B rx=0/0B"));
+}
+
+TEST_F(test_ldp_sm, master_destroy_async_warns_for_pending_rx)
+{
+	simu_work_queue wq;
+	simu_mcb bus_m(0), bus_s(1);
+	ldp_master_testable m(&bus_m, &wq);
+	ldp_slave_impl s(&bus_s);
+	ldp_master_async_config m_cfg = {
+		ASYNC_PORT(0), 1, 1'000'000, 1'000'000, false, false, false,
+	};
+	ldp_slave_async_config s_cfg = {ASYNC_PORT(0), 32};
+
+	int conn_m = m.create(true, &m_cfg);
+	int conn_s = s.create(true, &s_cfg);
+	ASSERT_EQ(conn_m, 0);
+	ASSERT_EQ(conn_s, 0);
+	ASSERT_EQ(s.send(conn_s, reinterpret_cast<const uint8_t *>("aio>000\0"), 8), 8);
+	m.schedule_bc(1000);
+	wq.sync();
+
+	testing::internal::CaptureStdout();
+	ASSERT_EQ(m.destroy(conn_m), 0);
+	std::string output = testing::internal::GetCapturedStdout();
+
+	EXPECT_THAT(output, HasSubstr("Closing async connection 0 sid=1 port=8"));
+	EXPECT_THAT(output, HasSubstr("tx=0/0B rx=1/8B"));
+}
+
+TEST_F(test_ldp_sm, master_destroy_async_does_not_warn_for_empty_queues)
+{
+	simu_work_queue wq;
+	simu_mcb bus_m(0);
+	ldp_master_testable m(&bus_m, &wq);
+	ldp_master_async_config cfg = {
+		ASYNC_PORT(0), 1, 1'000'000, 1'000'000, false, false, false,
+	};
+
+	int conn = m.create(true, &cfg);
+	ASSERT_EQ(conn, 0);
+
+	testing::internal::CaptureStdout();
+	ASSERT_EQ(m.destroy(conn), 0);
+	std::string output = testing::internal::GetCapturedStdout();
+
+	EXPECT_THAT(output, Not(HasSubstr("Closing async connection")));
+}
+
 TEST_F(test_ldp_sm, async_delay_steady_state_uses_p50_not_p90)
 {
 	simu_work_queue wq;
