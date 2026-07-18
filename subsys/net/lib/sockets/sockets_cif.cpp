@@ -790,18 +790,26 @@ static void wq_background_entry(void *arg1, void *arg2, void *arg3)
 {
 	auto wq = reinterpret_cast<cif_master_data::ldp_wq *>(arg1);
 	bool empty_wq;
+	bool scheduled;
+	zephyr::ldp_wq_diagnostics diagnostics;
 
 	while (true) {
+		scheduled = false;
 
 		k_mutex_lock(&cif_data.x_lock_wq_, K_FOREVER);
 		{
 			empty_wq = wq->empty();
 			if (!empty_wq) {
-				wq->schedule();
-				NET_DBG("WQ scheduled");
+				diagnostics = wq->schedule();
+				scheduled = true;
 			}
 		}
 		k_mutex_unlock(&cif_data.x_lock_wq_);
+		wq->report_diagnostics(diagnostics);
+		diagnostics = {};
+		if (scheduled) {
+			NET_DBG("WQ scheduled");
+		}
 
 		if (empty_wq) {
 			/* Nothing to do, sleep for a while */

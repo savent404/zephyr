@@ -13,6 +13,7 @@
 #include <zephyr/kernel.h>
 #include <zephyr/sys/barrier.h>
 #include <zephyr/posix/pthread.h>
+#include <array>
 #include <list>
 
 #include "ldp/inc/ldp_utils.hpp"
@@ -109,6 +110,37 @@ struct ze_rwlock {
 	}
 };
 
+enum class ldp_wq_diagnostic_type : uint8_t {
+	FORCED_STARTED,
+	FORCED_CONTINUING,
+	OVERRUN_STARTED,
+	OVERRUN_CONTINUING,
+	OVERRUN_RECOVERED,
+};
+
+struct ldp_wq_diagnostic {
+	ldp_wq_diagnostic_type type;
+	work_queue_if::id item_id = -1;
+	work_queue_if::id bypassed_high_id = -1;
+	uint32_t count = 0;
+	uint32_t total_count = 0;
+	uint32_t cycle_us = 0;
+	uint64_t value_us = 0;
+	uint64_t max_value_us = 0;
+};
+
+struct ldp_wq_diagnostics {
+	std::array<ldp_wq_diagnostic, 2> entries{};
+	size_t count = 0;
+
+	void add(const ldp_wq_diagnostic &diagnostic)
+	{
+		if (count < entries.size()) {
+			entries[count++] = diagnostic;
+		}
+	}
+};
+
 struct ldp_wq: public work_queue_if {
 	using work_item = struct {
 		void (*fn)(void *, void *);
@@ -119,6 +151,7 @@ struct ldp_wq: public work_queue_if {
 		int32_t left;
 		uint32_t revision;
 		priority prio;
+		ldp_work_item_overrun_state overrun;
 	};
 	using work_list = std::list<work_item>;
 
@@ -143,11 +176,13 @@ struct ldp_wq: public work_queue_if {
 	{
 		return work_items_.empty();
 	}
-	void schedule();
+	ldp_wq_diagnostics schedule();
+	static void report_diagnostics(const ldp_wq_diagnostics &diagnostics);
 
 	work_list work_items_;
 	int next_id_;
 	uint64_t last_update_us_ = 0;
+	ldp_work_item_dispatch_state dispatch_state_{};
 	uint64_t now_us() const;
 	void account_elapsed(uint64_t now_us);
 	void notify_schedule_update();

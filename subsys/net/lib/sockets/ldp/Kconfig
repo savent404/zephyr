@@ -24,3 +24,21 @@ config LDP_MAX_HARQ
 	  This option specifies the maximum depth of the LDP HARQ FIFO buffer.
 	  A larger value allows for more packets to be queued for retransmission
 	  but consumes more memory.
+
+config CIF_WQ_NORMAL_MAX_OVERDUE_US
+	int "Maximum CIF normal work item overdue time"
+	depends on LDP
+	default 100000
+	range 1 2147483647
+	help
+	  Force one overdue normal-priority work item before continuing due
+	  high-priority work when lateness is strictly greater than this value.
+
+config CIF_WQ_DIAGNOSTIC_REPORT_INTERVAL_MS
+	int "CIF work queue diagnostic report interval"
+	depends on LDP
+	default 1000
+	range 100 60000
+	help
+	  Report continuing callback overruns and forced normal dispatches no more
+	  than once per interval. First events are reported immediately.
