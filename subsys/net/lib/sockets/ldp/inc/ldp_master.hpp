@@ -361,6 +361,12 @@ struct ldp_master: public ldp_basic {
 	static inline constexpr uint32_t BC_INTERVAL_US = 1000 * 1000;
 	static inline constexpr uint32_t BC_INTERVAL_FACTOR = 100;
 	static inline constexpr uint8_t COMEBACK_SAMPLE_WINDOW = 16;
+#ifdef CONFIG_CIF_ASYNC_BOOTSTRAP_CREDITS
+	static inline constexpr unsigned ASYNC_BOOTSTRAP_CREDITS =
+		CONFIG_CIF_ASYNC_BOOTSTRAP_CREDITS;
+#else
+	static inline constexpr unsigned ASYNC_BOOTSTRAP_CREDITS = 5;
+#endif
 
 	static constexpr uint32_t bc_interval_for_sync_cycle(uint32_t cycle)
 	{
@@ -501,7 +507,7 @@ struct ldp_master: public ldp_basic {
 		auto ci = std::make_unique<async_conn_info>();
 		auto bc = std::make_shared<bc::conn_item>(
 			cfg->pps > 0 ? bc_mode::BC_MODE_ASYNC : bc_mode::BC_MODE_ASYNC_AUTO,
-			cfg->pps, 0);
+			cfg->pps, ASYNC_BOOTSTRAP_CREDITS);
 
 		if (!ci) {
 			return -LDP_ERR_NOMEM;
@@ -1330,12 +1336,12 @@ struct ldp_master: public ldp_basic {
 		auto had_short_schedule = ci->last_schedule_delay_us < ci->cycle;
 
 		do {
-			if (!bc_->try_grant(ci->bc, 1)) {
-				/* If no token available, we should wait for a while */
+			if (!should_process_connection(ci)) {
 				break;
 			}
 
-			if (!should_process_connection(ci)) {
+			if (!bc_->try_grant(ci->bc, 1)) {
+				/* If no token available, we should wait for a while */
 				break;
 			}
 
@@ -1415,7 +1421,7 @@ struct ldp_master: public ldp_basic {
 				ci->short_retry_level = 0;
 				ci->ineffective_full_cycle_streak = 0;
 
-				if (bc_->try_grant(ci->bc, 1)) {
+				if (bc_->can_grant(ci->bc, 1)) {
 					next_delay_us = async_base_delay_us(ci);
 					granted_short_retry = next_delay_us < ci->cycle;
 				}
@@ -1432,12 +1438,12 @@ struct ldp_master: public ldp_basic {
 				ci->short_retry_level = 0;
 				ci->ineffective_full_cycle_streak = 0;
 
-				if (bc_->try_grant(ci->bc, 1)) {
+				if (bc_->can_grant(ci->bc, 1)) {
 					next_delay_us = async_base_delay_us(ci);
 					granted_short_retry = next_delay_us < ci->cycle;
 				}
 			} else if (had_short_schedule) {
-				if (ci->short_retry_level == 0 && bc_->try_grant(ci->bc, 1)) {
+				if (ci->short_retry_level == 0 && bc_->can_grant(ci->bc, 1)) {
 					next_delay_us = async_guard_delay_us(ci);
 					ci->short_retry_level = 1;
 					granted_short_retry = next_delay_us < ci->cycle;

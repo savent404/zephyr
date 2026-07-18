@@ -26,6 +26,18 @@ TEST(bc, add_rm)
 	EXPECT_EQ(bc.add_conn(conn4), true); /* now we have pps for sync */
 }
 
+TEST(bc, can_grant_checks_credit_without_consuming_it)
+{
+	ldp_bc bc(1000, 0.1, 0.2);
+	auto conn = std::make_shared<conn_item>(bc_mode::BC_MODE_ASYNC, 10, 2);
+
+	ASSERT_TRUE(bc.add_conn(conn));
+	EXPECT_TRUE(bc.can_grant(conn, 2));
+	EXPECT_FLOAT_EQ(conn->pps_granted, 2.0f);
+	EXPECT_FALSE(bc.can_grant(conn, 3));
+	EXPECT_FLOAT_EQ(conn->pps_granted, 2.0f);
+}
+
 TEST(bc, sync)
 {
 	ldp_bc bc(1000, 0.1, 0); /* alloc 100 pps for sync */

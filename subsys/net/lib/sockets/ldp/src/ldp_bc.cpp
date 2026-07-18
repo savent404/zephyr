@@ -108,9 +108,14 @@ void ldp_bc::schedule(unsigned delta_microsec)
 		}
 	}
 }
+bool ldp_bc::can_grant(conn_ptr conn, int p) const
+{
+	return conn->pps_granted >= p;
+}
+
 bool ldp_bc::try_grant(conn_ptr conn, int p)
 {
-	if (conn->pps_granted >= p) {
+	if (can_grant(conn, p)) {
 		conn->pps_granted -= p;
 		return true;
 	}

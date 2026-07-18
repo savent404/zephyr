@@ -120,6 +120,11 @@ struct ldp_bc {
 	void schedule(unsigned delta_microsec);
 
 	/**
+	 * @brief Check whether bandwidth is available without consuming it
+	 */
+	bool can_grant(conn_ptr conn, int p) const;
+
+	/**
 	 * @brief Try to grant bandwidth to a connection
 	 * @param conn The connection to grant bandwidth
 	 * @param p The packets want to grant
@@ -152,6 +157,10 @@ struct ldp_bc_dummy: public ldp_bc {
 	}
 	void schedule(unsigned delta_microsec)
 	{
+	}
+	bool can_grant(conn_ptr conn, int p) const
+	{
+		return true;
 	}
 	bool try_grant(conn_ptr conn, int p)
 	{

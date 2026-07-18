@@ -68,6 +68,27 @@ struct ldp_master_testable: public ldp_master_impl {
 		return this->async_conns_.front()->cycle;
 	}
 
+	void run_async_handler(size_t index = 0)
+	{
+		auto it = this->async_conns_.begin();
+		std::advance(it, index);
+		this->async_handler(it->get());
+	}
+
+	float async_granted(size_t index = 0) const
+	{
+		auto it = this->async_conns_.begin();
+		std::advance(it, index);
+		return (*it)->bc->pps_granted;
+	}
+
+	uint64_t async_xfer_count(size_t index = 0) const
+	{
+		auto it = this->async_conns_.begin();
+		std::advance(it, index);
+		return (*it)->stat.val(port_stat::STAT_ID_HIST_XFER_COUNT);
+	}
+
 	work_queue_if::id sync_wq_id() const
 	{
 		return this->sync_wq_id_;
@@ -1041,8 +1062,7 @@ TEST_F(test_ldp_sm, async_bandwidth_control)
 
 	uint8_t rx_buf[32];
 	{
-		/* Due to the required bandwidth, the second async port won't be processed for a
-		 * while */
+		/* Both async ports can use their bounded startup credits immediately. */
 		wq.sync();
 		wq.sync();
 
@@ -1050,20 +1070,201 @@ TEST_F(test_ldp_sm, async_bandwidth_control)
 		ASSERT_STREQ((const char *)rx_buf, "io>100");
 		ASSERT_EQ(m.recv(mpu_conn[2], rx_buf, 32), 8);
 		ASSERT_STREQ((const char *)rx_buf, "aio>200");
-		ASSERT_EQ(m.recv(mpu_conn[3], rx_buf, 32), -err::LDP_ERR_AGAIN);
+		ASSERT_EQ(m.recv(mpu_conn[3], rx_buf, 32), 8);
+		ASSERT_STREQ((const char *)rx_buf, "aio>300");
+	}
+}
+
+TEST_F(test_ldp_sm, async_bootstrap_credits_allow_five_rounds_without_bc_schedule)
+{
+	simu_work_queue wq;
+	simu_mcb bus_m(0);
+	ldp_master_testable m(&bus_m, &wq);
+	ldp_master_async_config cfg = {ASYNC_PORT(0), 1,     5000,  50000, false,
+				       false,         false, false, 1};
+
+	ASSERT_EQ(m.create(true, &cfg), 0);
+	EXPECT_EQ(m.async_granted(), 5.0f);
+
+	for (int round = 0; round < 5; ++round) {
+		m.run_async_handler();
+		EXPECT_EQ(m.async_xfer_count(), static_cast<uint64_t>(round + 1));
+		EXPECT_EQ(m.async_granted(), static_cast<float>(4 - round));
+	}
+}
+
+TEST_F(test_ldp_sm, async_bootstrap_exhaustion_waits_for_periodic_bc)
+{
+	simu_work_queue wq;
+	simu_mcb bus_m(0, simu_mcb::ps_io, 1);
+	ldp_master_testable m(&bus_m, &wq);
+	ldp_master_async_config cfg = {ASYNC_PORT(0), 1,     5000,  50000, false,
+				       false,         false, false, 1};
+
+	ASSERT_EQ(m.create(true, &cfg), 0);
+	for (int round = 0; round < 5; ++round) {
+		m.run_async_handler();
 	}
 
-	int cnt = 0;
-	while (1) {
-		if (m.recv(mpu_conn[3], rx_buf, 32) == 8) {
-			break;
-		}
-		wq.sync();
-		cnt++;
+	m.run_async_handler();
+	EXPECT_EQ(m.async_xfer_count(), 5u);
+	EXPECT_EQ(m.async_granted(), 0.0f);
+
+	m.schedule_bc(1000000);
+	ASSERT_GE(m.async_granted(), 1.0f);
+	m.run_async_handler();
+	EXPECT_EQ(m.async_xfer_count(), 6u);
+}
+
+TEST_F(test_ldp_sm, async_response_rich_bootstrap_allows_five_transfers_then_denies_sixth)
+{
+	simu_work_queue wq;
+	simu_mcb bus_m(0), bus_s(1);
+	ldp_master_testable m(&bus_m, &wq);
+	ldp_slave_impl s(&bus_s);
+	ldp_master_async_config m_cfg = {ASYNC_PORT(0), 1,     5000,  50000, false,
+					 false,         false, false, 1};
+	ldp_slave_async_config s_cfg = {ASYNC_PORT(0), 32};
+	int conn_m = m.create(true, &m_cfg);
+	int conn_s = s.create(true, &s_cfg);
+	const char *payloads[] = {"rsp:600", "rsp:601", "rsp:602", "rsp:603", "rsp:604"};
+
+	ASSERT_EQ(conn_m, 0);
+	ASSERT_EQ(conn_s, 0);
+	for (size_t round = 0; round < std::size(payloads); ++round) {
+		queue_slave_payload(s, conn_s, bus_s.sid_, ASYNC_PORT(0), payloads[round], 0);
+		m.run_async_handler();
+		expect_master_payload(m, conn_m, payloads[round]);
+		EXPECT_EQ(m.async_xfer_count(), round + 1);
+		EXPECT_EQ(m.async_granted(), static_cast<float>(4 - round));
 	}
-	ASSERT_STREQ((const char *)rx_buf, "aio>300");
-	printf("%d times\n", cnt);
-	ASSERT_TRUE(cnt > 3);
+
+	queue_slave_payload(s, conn_s, bus_s.sid_, ASYNC_PORT(0), "rsp:605", 0);
+	m.run_async_handler();
+	EXPECT_EQ(m.async_xfer_count(), 5u);
+	EXPECT_EQ(m.async_granted(), 0.0f);
+}
+
+TEST_F(test_ldp_sm, limited_async_response_rich_steady_state_obeys_configured_pps)
+{
+	simu_work_queue wq;
+	simu_mcb bus_m(0), bus_s(1);
+	ldp_master_testable m(&bus_m, &wq);
+	ldp_slave_impl s(&bus_s);
+	ldp_master_async_config m_cfg = {ASYNC_PORT(0), 1,     5000,  50000, false,
+					 false,         false, false, 2};
+	ldp_slave_async_config s_cfg = {ASYNC_PORT(0), 32};
+	int conn_m = m.create(true, &m_cfg);
+	int conn_s = s.create(true, &s_cfg);
+	uint64_t expected_xfers = 0;
+
+	ASSERT_EQ(conn_m, 0);
+	ASSERT_EQ(conn_s, 0);
+	for (int round = 0; round < 5; ++round) {
+		char payload[9];
+		snprintf(payload, sizeof(payload), "rsp:7%02d", round);
+		queue_slave_payload(s, conn_s, bus_s.sid_, ASYNC_PORT(0), payload, 0);
+		m.run_async_handler();
+		expect_master_payload(m, conn_m, payload);
+		expected_xfers++;
+	}
+	ASSERT_EQ(m.async_granted(), 0.0f);
+
+	for (int period = 0; period < 2; ++period) {
+		m.schedule_bc(1000000);
+		ASSERT_FLOAT_EQ(m.async_granted(), 2.0f);
+
+		for (int transfer = 0; transfer < 2; ++transfer) {
+			char payload[9];
+			snprintf(payload, sizeof(payload), "rsp:%d%d0", period, transfer);
+			queue_slave_payload(s, conn_s, bus_s.sid_, ASYNC_PORT(0), payload, 0);
+			m.run_async_handler();
+			expect_master_payload(m, conn_m, payload);
+			expected_xfers++;
+		}
+
+		m.run_async_handler();
+		EXPECT_EQ(m.async_xfer_count(), expected_xfers);
+		EXPECT_EQ(m.async_granted(), 0.0f);
+	}
+}
+
+TEST_F(test_ldp_sm, async_oneshot_hold_preserves_bootstrap_credits)
+{
+	simu_work_queue wq;
+	simu_mcb bus_m(0);
+	ldp_master_testable m(&bus_m, &wq);
+	ldp_master_async_config cfg = {ASYNC_PORT(0), 1,     5000,  50000, false,
+				       true,          false, false, 1};
+	int conn = m.create(true, &cfg);
+
+	ASSERT_EQ(conn, 0);
+	for (int round = 0; round < 6; ++round) {
+		m.run_async_handler();
+	}
+	EXPECT_EQ(m.async_xfer_count(), 0u);
+	EXPECT_EQ(m.async_granted(), 5.0f);
+
+	ASSERT_EQ(m.send(conn, reinterpret_cast<const uint8_t *>("cfg"), 4), 4);
+	for (int round = 0; round < 5; ++round) {
+		m.run_async_handler();
+	}
+	EXPECT_EQ(m.async_xfer_count(), 5u);
+	EXPECT_EQ(m.async_granted(), 0.0f);
+}
+
+TEST_F(test_ldp_sm, async_oneshot_ack_hold_does_not_consume_more_credits)
+{
+	simu_work_queue wq;
+	simu_mcb bus_m(0), bus_s(1);
+	ldp_master_testable m(&bus_m, &wq);
+	ldp_slave_impl s(&bus_s);
+	ldp_master_async_config m_cfg = {ASYNC_PORT(0), 1,     5000,  50000, false,
+					 true,          false, false, 1};
+	ldp_slave_async_config s_cfg = {ASYNC_PORT(0), 32};
+	int conn_m = m.create(true, &m_cfg);
+	int conn_s = s.create(true, &s_cfg);
+	uint8_t rx_buf[32] = {};
+
+	ASSERT_EQ(conn_m, 0);
+	ASSERT_EQ(conn_s, 0);
+	ASSERT_EQ(m.send(conn_m, reinterpret_cast<const uint8_t *>("cfg:600"), 8), 8);
+	m.run_async_handler();
+	ASSERT_EQ(s.recv(conn_s, rx_buf, sizeof(rx_buf)), 8);
+	ASSERT_EQ(s.send(conn_s, reinterpret_cast<const uint8_t *>("rsp:600"), 8), 8);
+	m.run_async_handler();
+	expect_master_payload(m, conn_m, "rsp:600");
+	ASSERT_EQ(m.async_xfer_count(), 2u);
+	EXPECT_EQ(m.async_granted(), 3.0f);
+
+	for (int callback = 0; callback < 6; ++callback) {
+		m.run_async_handler();
+	}
+	EXPECT_EQ(m.async_xfer_count(), 2u);
+	EXPECT_EQ(m.async_granted(), 3.0f);
+}
+
+TEST_F(test_ldp_sm, second_async_connection_gets_independent_bootstrap_credits)
+{
+	simu_work_queue wq;
+	simu_mcb bus_m(0);
+	ldp_master_testable m(&bus_m, &wq);
+	ldp_master_async_config cfg_a = {ASYNC_PORT(0), 1,     5000,  50000, false,
+					 false,         false, false, 1};
+	ldp_master_async_config cfg_b = {ASYNC_PORT(1), 2,     5000,  50000, false,
+					 false,         false, false, 1};
+
+	ASSERT_EQ(m.create(true, &cfg_a), 0);
+	ASSERT_EQ(m.create(true, &cfg_b), 1);
+	for (int round = 0; round < 5; ++round) {
+		m.run_async_handler(0);
+		m.run_async_handler(1);
+	}
+
+	EXPECT_EQ(m.async_xfer_count(0), 5u);
+	EXPECT_EQ(m.async_xfer_count(1), 5u);
+	EXPECT_EQ(m.async_granted(0), 0.0f);
+	EXPECT_EQ(m.async_granted(1), 0.0f);
 }
 
 TEST_F(test_ldp_sm, async_reset_master_sw)

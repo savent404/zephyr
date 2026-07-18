@@ -25,6 +25,17 @@ config LDP_MAX_HARQ
 	  A larger value allows for more packets to be queued for retransmission
 	  but consumes more memory.
 
+config CIF_ASYNC_BOOTSTRAP_CREDITS
+	int "Initial CIF async bandwidth-control credits"
+	depends on LDP
+	default 5
+	range 3 5
+	help
+	  Give each newly created async connection this many one-time initial
+	  transfer credits. These credits allow a bounded startup burst before
+	  periodic bandwidth-control allocation becomes available. After they
+	  are exhausted, regular bandwidth control still applies.
+
 config CIF_WQ_NORMAL_MAX_OVERDUE_US
 	int "Maximum CIF normal work item overdue time"
 	depends on LDP
