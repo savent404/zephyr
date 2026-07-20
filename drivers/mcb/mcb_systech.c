@@ -22,6 +22,17 @@ LOG_MODULE_REGISTER(mcb_systech, LOG_LEVEL);
 
 #define DT_DRV_COMPAT systech_mcb
 
+#if CONFIG_MCB_SYSTECH_PANIC_ON_HW_ERROR
+#if defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic warning "-Wcpp"
+#endif
+#warning "CONFIG_MCB_SYSTECH_PANIC_ON_HW_ERROR is enabled; do not use in production"
+#if defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
+#endif
+
 #define DEV_CFG(_dev)  ((const struct mcb_systech_config *const)(_dev)->config)
 #define DEV_DATA(_dev) ((struct mcb_systech_data *const)(_dev)->data)
 
@@ -42,6 +53,13 @@ struct mcb_systech_config {
 	uint32_t poll_time;
 	bool slow_mode;
 };
+
+static inline void mcb_systech_panic_on_hw_error(void)
+{
+	if (IS_ENABLED(CONFIG_MCB_SYSTECH_PANIC_ON_HW_ERROR)) {
+		k_panic();
+	}
+}
 
 static inline void mcb_busy_wait(uint32_t us)
 {
@@ -85,9 +103,11 @@ static inline void mcb_write(const struct device *dev, uint32_t value, uint32_t 
 
 	if (val != value) {
 		LOG_WRN("Write %08x to %08x failed, read %08x", value, addr, val);
+		mcb_systech_panic_on_hw_error();
 	} else if (read_retry + 1 < MCB_WRITE_MAX_RETRY) {
 		LOG_WRN("Write %08x to %08x, read retry %d", value, addr,
 			MCB_WRITE_MAX_RETRY - read_retry - 1);
+		mcb_systech_panic_on_hw_error();
 	}
 }
 
@@ -229,6 +249,7 @@ void mcb_systech_tx(const struct device *dev, uint8_t sid, uint8_t port, bool pr
 	val = mcb_read(dev, reg_base + MCB_REG_CTRL1);
 	if (val != wanted) {
 		LOG_ERR("tx reg mismatch, reg: %08x, wanted:  %08x", val, wanted);
+		mcb_systech_panic_on_hw_error();
 	}
 #endif
 	LOG_DBG("Trigger transmission to sid %d, port %d, len %d", sid, port,
@@ -300,6 +321,7 @@ void mcb_systech_clr_status(const struct device *dev, uint32_t bits)
 	if (mcb_read(dev, reg_base + MCB_REG_STATUS1) & val) {
 		LOG_WRN_ONCE("Failed to clear status register, val = 0x%x, reg = 0x%x", val,
 			     mcb_read(dev, reg_base + MCB_REG_STATUS1));
+		mcb_systech_panic_on_hw_error();
 	}
 }
 
@@ -386,6 +408,7 @@ void mcb_systech_set_tx_len(const struct device *dev, uint8_t port, uint16_t len
 
 	while (mcb_systech_get_tx_len(dev, port) != len && --retry) {
 		LOG_WRN("MCB: TX len not set correctly, retry %d...", retry);
+		mcb_systech_panic_on_hw_error();
 		if (--retry) {
 			mcb_write(dev, len, reg_base + MCB_REG_PORT_TX_LEN(port));
 			mcb_busy_wait(1);
@@ -409,18 +432,21 @@ void mcb_systech_rx_clr(const struct device *dev, uint8_t port)
 	if (mcb_read(dev, reg_base + MCB_REG_STATUS1) & val) {
 		LOG_WRN_ONCE("Failed to clear rx ready, val = 0x%x, reg = 0x%x", val,
 			     mcb_read(dev, reg_base + MCB_REG_STATUS1));
+		mcb_systech_panic_on_hw_error();
 	}
 
 	if (port >= MCB_MAX_PORT) {
 		LOG_ERR("Invalid port number");
 		return;
 	}
+
 	val = BIT(port % 32);
 	reg = MCB_REG_PORT_RDY_MASK0 + (port / 32) * 4;
 	mcb_write_unsafe(~val, reg_base + reg);
 	if (mcb_read(dev, reg_base + reg) & val) {
 		LOG_WRN_ONCE("Failed to clear port ready mask, val = 0x%x, reg = 0x%x", val,
 			     mcb_read(dev, reg_base + reg));
+		mcb_systech_panic_on_hw_error();
 	}
 }
 

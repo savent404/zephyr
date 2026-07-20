@@ -22,6 +22,15 @@ config MCB_SYSTECH_HW_WORKAROUND
 		help
 			This is for HW workaround solutions
 
+config MCB_SYSTECH_PANIC_ON_HW_ERROR
+		bool "Panic on unexpected MCB hardware errors"
+		default n
+		depends on MCB_SYSTECH
+		help
+			Call k_panic() when the driver detects unexpected MCB hardware
+			behavior. This option is intended for hardware diagnostics and
+			must not be enabled in production builds.
+
 config MCB_SYSTECH_TX_CTRL1_VERIFY
 		bool "Verify CTRL1 register after TX trigger"
 		default n
